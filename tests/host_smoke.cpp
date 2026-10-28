@@ -42,13 +42,13 @@ void frame(LDBHostPluginV1& plugin,IDirect3DDevice9* device,IDirect3DSwapChain9*
  if(secondary){device->SetRenderTarget(1,nullptr);secondary->Release();}device->SetRenderTarget(0,back);original->Release();back->Release();
 }
 int main(){
- auto root=std::filesystem::current_path();auto dll=root/L"build"/L"LDBDangoMusic.dll";
+ auto root=std::filesystem::current_path();auto dll=root/L"build"/L"L4D2DangoMusic.dll";
  auto module=LoadLibraryW(dll.c_str());require(module!=nullptr,"LoadLibrary failed");
  auto address=GetProcAddress(module,"LDBHostPluginQuery");LDBHostPluginQueryFn query=nullptr;static_assert(sizeof(query)==sizeof(address));std::memcpy(&query,&address,sizeof(query));require(query!=nullptr,"Missing export");
  LDBHostPluginV1 plugin{};plugin.struct_size=sizeof(plugin);require(!query(999,&plugin),"Accepted invalid ABI");plugin.struct_size=80;require(!query(1,&plugin),"Accepted incompatible old SDK layout");plugin.struct_size=sizeof(plugin);require(query(1,&plugin),"ABI negotiation failed");
  require(plugin.on_swapchain_created&&plugin.on_swapchain_destroyed,"Missing SwapChain lifecycle callbacks");
  auto hostDir=root.wstring();LDBHostApiV1 host{sizeof(host),1,64,0,hostDir.c_str(),"standalone-smoke",logMessage};require(plugin.on_load(&host),"on_load failed");
- auto window=CreateWindowExW(0,L"STATIC",L"LDBDangoMusic smoke",WS_OVERLAPPEDWINDOW,0,0,1280,720,nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);require(window!=nullptr,"Window creation failed");
+ auto window=CreateWindowExW(0,L"STATIC",L"L4D2DangoMusic smoke",WS_OVERLAPPEDWINDOW,0,0,1280,720,nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);require(window!=nullptr,"Window creation failed");
  auto d3d=Direct3DCreate9(D3D_SDK_VERSION);require(d3d!=nullptr,"D3D9 unavailable");D3DPRESENT_PARAMETERS params{};params.Windowed=TRUE;params.SwapEffect=D3DSWAPEFFECT_DISCARD;params.hDeviceWindow=window;params.BackBufferWidth=1280;params.BackBufferHeight=720;params.BackBufferFormat=D3DFMT_X8R8G8B8;
  IDirect3DDevice9* device=nullptr;require(SUCCEEDED(d3d->CreateDevice(D3DADAPTER_DEFAULT,D3DDEVTYPE_HAL,window,D3DCREATE_SOFTWARE_VERTEXPROCESSING,&params,&device)),"Device creation failed");plugin.on_device_created(device);Sleep(1600);
  IDirect3DSwapChain9* primary=nullptr;require(SUCCEEDED(device->GetSwapChain(0,&primary)),"Primary chain missing");plugin.on_swapchain_created(primary);
@@ -57,7 +57,7 @@ int main(){
  IDirect3DSurface9* mainBack=nullptr;primary->GetBackBuffer(0,D3DBACKBUFFER_TYPE_MONO,&mainBack);device->SetRenderTarget(0,mainBack);mainBack->Release();plugin.on_swapchain_destroyed(primary);primary->Release();
  plugin.on_before_reset(device,&params,FALSE);auto hr=device->Reset(&params);plugin.on_after_reset(device,hr,FALSE);require(SUCCEEDED(hr),"Reset failed");require(SUCCEEDED(device->GetSwapChain(0,&primary)),"Post-reset chain missing");plugin.on_swapchain_created(primary);frame(plugin,device,primary,true);plugin.on_swapchain_destroyed(primary);primary->Release();
  plugin.on_device_destroyed(device);device->Release();d3d->Release();plugin.on_shutdown();
- auto settingsPath=root/L"plugins"/L"LDBDangoMusic"/L"config.json";std::ifstream settingsFile(settingsPath);
+ auto settingsPath=root/L"plugins"/L"L4D2DangoMusic"/L"config.json";std::ifstream settingsFile(settingsPath);
  if(settingsFile&&nlohmann::json::parse(settingsFile).value("cameraDiagnostics",false)){
  bool captured=false;for(const auto& entry:std::filesystem::directory_iterator(settingsPath.parent_path())){if(entry.path().extension()!=L".jsonl")continue;std::ifstream file(entry.path());std::string line;while(std::getline(file,line)){auto sample=nlohmann::json::parse(line);if(sample["view"][12]==-10&&sample["view"][13]==-20&&sample["viewport"][2]==128)captured=true;require(sample["camera_confirmed"]==false,"Diagnostic incorrectly confirmed camera");}}
  require(captured,"No pre-overlay matrix/viewport diagnostic captured");}

@@ -1,11 +1,11 @@
 # 0.4.0 纯 L4N 实验版
 
-单个 x86 LDBDangoMusic.dll，导出 GetL4NPluginInstance，进入游戏进程。
+单个 x86 L4D2DangoMusic.dll，导出 GetL4NPluginInstance，进入游戏进程。
 没有 Host 插件入口、外部相机进程或共享内存。历史 Host SDK 头/测试仅为旧版本资料，不参与新版本编译。
 
 ## 流程
 
-L4N LyricsPlugin → Source 相机 / LX HTTP / 动画 / 世界投影 / D3D9 绘制 → LDB Client → Host → DXVK。
+L4D2DangoMusic → Source 相机 / LX HTTP / 动画 / 世界投影 / D3D9 绘制 → LDB Client → Host → DXVK。
 
 Source 采样：核对 VClient016 / VEngineClient013 接口后，在 View_Render 原函数返回时读取引擎维护的 world-to-view / world-to-screen 矩阵。
 不再使用 D3D9 GetTransform 推断相机。游戏侧快照在进程内发布；渲染回调只读快照。
@@ -31,15 +31,15 @@ Source 采样：核对 VClient016 / VEngineClient013 接口后，在 View_Render
 ## 安装与回滚
 
 1. 完全退出游戏和 Host。使用已有 L4N SDK v2 加载器。
-2. 将旧 `bin/.l4d2bridge/plugins/LDBDangoMusic.dll` 改名为 .disabled，避免双重歌词。
-3. 新 DLL 放在 `bin/neko/plugins/LDBDangoMusic.dll`。
-4. 配置放在 `bin/neko/plugins/LDBDangoMusic/config.json`，可迁移旧 LX 配置。
+2. 将旧 `bin/.l4d2bridge/plugins/L4D2DangoMusic.dll` 改名为 .disabled，避免双重歌词。
+3. 新 DLL 放在 `bin/neko/plugins/L4D2DangoMusic.dll`。
+4. 配置放在 `bin/neko/plugins/L4D2DangoMusic/config.json`，可迁移旧 LX 配置。
 5. worldLyrics=true 开启实验世界模式；worldLyrics=false 只用屏幕歌词。
 6. config.world-demo.json 是开启演示、世界锚点及诊断的测试配置。
 7. 回滚：退出后移走新 L4N DLL，恢复旧 Host DLL 和旧配置。其他 Host 插件无需停用。
 
 ZIP source/scripts/install.ps1 可自动备份、迁移配置并禁用旧 Host DLL。
-日志为 bin/neko/plugins/LDBDangoMusic.log。相机诊断 JSONL 在对应 LDBDangoMusic 配置目录；新增 source_camera 字段记录游戏矩阵。
+日志为 bin/neko/plugins/L4D2DangoMusic.log。相机诊断 JSONL 在对应 L4D2DangoMusic 配置目录；新增 source_camera 字段记录游戏矩阵。
 
 ## 实机检查
 
@@ -47,7 +47,7 @@ ZIP source/scripts/install.ps1 可自动备份、迁移配置并禁用旧 Host D
 - 再检查 Source camera installed；若提示 exact interface unavailable，保留日志，不修改寄存器/虚表索引猜测。
 - 有效时左上显示 GAME CAMERA: ACTIVE，固定锚点随转头移出视野、走动产生视差。
 - 测试进图、转头、移动、观战、切图、暂停、全屏切换、退出。
-- 若需要诊断设置 cameraDiagnostics=true，提交 JSONL 和 LDBDangoMusic.log。
+- 若需要诊断设置 cameraDiagnostics=true，提交 JSONL 和 L4D2DangoMusic.log。
 
 ## 验证边界
 

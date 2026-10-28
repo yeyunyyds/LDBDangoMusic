@@ -1,4 +1,4 @@
-# 0.5.0 Peak-inspired 原生歌词
+# 0.6.0 Peak-inspired 原生歌词
 
 按用户最终要求模仿 PeakDangoMusic 的视觉，不依赖 Unity/TMP，也没有复制 TMP shader、材质或引擎资源。
 参考版本 c9fe555b53f7d3cea85bfdcb92476a1ed6853ad0。
@@ -30,7 +30,7 @@
 
 ## 安装
 
-退出游戏和 Host，替换 bin/neko/plugins/LDBDangoMusic.dll。
+退出游戏和 Host，替换 bin/neko/plugins/L4D2DangoMusic.dll。
 要套用整套外观，使用 ZIP source/scripts/install.ps1：保留原播放器/世界模式/offset，备份配置，应用新视觉参数。
 该脚本 offset 默认500，可用 -OffsetMs 指定当前值。
 手动只换DLL会继续尊重旧文件中的字色、翻译、描边等设置；请一并对照新的 config.example.json。

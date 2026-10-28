@@ -9,7 +9,7 @@
    保留你的 LX 模式和同步设置即可；也可用包内 config.camera-demo.json 覆盖实际配置来做离线演示诊断。
 2. 重启后，在菜单停留 5 秒，进图，分别站立、前后左右移动、水平转头、上下看各约 5 秒。
 3. 再打开/关闭菜单，切图，切到观战模式。记录操作顺序及大致秒数；最好录一段对应画面。
-4. 完全退出游戏，取得 `bin/.l4d2bridge/plugins/LDBDangoMusic/camera-进程号-时间.jsonl`。
+4. 完全退出游戏，取得 `bin/.l4d2bridge/plugins/L4D2DangoMusic/camera-进程号-时间.jsonl`。
    Host 日志会打印完整文件路径，写入失败也会提示。
 5. 可执行 `python source/scripts/analyze_camera.py 路径.jsonl` 查看候选位姿和分组统计。
 6. 测完关闭 cameraDiagnostics，重启恢复普通模式。

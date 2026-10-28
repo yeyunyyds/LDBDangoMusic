@@ -11,3 +11,6 @@ g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc tests/wor
 ./build/world_camera_test
 g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc -Ivendor tests/peak_style_test.cpp -o build/peak_style_test
 ./build/peak_style_test
+g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc -Ivendor tests/settings_lifecycle_test.cpp -o build/settings_lifecycle_test
+./build/settings_lifecycle_test
+python3 tests/test_presets.py

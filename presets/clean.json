@@ -1,0 +1,15 @@
+{
+  "textColor": "#F6F6F6",
+  "accentColor": "#F6F6F6",
+  "glow": false,
+  "glowStrength": 0.3,
+  "glowRadius": 0.5,
+  "pop": false,
+  "wiggle": false,
+  "wiggleFrequency": 8,
+  "wiggleAmount": 0.8,
+  "animationSpeed": 1,
+  "transitionMs": 500,
+  "lingerMs": 1000,
+  "presetId": 5
+}

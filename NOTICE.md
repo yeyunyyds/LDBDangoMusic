@@ -1,4 +1,4 @@
-LDBDangoMusic is distributed under GPL-3.0 (see LICENSE).
+L4D2DangoMusic is distributed under GPL-3.0 (see LICENSE).
 The lyric presentation and LX integration are developed with reference to:
 - Sorihiko/DangoMusic, da696d0871fa348323782d7d299ba10df46e07db (GPL-3.0)
 - ZHIZHU4410/PeakDangoMusic, c9fe555b53f7d3cea85bfdcb92476a1ed6853ad0 (GPL-3.0)
@@ -26,10 +26,15 @@ client.dll / engine.dll. The verified profile in vendor/source-binary-profile.js
 supersedes the old public-SDK slot inventory for runtime binding. Uploaded game
 DLLs are not bundled or committed; only hashes and interface metadata are saved.
 
-0.5.0 Peak-inspired visuals:
+0.6.0 Peak-inspired visuals:
 Native C++ adaptations of LyricAnimation, LyricLineView rules, layout and
 placement from ZHIZHU4410/PeakDangoMusic c9fe555b53f7d3cea85bfdcb92476a1ed6853ad0,
 GPL-3.0, are in src/peak_style.hpp. Animation math, deterministic wiggle, timing
 and lifecycle are adapted for the existing D3D9 renderer. No Unity/TMP engine,
 shader, material, font, game, or music resources are included. Cached alpha blur
 is a native approximation; see docs/peak-style.md for differences.
+
+0.6.0 renames the active project and artifacts to L4D2DangoMusic. Legacy names
+appear only in migration instructions and preserved historical release packages.
+L4N controls, settings snapshots, preset migration and scene submission gating
+are native implementation additions. Prior third-party notices remain applicable.

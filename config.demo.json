@@ -28,5 +28,12 @@
   "wiggleAmount": 0.8,
   "spreadDegrees": 30,
   "keepAway": true,
-  "debugOverlay": false
+  "debugOverlay": false,
+  "enabled": true,
+  "presetId": 0,
+  "lingerMs": 1000,
+  "reanchorMs": 3000,
+  "animationSpeed": 1,
+  "showTitle": false,
+  "showArtist": false
 }

@@ -1,0 +1,15 @@
+{
+  "textColor": "#FFEBCD",
+  "accentColor": "#FFB347",
+  "glow": true,
+  "glowStrength": 0.35,
+  "glowRadius": 0.5,
+  "pop": true,
+  "wiggle": true,
+  "wiggleFrequency": 6,
+  "wiggleAmount": 0.3,
+  "animationSpeed": 1,
+  "transitionMs": 400,
+  "lingerMs": 1000,
+  "presetId": 4
+}

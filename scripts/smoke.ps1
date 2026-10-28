@@ -1,10 +1,10 @@
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
-$testRoot = Join-Path ([IO.Path]::GetTempPath()) ('ldbdango-' + [guid]::NewGuid().ToString('N'))
-New-Item -ItemType Directory -Force (Join-Path $testRoot 'build'), (Join-Path $testRoot 'build/LDBDangoMusic') | Out-Null
+$testRoot = Join-Path ([IO.Path]::GetTempPath()) ('l4d2dango-' + [guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Force (Join-Path $testRoot 'build'), (Join-Path $testRoot 'build/L4D2DangoMusic') | Out-Null
 try {
-    Copy-Item (Join-Path $repo 'build/LDBDangoMusic.dll') (Join-Path $testRoot 'build')
-    '{"demo":true,"cameraDiagnostics":true}' | Set-Content -Encoding ASCII (Join-Path $testRoot 'build/LDBDangoMusic/config.json')
+    Copy-Item (Join-Path $repo 'build/L4D2DangoMusic.dll') (Join-Path $testRoot 'build')
+    '{"demo":true,"cameraDiagnostics":true}' | Set-Content -Encoding ASCII (Join-Path $testRoot 'build/L4D2DangoMusic/config.json')
     Push-Location $testRoot
     try {
         & (Join-Path $repo 'build/l4n_smoke.exe')
