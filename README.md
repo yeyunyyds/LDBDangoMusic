@@ -1,4 +1,4 @@
-# L4D2DangoMusic 0.6.0
+# L4D2DangoMusic 0.6.1
 
 纯 x86 L4N 歌词插件：Source 相机、LX API、Peak 风格动画、世界投影、D3D9 绘制，正常经过 LDB Client → Host → DXVK。
 
@@ -34,3 +34,9 @@ Source 游戏构建适配与此前0.4.3相同，仅支持已核对的 DLL 资料
 旧包和 GitHub 仓库原名可能保留，当前软件名、代码和产物统一为 L4D2DangoMusic。
 
 GPL-3.0；来源与 SDK 单独许可见 NOTICE.md。
+
+## 0.6.1 旧句残留修正
+
+取消基于场景计数跳过呈现，改为保存干净底图 → 绘制/呈现 → 恢复底图，避免文字留在游戏 backbuffer。
+当前句/退场句使用独立生命周期，不复活旧实例。默认预设改名“暖白浮光”。
+修正依据与未验收范围见 [旧句残留说明](docs/0.6.1-stale-lyrics.md)。

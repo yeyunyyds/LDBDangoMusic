@@ -21,6 +21,7 @@
 #include "peak_style.hpp"
 #include "lyrics_settings.hpp"
 #include "render_lifecycle.hpp"
+#include "lyric_lifecycle.hpp"
 #include "camera_diagnostics.hpp"
 #include "source_camera.hpp"
 static_assert(sizeof(void*)==4,"Pure L4N plugin must be x86");
@@ -33,7 +34,7 @@ std::shared_ptr<const Config> settings=std::make_shared<Config>(),pendingSave;
 std::mutex settingsMutex;std::atomic<int> saveState{0};thread_local std::shared_ptr<const Config> renderedSettings;
 std::filesystem::path directory;using LogFn=void(*)(int,const char*);LogFn logger=nullptr;
 constexpr int LDB_HOST_LOG_INFO=0,LDB_HOST_LOG_WARNING=1,LDB_HOST_LOG_ERROR=2;
-std::atomic<uint64_t> sceneSerial{1};thread_local bool overlayDrawing=false;FrameGate frameGate;
+PlaybackCursor playbackCursor;LyricLifecycle lyricLifecycle;std::atomic<int> visibleLyricIndex{-1};std::atomic<uint64_t> presentationCount{0},restoreErrors{0};
 std::atomic<bool> stopping{false};std::thread worker;std::mutex sleepMutex;std::condition_variable wake;
 std::shared_ptr<const State> snapshot=std::make_shared<State>();
 bool presentLogged[2]={false,false};uint64_t reportedErrors=0;bool drewPixels=false;
@@ -61,14 +62,14 @@ struct CameraWriter {
  std::ofstream file;size_t bytes=0,records=0;bool attempted=false,disabled=false;
  void drain(){if(!cfg.cameraDiagnostics)return;
  if(!attempted){attempted=true;try{std::filesystem::create_directories(directory);auto path=directory/("camera-"+std::to_string(GetCurrentProcessId())+"-"+std::to_string(now())+".jsonl");file.open(path,std::ios::out|std::ios::binary|std::ios::app);if(!file)throw std::runtime_error("Cannot open diagnostic file");note("L4D2DangoMusic camera diagnostic="+path.u8string()+" sample=4Hz max=2MiB/2400records; matrices unconfirmed");}catch(const std::exception& e){disabled=true;note(std::string("L4D2DangoMusic camera diagnostic disabled: ")+e.what());}}
- CameraSample s;while(cameraQueue.pop(s)){if(disabled)continue;auto json=cameraJson(s);json["dropped_total"]=cameraQueue.dropped.load();json["overlay_scene_serial"]=sceneSerial.load();json["overlay_submitted"]=frameGate.painted.load();json["overlay_duplicates_skipped"]=frameGate.duplicates.load();auto camera=std::atomic_load(&source_camera::snapshot);json["source_camera"]={{"capture_state",source_camera::captureState.load()},{"captured_frames",source_camera::capturedFrames.load()},{"active",camera->active},{"tick_ms",camera->tick},{"epoch",camera->epoch},{"world_to_view",camera->worldToView},{"world_to_clip",camera->worldToClip},{"width",camera->width},{"height",camera->height}};auto line=json.dump()+"\n";if(bytes+line.size()>2*1024*1024||records>=2400){disabled=true;note("L4D2DangoMusic camera diagnostic reached limit; restart to capture again");continue;}file<<line;if(!file){disabled=true;note("L4D2DangoMusic camera diagnostic write failed");continue;}bytes+=line.size();++records;}if(file)file.flush();
+ CameraSample s;while(cameraQueue.pop(s)){if(disabled)continue;auto json=cameraJson(s);json["dropped_total"]=cameraQueue.dropped.load();json["lyric_index"]=visibleLyricIndex.load();json["presentations"]=presentationCount.load();json["restore_errors"]=restoreErrors.load();auto camera=std::atomic_load(&source_camera::snapshot);json["source_camera"]={{"capture_state",source_camera::captureState.load()},{"captured_frames",source_camera::capturedFrames.load()},{"active",camera->active},{"tick_ms",camera->tick},{"epoch",camera->epoch},{"world_to_view",camera->worldToView},{"world_to_clip",camera->worldToClip},{"width",camera->width},{"height",camera->height}};auto line=json.dump()+"\n";if(bytes+line.size()>2*1024*1024||records>=2400){disabled=true;note("L4D2DangoMusic camera diagnostic reached limit; restart to capture again");continue;}file<<line;if(!file){disabled=true;note("L4D2DangoMusic camera diagnostic write failed");continue;}bytes+=line.size();++records;}if(file)file.flush();
  }
 };
 bool checked(HRESULT hr,unsigned stage,const char* operation){if(SUCCEEDED(hr))return true;auto bit=uint64_t(1)<<stage;if(!(reportedErrors&bit)){reportedErrors|=bit;char msg[256];std::snprintf(msg,sizeof(msg),"L4D2DangoMusic render-error operation=%s hr=0x%08lx",operation,static_cast<unsigned long>(hr));if(logger)logger(LDB_HOST_LOG_WARNING,msg);}return false;}
 void publish(State s){std::atomic_store(&snapshot,std::make_shared<const State>(std::move(s)));}
 struct Internet {HINTERNET h; explicit Internet(HINTERNET v):h(v){if(!h)throw std::runtime_error("WinHTTP handle failed");}~Internet(){WinHttpCloseHandle(h);}Internet(const Internet&)=delete;};
 nlohmann::json get(const wchar_t* path,size_t limit){
- Internet session(WinHttpOpen(L"L4D2DangoMusic/0.6.0",WINHTTP_ACCESS_TYPE_NO_PROXY,WINHTTP_NO_PROXY_NAME,WINHTTP_NO_PROXY_BYPASS,0));
+ Internet session(WinHttpOpen(L"L4D2DangoMusic/0.6.1",WINHTTP_ACCESS_TYPE_NO_PROXY,WINHTTP_NO_PROXY_NAME,WINHTTP_NO_PROXY_BYPASS,0));
  WinHttpSetTimeouts(session.h,500,500,500,500);
  Internet connection(WinHttpConnect(session.h,L"127.0.0.1",static_cast<INTERNET_PORT>(cfg.port),0));
  Internet request(WinHttpOpenRequest(connection.h,L"GET",path,nullptr,WINHTTP_NO_REFERER,WINHTTP_DEFAULT_ACCEPT_TYPES,0));
@@ -124,25 +125,25 @@ void styled(IDirect3DDevice9* dev,Image im,float x,float y,float scale,float alp
  draw(dev,im,x,y,scale,alpha,color,rotation);
 }
 struct PeakEntry {
- Line line;peak::Animation animation;peak::Layout layout;int index;double born,retired=-1,lastPlaced;Vec3 anchor;uint32_t epoch;
+ uint64_t leaseId=0;Line line;peak::Animation animation;peak::Layout layout;int index;double born,retired=-1,lastPlaced;Vec3 anchor;uint32_t epoch;
  PeakEntry(const Line& l,int64_t next,int i,double tick,Vec3 point,uint32_t e):line(l),animation(l,next),index(i),born(tick),lastPlaced(tick),anchor(point),epoch(e){}
 };
-std::vector<std::unique_ptr<PeakEntry>> peakEntries;std::string peakSong;int peakIndex=-1;int64_t lastSongPosition=-1,lastFrameTick=0;bool lastWorldMode=false;float lastWidth=0,lastHeight=0;
+std::vector<std::unique_ptr<PeakEntry>> peakEntries;int peakIndex=-1;bool lastWorldMode=false;float lastWidth=0,lastHeight=0;
 void peakFrame(IDirect3DDevice9* dev,const State& state,int at,int64_t song,bool world,const GameCameraFrame& camera,CameraPose pose,float width,float height){
  double clock=now()/1000.;
- bool jump=lastSongPosition>=0&&std::abs(song-lastSongPosition-(state.playing?int64_t((now()-lastFrameTick)*state.rate):0))>1800;
- if(peakSong!=state.key||jump||lastWorldMode!=world||lastWidth!=width||lastHeight!=height||(!peakEntries.empty()&&world&&peakEntries.back()->epoch!=camera.epoch)){peakEntries.clear();peakIndex=-1;peakSong=state.key;}
- lastSongPosition=song;lastFrameTick=now();lastWorldMode=world;lastWidth=width;lastHeight=height;
- if(at!=peakIndex){for(auto& e:peakEntries)if(e->retired<0)e->retired=clock;peakIndex=at;
- if(at>=0&&!state.timeline[at].text.empty()){auto& line=state.timeline[at];auto next=at+1<int(state.timeline.size())?state.timeline[at+1].start:line.start+5000;
- auto existing=std::find_if(peakEntries.begin(),peakEntries.end(),[&](auto& e){return e->index==at&&e->line.text==line.text;});
- if(existing!=peakEntries.end()){(*existing)->retired=-1;}
- else {
- peakEntries.erase(std::remove_if(peakEntries.begin(),peakEntries.end(),[&](auto& e){return e->line.text==line.text;}),peakEntries.end());
- Vec3 anchor=world?anchors.current:Vec3{};auto entry=std::make_unique<PeakEntry>(line,next,at,clock,anchor,camera.epoch);
+ bool contextChanged=lastWorldMode!=world||lastWidth!=width||lastHeight!=height||(!peakEntries.empty()&&world&&peakEntries.back()->epoch!=camera.epoch);
+ lastWorldMode=world;lastWidth=width;lastHeight=height;
+ if(contextChanged){lyricLifecycle.reset();peakEntries.clear();}
+ std::string text=at>=0?state.timeline[at].text:std::string{};
+ lyricLifecycle.update(state.key,at,text,clock,cfg.lingerMs,cfg.transition);
+ peakEntries.erase(std::remove_if(peakEntries.begin(),peakEntries.end(),[&](auto& entry){return std::none_of(lyricLifecycle.entries.begin(),lyricLifecycle.entries.end(),[&](auto& lease){return lease.id==entry->leaseId;});}),peakEntries.end());
+ for(auto& lease:lyricLifecycle.entries){auto existing=std::find_if(peakEntries.begin(),peakEntries.end(),[&](auto& e){return e->leaseId==lease.id;});
+ if(existing!=peakEntries.end()){(*existing)->retired=lease.retired;continue;}
+ auto& line=state.timeline[lease.index];auto next=lease.index+1<int(state.timeline.size())?state.timeline[lease.index+1].start:line.start+5000;
+ auto entry=std::make_unique<PeakEntry>(line,next,lease.index,clock,world?anchors.current:Vec3{},camera.epoch);entry->leaseId=lease.id;entry->retired=lease.retired;
  float maxPixels=world?std::min(cfg.worldDistance*.6f,130.f)/(cfg.worldHeight*cfg.worldDistance/200.f)*cfg.size:width*.32f/std::clamp(height/1080.f*28/cfg.size,.5f,2.6f);
- entry->layout=peak::layout(entry->animation.glyphs,[&](const std::string& text){return image(dev,text).advance;},maxPixels,cfg.size*1.35f);
- peakEntries.push_back(std::move(entry));while(peakEntries.size()>4)peakEntries.erase(peakEntries.begin());}}}
+ entry->layout=peak::layout(entry->animation.glyphs,[&](const std::string& glyph){return image(dev,glyph).advance;},maxPixels,cfg.size*1.35f);peakEntries.push_back(std::move(entry));}
+ visibleLyricIndex=at;
  for(size_t i=0;i<peakEntries.size();){auto& entry=*peakEntries[i];ExitFrame life;if(entry.retired>=0)life=exitFrame((clock-entry.retired)*1000,cfg.lingerMs,cfg.transition);
  if(life.done){peakEntries.erase(peakEntries.begin()+i);continue;}++i;
  Placement place;float scale=std::clamp(height/1080.f*28/cfg.size,.5f,2.6f),center=width*(entry.index%2?.78f:.22f),top=height*.61f;
@@ -175,12 +176,11 @@ struct DrawGuard {
 void WINAPI render(IDirect3DDevice9* dev,const PresentInfo* present){
  if(!dev||!present)return;
  auto currentSettings=std::atomic_load(&settings);cfg=*currentSettings;if(!cfg.enabled)return;
- if(renderedSettings!=currentSettings){clear();peakEntries.clear();peakIndex=-1;renderedSettings=currentSettings;}
- struct OverlayScope {OverlayScope(){overlayDrawing=true;}~OverlayScope(){overlayDrawing=false;}} overlayScope;
+ if(renderedSettings!=currentSettings){clear();peakEntries.clear();peakIndex=-1;lyricLifecycle.reset();renderedSettings=currentSettings;}
  captureCamera(dev,present);
  const unsigned path=present->is_swapchain_present?1:0;
  if(!presentLogged[path]){presentLogged[path]=true;note(std::string("L4D2DangoMusic first Present path=")+(path?"SwapChain":"Device")+(present->swap_chain?" current-chain=yes":" current-chain=no"));}
- try {if(cache.size()>256)clear();auto state=std::atomic_load(&snapshot);auto position=state->at(now());auto at=position<0?-1:indexAt(state->timeline,lyricPosition(position,cfg.demo?0:cfg.offset));
+ try {if(cache.size()>256)clear();auto state=std::atomic_load(&snapshot);auto cursor=playbackCursor.select(state->key,state->at(now()),state->playing);auto position=cursor.position;if(cursor.seek){peakEntries.clear();lyricLifecycle.reset();anchors.reset();}auto at=position<0?-1:indexAt(state->timeline,lyricPosition(position,cfg.demo?0:cfg.offset));
  std::string text=at<0?state->message:state->timeline[at].text;
  DrawGuard guard(dev);auto& target=guard.target;auto& depth=guard.depth;auto& back=guard.back;auto& block=guard.block;
  if(!checked(dev->CreateStateBlock(D3DSBT_ALL,&block),0,"CreateStateBlock"))return;
@@ -190,14 +190,14 @@ void WINAPI render(IDirect3DDevice9* dev,const PresentInfo* present){
  for(unsigned i=0;i<guard.extraCount;++i)dev->GetRenderTarget(i+1,&guard.extra[i]);guard.captured=true;
  // The supplied chain is borrowed. Only GetBackBuffer's returned reference is released.
  HRESULT backResult=currentBackBuffer(dev,present->swap_chain,path!=0,D3DBACKBUFFER_TYPE_MONO,&back,D3DERR_INVALIDCALL);
- if(checked(backResult,2,"Get current SwapChain backbuffer")){D3DSURFACE_DESC desc{};IDirect3DSwapChain9* ownedChain=nullptr;IDirect3DSwapChain9* targetChain=present->swap_chain;if(!targetChain&&SUCCEEDED(dev->GetSwapChain(0,&ownedChain)))targetChain=ownedChain;IUnknown* targetIdentity=nullptr;if(targetChain)targetChain->QueryInterface(__uuidof(IUnknown),reinterpret_cast<void**>(&targetIdentity));if(!targetIdentity)back->QueryInterface(__uuidof(IUnknown),reinterpret_cast<void**>(&targetIdentity));uintptr_t targetKey=reinterpret_cast<uintptr_t>(targetIdentity?targetIdentity:static_cast<IUnknown*>(back));bool drawThisScene=frameGate.allow(targetKey,sceneSerial.load(std::memory_order_acquire));if(targetIdentity)targetIdentity->Release();if(ownedChain)ownedChain->Release();if(!drawThisScene)return;if(!checked(back->GetDesc(&desc),9,"Get backbuffer description"))return;dev->SetDepthStencilSurface(nullptr);for(unsigned i=0;i<guard.extraCount;++i)dev->SetRenderTarget(i+1,nullptr);if(!checked(dev->SetRenderTarget(0,back),3,"SetRenderTarget"))return;D3DVIEWPORT9 vp{0,0,desc.Width,desc.Height,0,1};if(!checked(dev->SetViewport(&vp),10,"SetViewport"))return;
+ if(checked(backResult,2,"Get current SwapChain backbuffer")){D3DSURFACE_DESC desc{};if(!checked(back->GetDesc(&desc),9,"Get backbuffer description"))return;dev->SetDepthStencilSurface(nullptr);for(unsigned i=0;i<guard.extraCount;++i)dev->SetRenderTarget(i+1,nullptr);if(!checked(dev->SetRenderTarget(0,back),3,"SetRenderTarget"))return;D3DVIEWPORT9 vp{0,0,desc.Width,desc.Height,0,1};if(!checked(dev->SetViewport(&vp),10,"SetViewport"))return;
  if(checked(dev->BeginScene(),4,"BeginScene")){guard.scene=true;
  dev->SetVertexShader(nullptr);dev->SetPixelShader(nullptr);dev->SetFVF(D3DFVF_XYZRHW|D3DFVF_DIFFUSE|D3DFVF_TEX1);
  dev->SetRenderState(D3DRS_FILLMODE,D3DFILL_SOLID);dev->SetRenderState(D3DRS_ZENABLE,FALSE);dev->SetRenderState(D3DRS_ZWRITEENABLE,FALSE);dev->SetRenderState(D3DRS_CULLMODE,D3DCULL_NONE);dev->SetRenderState(D3DRS_LIGHTING,FALSE);dev->SetRenderState(D3DRS_FOGENABLE,FALSE);dev->SetRenderState(D3DRS_STENCILENABLE,FALSE);dev->SetRenderState(D3DRS_SCISSORTESTENABLE,FALSE);dev->SetRenderState(D3DRS_ALPHATESTENABLE,FALSE);dev->SetRenderState(D3DRS_ALPHABLENDENABLE,TRUE);dev->SetRenderState(D3DRS_SRCBLEND,D3DBLEND_SRCALPHA);dev->SetRenderState(D3DRS_DESTBLEND,D3DBLEND_INVSRCALPHA);dev->SetRenderState(D3DRS_BLENDOP,D3DBLENDOP_ADD);dev->SetRenderState(D3DRS_SEPARATEALPHABLENDENABLE,FALSE);dev->SetRenderState(D3DRS_COLORWRITEENABLE,15);dev->SetRenderState(D3DRS_SRGBWRITEENABLE,FALSE);
  for(auto stage:{D3DTSS_COLOROP,D3DTSS_ALPHAOP})dev->SetTextureStageState(0,stage,D3DTOP_MODULATE);
  dev->SetTextureStageState(0,D3DTSS_COLORARG1,D3DTA_TEXTURE);dev->SetTextureStageState(0,D3DTSS_COLORARG2,D3DTA_DIFFUSE);dev->SetTextureStageState(0,D3DTSS_ALPHAARG1,D3DTA_TEXTURE);dev->SetTextureStageState(0,D3DTSS_ALPHAARG2,D3DTA_DIFFUSE);dev->SetTextureStageState(0,D3DTSS_TEXCOORDINDEX,0);dev->SetTextureStageState(0,D3DTSS_TEXTURETRANSFORMFLAGS,D3DTTFF_DISABLE);dev->SetTextureStageState(1,D3DTSS_COLOROP,D3DTOP_DISABLE);dev->SetTextureStageState(1,D3DTSS_ALPHAOP,D3DTOP_DISABLE);
  dev->SetSamplerState(0,D3DSAMP_MINFILTER,D3DTEXF_LINEAR);dev->SetSamplerState(0,D3DSAMP_MAGFILTER,D3DTEXF_LINEAR);dev->SetSamplerState(0,D3DSAMP_ADDRESSU,D3DTADDRESS_CLAMP);dev->SetSamplerState(0,D3DSAMP_ADDRESSV,D3DTADDRESS_CLAMP);dev->SetSamplerState(0,D3DSAMP_SRGBTEXTURE,FALSE);
- if(cfg.demo){auto banner=image(dev,"L4D2DangoMusic 0.6.0 DEMO - "+std::string(path?"SwapChain":"Device"));draw(dev,banner,16,16,std::min(1.f,desc.Width*.9f/std::max(banner.width,1)),1.f);}
+ if(cfg.demo){auto banner=image(dev,"L4D2DangoMusic 0.6.1 DEMO - "+std::string(path?"SwapChain":"Device"));draw(dev,banner,16,16,std::min(1.f,desc.Width*.9f/std::max(banner.width,1)),1.f);}
  auto camera=std::atomic_load(&source_camera::snapshot);const auto& gameFrame=*camera;CameraPose pose;
  bool cameraGood=usableCamera(gameFrame,now())&&cameraPose(gameFrame,pose);bool cameraValid=cfg.worldLyrics&&cameraGood;
  if(cfg.worldLyrics&&cfg.debugOverlay){auto status=image(dev,cameraValid?std::string("GAME CAMERA: ACTIVE (experimental)"):std::string("GAME CAMERA: ")+source_camera::status()+" - screen fallback");draw(dev,status,16,cfg.demo?64.f:16.f,std::min(.65f,desc.Width*.9f/std::max(status.width,1)),.8f,cameraValid?0x99ffbb:0xffcc88);}
@@ -215,17 +215,39 @@ bool load(const std::filesystem::path& pluginDirectory){try{directory=pluginDire
  if(std::filesystem::exists(path)){std::ifstream f(path);cfg=decodeConfig(nlohmann::json::parse(f));}
  std::atomic_store(&settings,std::make_shared<const Config>(cfg));
 
- note("L4D2DangoMusic 0.6.0 config="+path.u8string()+" mode="+(cfg.demo?"DEMO":"BLF/LX")+" port="+std::to_string(cfg.port)+" offsetMs="+std::to_string(cfg.offset)+" displayMode="+cfg.mode);
+ note("L4D2DangoMusic 0.6.1 config="+path.u8string()+" mode="+(cfg.demo?"DEMO":"BLF/LX")+" port="+std::to_string(cfg.port)+" offsetMs="+std::to_string(cfg.offset)+" displayMode="+cfg.mode);
  stopping=false;worker=std::thread(run);return TRUE;}catch(const std::exception& e){if(logger)logger(LDB_HOST_LOG_ERROR,e.what());return FALSE;}catch(...){return FALSE;}}
-void WINAPI created(IDirect3DDevice9*){++deviceGeneration;frameGate.reset();anchors.reset();peakEntries.clear();peakIndex=-1;clear();reportedErrors=0;drewPixels=false;note("L4D2DangoMusic device lifecycle: created/destroyed; textures cleared");}
-void WINAPI beforeReset(IDirect3DDevice9*,const D3DPRESENT_PARAMETERS*,BOOL){frameGate.reset();anchors.reset();peakEntries.clear();peakIndex=-1;clear();}
+void releasePresentationBackup();
+void WINAPI created(IDirect3DDevice9*){++deviceGeneration;releasePresentationBackup();anchors.reset();peakEntries.clear();peakIndex=-1;lyricLifecycle.reset();clear();reportedErrors=0;drewPixels=false;note("L4D2DangoMusic device lifecycle: created/destroyed; textures cleared");}
+void WINAPI beforeReset(IDirect3DDevice9*,const D3DPRESENT_PARAMETERS*,BOOL){releasePresentationBackup();anchors.reset();peakEntries.clear();peakIndex=-1;lyricLifecycle.reset();clear();}
 void WINAPI afterReset(IDirect3DDevice9*,HRESULT hr,BOOL){++deviceGeneration;reportedErrors=0;checked(hr,5,"Reset");note("L4D2DangoMusic Reset completed; textures will rebuild");}
-void WINAPI shutdown(){stopping=true;wake.notify_all();if(worker.joinable())worker.join();clear();}
+void WINAPI shutdown(){stopping=true;wake.notify_all();if(worker.joinable())worker.join();releasePresentationBackup();clear();}
 }
 namespace {
+struct PresentationBackup {
+ IDirect3DSurface9* clean=nullptr;IDirect3DDevice9* owner=nullptr;D3DSURFACE_DESC description{};
+ void release(){if(clean)clean->Release();clean=nullptr;owner=nullptr;}
+ bool prepare(IDirect3DDevice9* device,const D3DSURFACE_DESC& desc){
+ if(clean&&(owner!=device||description.Width!=desc.Width||description.Height!=desc.Height||description.Format!=desc.Format||description.MultiSampleType!=desc.MultiSampleType||description.MultiSampleQuality!=desc.MultiSampleQuality))release();
+ if(!clean){if(!checked(device->CreateRenderTarget(desc.Width,desc.Height,desc.Format,desc.MultiSampleType,desc.MultiSampleQuality,FALSE,&clean,nullptr),11,"Create pristine backbuffer backup"))return false;owner=device;description=desc;}return true;
+ }
+};
+PresentationBackup presentationBackup;
+void releasePresentationBackup(){presentationBackup.release();}
+template<class Present> HRESULT paintAndPresent(IDirect3DDevice9* device,IDirect3DSwapChain9* chain,Present present){
+ IDirect3DSurface9* back=nullptr;D3DSURFACE_DESC desc{};PresentInfo info{chain!=nullptr,chain};
+ auto capture=[&](){auto config=std::atomic_load(&settings);if(!config->enabled)return false;
+ HRESULT result=chain?chain->GetBackBuffer(0,D3DBACKBUFFER_TYPE_MONO,&back):device->GetBackBuffer(0,0,D3DBACKBUFFER_TYPE_MONO,&back);
+ if(!checked(result,12,"Acquire presented backbuffer"))return false;
+ if(!checked(back->GetDesc(&desc),13,"Describe presented backbuffer")||!presentationBackup.prepare(device,desc))return false;
+ return checked(device->StretchRect(back,nullptr,presentationBackup.clean,nullptr,D3DTEXF_NONE),14,"Capture pristine backbuffer");};
+ auto restore=[&](){if(!checked(device->StretchRect(presentationBackup.clean,nullptr,back,nullptr,D3DTEXF_NONE),15,"Restore pristine backbuffer"))++restoreErrors;};
+ HRESULT result=E_FAIL;try{result=overlayTransaction(capture,[&](){render(device,&info);++presentationCount;},present,restore);}catch(...){note("Presentation transaction failed");if(back)back->Release();throw;}
+ if(back)back->Release();return result;
+}
 struct Patch {void** slot;void* original;void* replacement;};
 std::array<Patch,64> patches{};std::atomic<size_t> patchCount{0};SRWLOCK patchLock=SRWLOCK_INIT;std::filesystem::path pluginDirectory;
-void fileLog(int,const char* message){std::ofstream file(pluginDirectory/L"L4D2DangoMusic.log",std::ios::app);file<<"L4D2DangoMusic 0.6.0 "<<message<<'\n';}
+void fileLog(int,const char* message){std::ofstream file(pluginDirectory/L"L4D2DangoMusic.log",std::ios::app);file<<"L4D2DangoMusic 0.6.1 "<<message<<'\n';}
 bool patch(void** table,size_t slot,void* replacement){
  if(!TryAcquireSRWLockExclusive(&patchLock))return false;auto count=patchCount.load(std::memory_order_acquire);
  for(size_t i=0;i<count;++i)if(patches[i].slot==table+slot){bool same=patches[i].replacement==replacement;ReleaseSRWLockExclusive(&patchLock);return same;}
@@ -239,21 +261,20 @@ void* original(void* object,size_t slot){auto table=*reinterpret_cast<void***>(o
 thread_local unsigned presentDepth=0;
 HRESULT WINAPI devicePresent(IDirect3DDevice9* device,const RECT* source,const RECT* target,HWND window,const RGNDATA* dirty){
  auto fn=reinterpret_cast<HRESULT(WINAPI*)(IDirect3DDevice9*,const RECT*,const RECT*,HWND,const RGNDATA*)>(original(device,17));
- ++presentDepth;if(presentDepth==1){PresentInfo info;render(device,&info);}auto hr=fn(device,source,target,window,dirty);--presentDepth;return hr;
+ ++presentDepth;auto hr=presentDepth==1?paintAndPresent(device,nullptr,[&](){return fn(device,source,target,window,dirty);}):fn(device,source,target,window,dirty);--presentDepth;return hr;
 }
 HRESULT WINAPI chainPresent(IDirect3DSwapChain9* chain,const RECT* source,const RECT* target,HWND window,const RGNDATA* dirty,DWORD flags){
  auto fn=reinterpret_cast<HRESULT(WINAPI*)(IDirect3DSwapChain9*,const RECT*,const RECT*,HWND,const RGNDATA*,DWORD)>(original(chain,3));
- ++presentDepth;if(presentDepth==1){IDirect3DDevice9* device=nullptr;if(SUCCEEDED(chain->GetDevice(&device))&&device){PresentInfo info{true,chain};render(device,&info);device->Release();}}
- auto hr=fn(chain,source,target,window,dirty,flags);--presentDepth;return hr;
+ ++presentDepth;HRESULT hr;
+ IDirect3DDevice9* device=nullptr;if(presentDepth==1&&SUCCEEDED(chain->GetDevice(&device))&&device){hr=paintAndPresent(device,chain,[&](){return fn(chain,source,target,window,dirty,flags);});device->Release();}
+ else hr=fn(chain,source,target,window,dirty,flags);--presentDepth;return hr;
 }
 void hookChain(IDirect3DSwapChain9* chain){if(chain&&(*reinterpret_cast<void***>(chain))[3]!=reinterpret_cast<void*>(&chainPresent)&&patch(*reinterpret_cast<void***>(chain),3,reinterpret_cast<void*>(&chainPresent)))note("SwapChain Present attached");}
 HRESULT WINAPI getChain(IDirect3DDevice9* device,UINT index,IDirect3DSwapChain9** chain){auto fn=reinterpret_cast<HRESULT(WINAPI*)(IDirect3DDevice9*,UINT,IDirect3DSwapChain9**)>(original(device,14));auto hr=fn(device,index,chain);if(SUCCEEDED(hr)&&chain&&*chain)hookChain(*chain);return hr;}
 HRESULT WINAPI addChain(IDirect3DDevice9* device,D3DPRESENT_PARAMETERS* params,IDirect3DSwapChain9** chain){auto fn=reinterpret_cast<HRESULT(WINAPI*)(IDirect3DDevice9*,D3DPRESENT_PARAMETERS*,IDirect3DSwapChain9**)>(original(device,13));auto hr=fn(device,params,chain);if(SUCCEEDED(hr)&&chain&&*chain)hookChain(*chain);return hr;}
 HRESULT WINAPI resetDevice(IDirect3DDevice9* device,D3DPRESENT_PARAMETERS* params){auto fn=reinterpret_cast<HRESULT(WINAPI*)(IDirect3DDevice9*,D3DPRESENT_PARAMETERS*)>(original(device,16));beforeReset(device,params,FALSE);auto hr=fn(device,params);afterReset(device,hr,FALSE);if(SUCCEEDED(hr)){IDirect3DSwapChain9* chain=nullptr;if(SUCCEEDED(device->GetSwapChain(0,&chain))){hookChain(chain);chain->Release();}}return hr;}
-HRESULT WINAPI presentEx(IDirect3DDevice9Ex* device,const RECT* source,const RECT* target,HWND window,const RGNDATA* dirty,DWORD flags){auto fn=reinterpret_cast<HRESULT(WINAPI*)(IDirect3DDevice9Ex*,const RECT*,const RECT*,HWND,const RGNDATA*,DWORD)>(original(device,121));++presentDepth;if(presentDepth==1){PresentInfo info;render(device,&info);}auto hr=fn(device,source,target,window,dirty,flags);--presentDepth;return hr;}
+HRESULT WINAPI presentEx(IDirect3DDevice9Ex* device,const RECT* source,const RECT* target,HWND window,const RGNDATA* dirty,DWORD flags){auto fn=reinterpret_cast<HRESULT(WINAPI*)(IDirect3DDevice9Ex*,const RECT*,const RECT*,HWND,const RGNDATA*,DWORD)>(original(device,121));++presentDepth;auto hr=presentDepth==1?paintAndPresent(device,nullptr,[&](){return fn(device,source,target,window,dirty,flags);}):fn(device,source,target,window,dirty,flags);--presentDepth;return hr;}
 HRESULT WINAPI resetEx(IDirect3DDevice9Ex* device,D3DPRESENT_PARAMETERS* params,D3DDISPLAYMODEEX* mode){auto fn=reinterpret_cast<HRESULT(WINAPI*)(IDirect3DDevice9Ex*,D3DPRESENT_PARAMETERS*,D3DDISPLAYMODEEX*)>(original(device,132));beforeReset(device,params,TRUE);auto hr=fn(device,params,mode);afterReset(device,hr,TRUE);return hr;}
-HRESULT WINAPI endScene(IDirect3DDevice9* device){auto fn=reinterpret_cast<HRESULT(WINAPI*)(IDirect3DDevice9*)>(original(device,42));auto hr=fn(device);if(SUCCEEDED(hr)&&!overlayDrawing)sceneSerial.fetch_add(1,std::memory_order_release);return hr;}
-HRESULT WINAPI clearScene(IDirect3DDevice9* device,DWORD count,const D3DRECT* rects,DWORD flags,D3DCOLOR color,float z,DWORD stencil){auto fn=reinterpret_cast<HRESULT(WINAPI*)(IDirect3DDevice9*,DWORD,const D3DRECT*,DWORD,D3DCOLOR,float,DWORD)>(original(device,43));auto hr=fn(device,count,rects,flags,color,z,stencil);if(SUCCEEDED(hr)&&!overlayDrawing&&(flags&D3DCLEAR_TARGET))sceneSerial.fetch_add(1,std::memory_order_release);return hr;}
 std::string menuText;
 const char* menuAction(void*);
 std::string escaped(std::string s){std::string out;for(char c:s){if(c=='"'||c=='\\')out+='\\';if(c!='\r'&&c!='\n')out+=c;}return out;}
@@ -296,13 +317,13 @@ class LyricsPlugin final:public IL4NPlugin {
  bool started=false;
 public:
  const char* GetName()override{return "L4D2DangoMusic";}
- const char* GetVersion()override{return "0.6.0";}
+ const char* GetVersion()override{return "0.6.1";}
  const char* RequestHudMenu(bool title)override{start();return rootMenu(title);}
  void start(){if(started)return;HMODULE self=nullptr;GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,reinterpret_cast<const wchar_t*>(&fileLog),&self);wchar_t path[32768]{};if(!GetModuleFileNameW(self,path,32768))return;pluginDirectory=std::filesystem::path(path).parent_path();logger=fileLog;started=load(pluginDirectory);source_camera::logger=note;}
  void OnModuleLoaded(const char* name,std::uintptr_t handle)override{start();if(!started||!name)return;std::string n(name);if(n=="client"||n=="client.dll")source_camera::clientModule=reinterpret_cast<HMODULE>(handle);if(n=="engine"||n=="engine.dll")source_camera::engineModule=reinterpret_cast<HMODULE>(handle);source_camera::connect();}
  void OnGameLaunch()override{start();if(!started)return;if(!source_camera::clientModule)source_camera::clientModule=GetModuleHandleW(L"client.dll");if(!source_camera::engineModule)source_camera::engineModule=GetModuleHandleW(L"engine.dll");source_camera::connect();}
  void OnD3DDeviceCreated(void* pointer,bool)override{start();if(!started||!pointer)return;auto device=static_cast<IDirect3DDevice9*>(pointer);auto table=*reinterpret_cast<void***>(device);
- cfg=*std::atomic_load(&settings);created(device);patch(table,42,reinterpret_cast<void*>(&endScene));patch(table,43,reinterpret_cast<void*>(&clearScene));patch(table,17,reinterpret_cast<void*>(&devicePresent));patch(table,16,reinterpret_cast<void*>(&resetDevice));patch(table,14,reinterpret_cast<void*>(&getChain));patch(table,13,reinterpret_cast<void*>(&addChain));IDirect3DSwapChain9* chain=nullptr;if(SUCCEEDED(device->GetSwapChain(0,&chain))&&chain){hookChain(chain);chain->Release();}IDirect3DDevice9Ex* ex=nullptr;if(SUCCEEDED(device->QueryInterface(__uuidof(IDirect3DDevice9Ex),reinterpret_cast<void**>(&ex)))&&ex){auto et=*reinterpret_cast<void***>(ex);patch(et,121,reinterpret_cast<void*>(&presentEx));patch(et,132,reinterpret_cast<void*>(&resetEx));ex->Release();}note("x86 Client D3D9 callbacks installed; no Host plugin required");}
+ cfg=*std::atomic_load(&settings);created(device);patch(table,17,reinterpret_cast<void*>(&devicePresent));patch(table,16,reinterpret_cast<void*>(&resetDevice));patch(table,14,reinterpret_cast<void*>(&getChain));patch(table,13,reinterpret_cast<void*>(&addChain));IDirect3DSwapChain9* chain=nullptr;if(SUCCEEDED(device->GetSwapChain(0,&chain))&&chain){hookChain(chain);chain->Release();}IDirect3DDevice9Ex* ex=nullptr;if(SUCCEEDED(device->QueryInterface(__uuidof(IDirect3DDevice9Ex),reinterpret_cast<void**>(&ex)))&&ex){auto et=*reinterpret_cast<void***>(ex);patch(et,121,reinterpret_cast<void*>(&presentEx));patch(et,132,reinterpret_cast<void*>(&resetEx));ex->Release();}note("x86 Client D3D9 callbacks installed; no Host plugin required");}
  void stop(){source_camera::stop();if(started){shutdown();started=false;}for(size_t i=patchCount.load();i>0;--i){auto& p=patches[i-1];if(!source_camera::readable(p.slot,sizeof(void*)))continue;DWORD old=0;if(VirtualProtect(p.slot,sizeof(void*),PAGE_READWRITE,&old)){InterlockedCompareExchangePointer(p.slot,p.original,p.replacement);DWORD ignored=0;VirtualProtect(p.slot,sizeof(void*),old,&ignored);}}patchCount.store(0);}
  ~LyricsPlugin()override{stop();}
 };

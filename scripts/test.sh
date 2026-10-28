@@ -14,3 +14,5 @@ g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc -Ivendor 
 g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc -Ivendor tests/settings_lifecycle_test.cpp -o build/settings_lifecycle_test
 ./build/settings_lifecycle_test
 python3 tests/test_presets.py
+g++ -std=c++17 -Wall -Wextra -Werror -Isrc tests/lyric_lifecycle_test.cpp -o build/lyric_lifecycle_test
+./build/lyric_lifecycle_test

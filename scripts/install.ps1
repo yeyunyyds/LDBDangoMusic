@@ -28,4 +28,4 @@ foreach ($old in @((Join-Path $target "$legacy.dll"), (Join-Path $GameRoot "bin/
 }
 Copy-Item $sourceDll $dll -Force
 [IO.File]::WriteAllText($path, ($settings | ConvertTo-Json -Depth 16), [System.Text.UTF8Encoding]::new($false))
-Write-Host 'Installed L4D2DangoMusic 0.6.0; existing settings migrated. Restart game, open the L4N menu.'
+Write-Host 'Installed L4D2DangoMusic 0.6.1; existing settings migrated. Restart game, open the L4N menu.'
