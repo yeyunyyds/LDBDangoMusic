@@ -29,7 +29,7 @@ inline Timeline lyrics(const nlohmann::json& j){
  for(auto& l:out){auto it=std::lower_bound(tr.begin(),tr.end(),l.start,[](auto&a,int64_t t){return a.start<t;});if(it!=tr.end()&&it->start==l.start)l.translation=it->text;}return out;
 }
 inline int indexAt(const Timeline& t,int64_t ms){auto i=std::upper_bound(t.begin(),t.end(),ms,[](int64_t n,const Line&l){return n<l.start;});return int(i-t.begin())-1;}
-struct State { bool connected=false,playing=false; std::string key,title,artist,message="Waiting for BLF / LX"; int64_t position=0,duration=0,sampled=0;double rate=1; Timeline timeline;
+struct State { uint64_t generation=0;bool connected=false,playing=false; std::string key,title,artist,message="Waiting for BLF / LX"; int64_t position=0,duration=0,sampled=0;double rate=1; Timeline timeline;
  int64_t at(int64_t now)const {auto age=now-sampled;if(!connected||age<0||age>3000)return -1;return std::clamp(position+(playing?int64_t(std::min<int64_t>(age,1500)*rate):0),int64_t(0),duration);}
 };
 inline State status(const nlohmann::json& j,int64_t now){State s;s.connected=true;s.sampled=now;s.message="Connected: no active track";

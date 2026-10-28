@@ -2,6 +2,7 @@
 #define NOMINMAX
 #include <windows.h>
 #include <winhttp.h>
+#include <tlhelp32.h>
 #include <d3d9.h>
 #include <atomic>
 #include <memory>
@@ -22,6 +23,7 @@
 #include "lyrics_settings.hpp"
 #include "render_lifecycle.hpp"
 #include "lyric_lifecycle.hpp"
+#include "player_session.hpp"
 #include "camera_diagnostics.hpp"
 #include "source_camera.hpp"
 static_assert(sizeof(void*)==4,"Pure L4N plugin must be x86");
@@ -32,9 +34,11 @@ int64_t now(){return static_cast<int64_t>(GetTickCount64());}
 thread_local Config cfg;
 std::shared_ptr<const Config> settings=std::make_shared<Config>(),pendingSave;
 std::mutex settingsMutex;std::atomic<int> saveState{0};thread_local std::shared_ptr<const Config> renderedSettings;
+HMODULE ownModule=nullptr;std::filesystem::path ownPath;
 std::filesystem::path directory;using LogFn=void(*)(int,const char*);LogFn logger=nullptr;
 constexpr int LDB_HOST_LOG_INFO=0,LDB_HOST_LOG_WARNING=1,LDB_HOST_LOG_ERROR=2;
 std::atomic<bool> positionPreview{false};bool lastPositionPreview=false,escapeHeld=false;uint64_t layoutGeneration=0;
+PlaybackDisplay playbackDisplay;
 PlaybackCursor playbackCursor;LyricLifecycle lyricLifecycle;std::atomic<int> visibleLyricIndex{-1};std::atomic<uint64_t> presentationCount{0},restoreErrors{0};
 std::atomic<bool> stopping{false};std::thread worker;std::mutex sleepMutex;std::condition_variable wake;
 std::shared_ptr<const State> snapshot=std::make_shared<State>();
@@ -63,14 +67,14 @@ struct CameraWriter {
  std::ofstream file;size_t bytes=0,records=0;bool attempted=false,disabled=false;
  void drain(){if(!cfg.cameraDiagnostics)return;
  if(!attempted){attempted=true;try{std::filesystem::create_directories(directory);auto path=directory/("camera-"+std::to_string(GetCurrentProcessId())+"-"+std::to_string(now())+".jsonl");file.open(path,std::ios::out|std::ios::binary|std::ios::app);if(!file)throw std::runtime_error("Cannot open diagnostic file");note("L4D2DangoMusic camera diagnostic="+path.u8string()+" sample=4Hz max=2MiB/2400records; matrices unconfirmed");}catch(const std::exception& e){disabled=true;note(std::string("L4D2DangoMusic camera diagnostic disabled: ")+e.what());}}
- CameraSample s;while(cameraQueue.pop(s)){if(disabled)continue;auto json=cameraJson(s);json["dropped_total"]=cameraQueue.dropped.load();json["lyric_index"]=visibleLyricIndex.load();json["presentations"]=presentationCount.load();json["restore_errors"]=restoreErrors.load();auto camera=std::atomic_load(&source_camera::snapshot);json["source_camera"]={{"capture_state",source_camera::captureState.load()},{"captured_frames",source_camera::capturedFrames.load()},{"active",camera->active},{"tick_ms",camera->tick},{"epoch",camera->epoch},{"world_to_view",camera->worldToView},{"world_to_clip",camera->worldToClip},{"width",camera->width},{"height",camera->height}};auto line=json.dump()+"\n";if(bytes+line.size()>2*1024*1024||records>=2400){disabled=true;note("L4D2DangoMusic camera diagnostic reached limit; restart to capture again");continue;}file<<line;if(!file){disabled=true;note("L4D2DangoMusic camera diagnostic write failed");continue;}bytes+=line.size();++records;}if(file)file.flush();
+ CameraSample s;while(cameraQueue.pop(s)){if(disabled)continue;auto json=cameraJson(s);json["dropped_total"]=cameraQueue.dropped.load();json["lyric_index"]=visibleLyricIndex.load();json["presentations"]=presentationCount.load();json["restore_errors"]=restoreErrors.load();auto music=std::atomic_load(&snapshot);json["player"]={{"connected",music->connected},{"playing",music->playing},{"generation",music->generation},{"position_ms",music->position},{"sampled_ms",music->sampled},{"timeline_lines",music->timeline.size()},{"message",music->message}};json["position_preview"]=positionPreview.load();auto camera=std::atomic_load(&source_camera::snapshot);json["source_camera"]={{"capture_state",source_camera::captureState.load()},{"captured_frames",source_camera::capturedFrames.load()},{"active",camera->active},{"tick_ms",camera->tick},{"epoch",camera->epoch},{"world_to_view",camera->worldToView},{"world_to_clip",camera->worldToClip},{"width",camera->width},{"height",camera->height}};auto line=json.dump()+"\n";if(bytes+line.size()>2*1024*1024||records>=2400){disabled=true;note("L4D2DangoMusic camera diagnostic reached limit; restart to capture again");continue;}file<<line;if(!file){disabled=true;note("L4D2DangoMusic camera diagnostic write failed");continue;}bytes+=line.size();++records;}if(file)file.flush();
  }
 };
 bool checked(HRESULT hr,unsigned stage,const char* operation){if(SUCCEEDED(hr))return true;auto bit=uint64_t(1)<<stage;if(!(reportedErrors&bit)){reportedErrors|=bit;char msg[256];std::snprintf(msg,sizeof(msg),"L4D2DangoMusic render-error operation=%s hr=0x%08lx",operation,static_cast<unsigned long>(hr));if(logger)logger(LDB_HOST_LOG_WARNING,msg);}return false;}
-void publish(State s){std::atomic_store(&snapshot,std::make_shared<const State>(std::move(s)));}
+void publish(State s){auto old=std::atomic_load(&snapshot);if(old->connected!=s.connected||old->playing!=s.playing||old->generation!=s.generation||old->message!=s.message)note("Player state connected="+std::to_string(s.connected)+" playing="+std::to_string(s.playing)+" generation="+std::to_string(s.generation)+" position_ms="+std::to_string(s.position)+" timeline_lines="+std::to_string(s.timeline.size())+" message="+s.message);std::atomic_store(&snapshot,std::make_shared<const State>(std::move(s)));}
 struct Internet {HINTERNET h; explicit Internet(HINTERNET v):h(v){if(!h)throw std::runtime_error("WinHTTP handle failed");}~Internet(){WinHttpCloseHandle(h);}Internet(const Internet&)=delete;};
 nlohmann::json get(const wchar_t* path,size_t limit){
- Internet session(WinHttpOpen(L"L4D2DangoMusic/0.7.0",WINHTTP_ACCESS_TYPE_NO_PROXY,WINHTTP_NO_PROXY_NAME,WINHTTP_NO_PROXY_BYPASS,0));
+ Internet session(WinHttpOpen(L"L4D2DangoMusic/0.7.1",WINHTTP_ACCESS_TYPE_NO_PROXY,WINHTTP_NO_PROXY_NAME,WINHTTP_NO_PROXY_BYPASS,0));
  WinHttpSetTimeouts(session.h,500,500,500,500);
  Internet connection(WinHttpConnect(session.h,L"127.0.0.1",static_cast<INTERNET_PORT>(cfg.port),0));
  Internet request(WinHttpOpenRequest(connection.h,L"GET",path,nullptr,WINHTTP_NO_REFERER,WINHTTP_DEFAULT_ACCEPT_TYPES,0));
@@ -83,16 +87,15 @@ nlohmann::json get(const wchar_t* path,size_t limit){
 }
 constexpr auto statusPath=L"/status?filter=status,name,singer,duration,progress,playbackRate";
 void run() noexcept {
- try {cfg=*std::atomic_load(&settings);CameraWriter cameraWriter;Timeline timeline;std::string key;int64_t retry=0;auto demoStart=now();
+ try {cfg=*std::atomic_load(&settings);CameraWriter cameraWriter;PlayerSession player;auto demoStart=now();
  while(!stopping||std::atomic_load(&pendingSave)){
  if(auto requested=std::atomic_exchange(&pendingSave,std::shared_ptr<const Config>{})){try{auto path=directory/L"config.json";nlohmann::json stored=nlohmann::json::object();if(std::filesystem::exists(path)){std::ifstream old(path);stored=nlohmann::json::parse(old);if(!stored.is_object())throw std::runtime_error("Existing config is not an object");}stored.update(encodeConfig(*requested));std::filesystem::create_directories(directory);auto temp=directory/L"config.json.tmp";{std::ofstream file(temp,std::ios::binary|std::ios::trunc);file<<stored.dump(2)<<'\n';file.flush();if(!file)throw std::runtime_error("Config write failed");}if(std::filesystem::exists(path))std::filesystem::copy_file(path,directory/L"config.json.bak",std::filesystem::copy_options::overwrite_existing);if(!MoveFileExW(temp.c_str(),path.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH))throw std::runtime_error("Config replace failed");saveState=2;note("Settings saved");}catch(const std::exception& e){saveState=-1;note(e.what());}}
  cameraWriter.drain();try{State s;
  if(cfg.demo){s.connected=s.playing=true;s.title="Offline demonstration";s.key="demo";s.duration=16000;s.position=(now()-demoStart)%16000;s.sampled=now();s.timeline=parse("[00:01.00]<1000,500>你好 <1500,500>求生之路\n[00:05.00]Left and right floating lyrics\n[00:09.00]暂停、换歌与逐字时间轴\n[00:13.00]L4D2DangoMusic");s.message="Offline demo";}
- else {s=status(get(statusPath,65536),now());if(s.key!=key){key=s.key;timeline.clear();retry=0;}
- if(!key.empty()&&timeline.empty()&&now()>=retry){publish(s);retry=now()+5000;auto next=lyrics(get(L"/lyric-all",2*1024*1024));auto verified=status(get(statusPath,65536),now());if(verified.key!=key){key.clear();continue;}s=std::move(verified);timeline=peak::splitTimeline(next);retry=now()+5000;}
- s.timeline=timeline;if(!timeline.empty())s.message="Connected to BLF / LX";}
- publish(std::move(s));
- }catch(const std::exception&){auto old=std::atomic_load(&snapshot);if(now()-old->sampled>3000){State s;s.message="Disconnected: enable BLF / LX local API";publish(std::move(s));}}
+ else {player.poll([](){return status(get(statusPath,65536),now());},[](){return peak::splitTimeline(lyrics(get(L"/lyric-all",2*1024*1024)));},[](){return now();},[](State state){publish(std::move(state));});}
+ if(cfg.demo)publish(std::move(s));
+ }catch(const std::exception& e){bool wasOnline=player.online;publish(player.disconnect(now()));if(wasOnline)note(std::string("Player disconnected; lyric cache invalidated: ")+e.what());}
+
  std::unique_lock<std::mutex> lock(sleepMutex);wake.wait_for(lock,std::chrono::milliseconds(cfg.demo?50:150),[]{return stopping.load();});
  }
  cameraWriter.drain();
@@ -197,7 +200,9 @@ void WINAPI render(IDirect3DDevice9* dev,const PresentInfo* present){
  captureCamera(dev,present);
  const unsigned path=present->is_swapchain_present?1:0;
  if(!presentLogged[path]){presentLogged[path]=true;note(std::string("L4D2DangoMusic first Present path=")+(path?"SwapChain":"Device")+(present->swap_chain?" current-chain=yes":" current-chain=no"));}
- try {if(cache.size()>256)clear();auto state=std::atomic_load(&snapshot);auto cursor=preview?ClockSelection{}:playbackCursor.select(state->key,state->at(now()),state->playing);auto position=cursor.position;if(cursor.seek){peakEntries.clear();lyricLifecycle.reset();anchors.reset();}auto at=position<0?-1:indexAt(state->timeline,lyricPosition(position,cfg.demo?0:cfg.offset));
+ try {if(cache.size()>256)clear();auto state=std::atomic_load(&snapshot);auto display=playbackDisplay.select(*state,now());
+ if(display.reset){visibleLyricIndex=-1;++layoutGeneration;peakEntries.clear();lyricLifecycle.reset();anchors.reset();playbackCursor={};}
+ auto cursor=preview?ClockSelection{}:playbackCursor.select(state->key,display.position,state->playing);auto position=cursor.position;if(cursor.seek){peakEntries.clear();lyricLifecycle.reset();anchors.reset();}auto at=position<0?-1:indexAt(state->timeline,lyricPosition(position,cfg.demo?0:cfg.offset));
  std::string text=at<0?state->message:state->timeline[at].text;
  DrawGuard guard(dev);auto& target=guard.target;auto& depth=guard.depth;auto& back=guard.back;auto& block=guard.block;
  if(!checked(dev->CreateStateBlock(D3DSBT_ALL,&block),0,"CreateStateBlock"))return;
@@ -214,7 +219,7 @@ void WINAPI render(IDirect3DDevice9* dev,const PresentInfo* present){
  for(auto stage:{D3DTSS_COLOROP,D3DTSS_ALPHAOP})dev->SetTextureStageState(0,stage,D3DTOP_MODULATE);
  dev->SetTextureStageState(0,D3DTSS_COLORARG1,D3DTA_TEXTURE);dev->SetTextureStageState(0,D3DTSS_COLORARG2,D3DTA_DIFFUSE);dev->SetTextureStageState(0,D3DTSS_ALPHAARG1,D3DTA_TEXTURE);dev->SetTextureStageState(0,D3DTSS_ALPHAARG2,D3DTA_DIFFUSE);dev->SetTextureStageState(0,D3DTSS_TEXCOORDINDEX,0);dev->SetTextureStageState(0,D3DTSS_TEXTURETRANSFORMFLAGS,D3DTTFF_DISABLE);dev->SetTextureStageState(1,D3DTSS_COLOROP,D3DTOP_DISABLE);dev->SetTextureStageState(1,D3DTSS_ALPHAOP,D3DTOP_DISABLE);
  dev->SetSamplerState(0,D3DSAMP_MINFILTER,D3DTEXF_LINEAR);dev->SetSamplerState(0,D3DSAMP_MAGFILTER,D3DTEXF_LINEAR);dev->SetSamplerState(0,D3DSAMP_ADDRESSU,D3DTADDRESS_CLAMP);dev->SetSamplerState(0,D3DSAMP_ADDRESSV,D3DTADDRESS_CLAMP);dev->SetSamplerState(0,D3DSAMP_SRGBTEXTURE,FALSE);
- if(cfg.demo&&!preview){auto banner=image(dev,"L4D2DangoMusic 0.7.0 DEMO - "+std::string(path?"SwapChain":"Device"));draw(dev,banner,16,16,std::min(1.f,desc.Width*.9f/std::max(banner.width,1)),1.f);}
+ if(cfg.demo&&!preview){auto banner=image(dev,"L4D2DangoMusic 0.7.1 DEMO - "+std::string(path?"SwapChain":"Device"));draw(dev,banner,16,16,std::min(1.f,desc.Width*.9f/std::max(banner.width,1)),1.f);}
  auto camera=std::atomic_load(&source_camera::snapshot);const auto& gameFrame=*camera;CameraPose pose;
  bool cameraGood=usableCamera(gameFrame,now())&&cameraPose(gameFrame,pose);bool cameraValid=cfg.worldLyrics&&cameraGood;
  if(cfg.worldLyrics&&cfg.debugOverlay&&!preview){auto status=image(dev,cameraValid?std::string("GAME CAMERA: ACTIVE (experimental)"):std::string("GAME CAMERA: ")+source_camera::status()+" - screen fallback");draw(dev,status,16,cfg.demo?64.f:16.f,std::min(.65f,desc.Width*.9f/std::max(status.width,1)),.8f,cameraValid?0x99ffbb:0xffcc88);}
@@ -222,8 +227,8 @@ void WINAPI render(IDirect3DDevice9* dev,const PresentInfo* present){
  else {
  if(!cameraValid)anchors.reset();else anchors.update(gameFrame,pose,state->key,at);
  if(cameraValid&&cfg.worldTestAnchor){Placement test;if(projectAnchor(gameFrame,anchors.test,float(desc.Width),float(desc.Height),cfg.worldHeight,cfg.size,test)){auto im=image(dev,"WORLD ANCHOR +");styled(dev,im,test.x-im.width*test.scale*.5f,test.y,test.scale,.9f,0x99ffbb);}}
- drawSongInfo(dev,*state,gameFrame,cameraValid,pose,float(desc.Width),float(desc.Height));
- peakFrame(dev,*state,at,position<0?0:lyricPosition(position,cfg.demo?0:cfg.offset),cameraValid,gameFrame,pose,float(desc.Width),float(desc.Height));
+ if(display.metadata)drawSongInfo(dev,*state,gameFrame,cameraValid,pose,float(desc.Width),float(desc.Height));
+ if(display.lyrics)peakFrame(dev,*state,at,lyricPosition(position,cfg.demo?0:cfg.offset),cameraValid,gameFrame,pose,float(desc.Width),float(desc.Height));
  if(at<0&&cfg.debugOverlay){auto im=image(dev,text);styled(dev,im,16,96,.65f,.7f,cfg.textColor);}
  }
  dev->EndScene();guard.scene=false;}
@@ -235,7 +240,7 @@ bool load(const std::filesystem::path& pluginDirectory){try{directory=pluginDire
  if(std::filesystem::exists(path)){std::ifstream f(path);cfg=decodeConfig(nlohmann::json::parse(f));}
  std::atomic_store(&settings,std::make_shared<const Config>(cfg));
 
- note("L4D2DangoMusic 0.7.0 config="+path.u8string()+" mode="+(cfg.demo?"DEMO":"BLF/LX")+" port="+std::to_string(cfg.port)+" offsetMs="+std::to_string(cfg.offset)+" displayMode="+cfg.mode);
+ note("L4D2DangoMusic 0.7.1 config="+path.u8string()+" mode="+(cfg.demo?"DEMO":"BLF/LX")+" port="+std::to_string(cfg.port)+" offsetMs="+std::to_string(cfg.offset)+" displayMode="+cfg.mode);
  stopping=false;worker=std::thread(run);return TRUE;}catch(const std::exception& e){if(logger)logger(LDB_HOST_LOG_ERROR,e.what());return FALSE;}catch(...){return FALSE;}}
 void releasePresentationBackup();
 void WINAPI created(IDirect3DDevice9*){++deviceGeneration;releasePresentationBackup();anchors.reset();peakEntries.clear();peakIndex=-1;lyricLifecycle.reset();clear();reportedErrors=0;drewPixels=false;note("L4D2DangoMusic device lifecycle: created/destroyed; textures cleared");}
@@ -267,7 +272,7 @@ template<class Present> HRESULT paintAndPresent(IDirect3DDevice9* device,IDirect
 }
 struct Patch {void** slot;void* original;void* replacement;};
 std::array<Patch,64> patches{};std::atomic<size_t> patchCount{0};SRWLOCK patchLock=SRWLOCK_INIT;std::filesystem::path pluginDirectory;
-void fileLog(int,const char* message){std::ofstream file(pluginDirectory/L"L4D2DangoMusic.log",std::ios::app);file<<"L4D2DangoMusic 0.7.0 "<<message<<'\n';}
+void fileLog(int,const char* message){std::ofstream file(pluginDirectory/L"L4D2DangoMusic.log",std::ios::app);file<<"L4D2DangoMusic 0.7.1 "<<message<<'\n';}
 bool patch(void** table,size_t slot,void* replacement){
  if(!TryAcquireSRWLockExclusive(&patchLock))return false;auto count=patchCount.load(std::memory_order_acquire);
  for(size_t i=0;i<count;++i)if(patches[i].slot==table+slot){bool same=patches[i].replacement==replacement;ReleaseSRWLockExclusive(&patchLock);return same;}
@@ -300,7 +305,16 @@ const char* menuAction(void*);
 std::string escaped(std::string s){std::string out;for(char c:s){if(c=='"'||c=='\\')out+='\\';if(c!='\r'&&c!='\n')out+=c;}return out;}
 std::string item(const std::string& label,uintptr_t id){char callback[32],data[32];std::snprintf(callback,sizeof(callback),"0x%lx",static_cast<unsigned long>(reinterpret_cast<uintptr_t>(&menuAction)));std::snprintf(data,sizeof(data),"0x%lx",static_cast<unsigned long>(id));return "\""+escaped(label)+"\" { \"callback\" \""+callback+"\" \"user_data\" \""+data+"\" }\n";}
 const char* page(const std::string& title,const std::string& rows){menuText="\""+escaped(title)+"\" {\n"+rows+"}\n";return menuText.c_str();}
-void changeSettings(const Config& next){std::atomic_store(&settings,std::make_shared<const Config>(next));}
+std::vector<std::string> relatedModules(){std::vector<std::string> paths;HANDLE snapshot=CreateToolhelp32Snapshot(TH32CS_SNAPMODULE|TH32CS_SNAPMODULE32,GetCurrentProcessId());if(snapshot==INVALID_HANDLE_VALUE)return paths;MODULEENTRY32W entry{};entry.dwSize=sizeof(entry);
+ if(Module32FirstW(snapshot,&entry))do{if(entry.hModule==ownModule)continue;std::wstring name=entry.szModule;std::transform(name.begin(),name.end(),name.begin(),[](wchar_t c){return c>=L'A'&&c<=L'Z'?c+32:c;});
+ if(name.find(L"dango")!=std::wstring::npos||GetProcAddress(entry.hModule,"L4D2DangoMusicShutdown")||GetProcAddress(entry.hModule,"LDBDangoMusicShutdown"))paths.push_back(std::filesystem::path(entry.szExePath).u8string());}while(Module32NextW(snapshot,&entry));CloseHandle(snapshot);return paths;}
+const char* diagnosticMenu(){std::string rows=item(u8"版本：0.7.1；进程："+std::to_string(GetCurrentProcessId()),24)+item(u8"当前 DLL："+ownPath.u8string(),24);auto others=relatedModules();
+ note("Runtime audit pid="+std::to_string(GetCurrentProcessId())+" dll="+ownPath.u8string()+" related_modules="+std::to_string(others.size()));
+ for(auto& path:others){rows+=item(u8"其他歌词模块："+path,24);note("Other lyric module: "+path);}
+ if(others.empty())rows+=item(u8"当前进程未发现其他相关模块（Host 需另查）",24);
+ auto music=std::atomic_load(&snapshot);rows+=item(std::string(u8"播放器：")+(music->connected?(music->playing?u8"播放中":u8"暂停/停止"):u8"未连接")+u8"；会话 "+std::to_string(music->generation)+u8"；歌词 "+std::to_string(music->timeline.size()),24);
+ return page(u8"L4D2DangoMusic 0.7.1 · 诊断",rows+item(u8"返回主菜单",0));}
+void changeSettings(const Config& next){std::atomic_store(&settings,std::make_shared<const Config>(next));note("Settings applied enabled="+std::to_string(next.enabled)+" preset="+std::to_string(next.presetId)+" preview="+std::to_string(positionPreview.load()));}
 std::string on(bool v){return v?u8"开":u8"关";}
 const char* channelMenu(const Config& c,bool accent,unsigned channel){uint32_t color=accent?c.accent:c.textColor;unsigned value=(color>>((2-channel)*8))&255;std::string rows;
  const char* names[]={"R","G","B"};const char* labels[]={"-16","-1","+1","+16","0","64","128","192","255"};
@@ -333,6 +347,7 @@ const char* menuAction(void* argument){uintptr_t id=reinterpret_cast<uintptr_t>(
  if(id>=3000&&id<=3103){int index=int(id-3000)/10,axis=int(id-3000)%10;if(index>=2+MaxLyricSlots||axis>3)return nullptr;positionPreview=true;return positionAxisMenu(c,index,axis);}
  if(id>=20000&&id<=30304){int code=int(id-20000),index=code/1000,axis=code%1000/100,choice=code%100;if(index>=2+MaxLyricSlots||axis>3||choice>4)return nullptr;positionPreview=true;adjustPosition(c.layout,index,axis,choice);changeSettings(c);return positionAxisMenu(c,index,axis);}
  positionPreview=false;
+ if(id==24)return diagnosticMenu();
  if(id==20)return page(u8"显示与歌曲信息",item(u8"翻译："+on(c.translation),2)+item(u8"世界歌词："+on(c.worldLyrics),7)+item(u8"靠近时后退："+on(c.keepAway),9)+item(u8"远处歌名："+on(c.showTitle),5)+item(u8"远处作者："+on(c.showArtist),6)+item(u8"长句回到视野",19));
  if(id==21)return page(u8"颜色与柔光",item(u8"正文颜色 "+colorText(c.textColor),11)+item(u8"光晕颜色 "+colorText(c.accent),12)+item(u8"柔光："+on(c.glow),8));
  if(id==22)return page(u8"动画与停留",item(u8"显字动画速度",13)+item(u8"退场耗时",14)+item(u8"换句后额外停留",15)+item(u8"抖动："+on(c.wiggle),3)+item(u8"逐字弹出："+on(c.pop),4));
@@ -356,21 +371,25 @@ const char* menuAction(void* argument){uintptr_t id=reinterpret_cast<uintptr_t>(
  else switch(id){case 1:c.enabled=!c.enabled;break;case 2:c.translation=!c.translation;break;case 3:c.wiggle=!c.wiggle;c.presetId=-1;break;case 4:c.pop=!c.pop;c.presetId=-1;break;case 5:c.showTitle=!c.showTitle;break;case 6:c.showArtist=!c.showArtist;break;case 7:c.worldLyrics=!c.worldLyrics;break;case 8:c.glow=!c.glow;c.presetId=-1;break;case 9:c.keepAway=!c.keepAway;break;default:return nullptr;}
  changeSettings(c);return page(u8"设置已应用",item(u8"实时生效；如需下次保留，请返回主菜单保存",0));
 }
-const char* rootMenu(bool title){if(title)return "L4D2DangoMusic";positionPreview=false;auto c=*std::atomic_load(&settings);std::string rows;
+const char* rootMenu(bool title){if(title)return "L4D2DangoMusic 0.7.1";positionPreview=false;auto c=*std::atomic_load(&settings);std::string rows;
  rows+=item(u8"歌词显示："+on(c.enabled),1)+item(u8"显示与歌曲信息",20)+item(u8"位置与数量（固定预览）",23)+item(std::string(u8"预设：")+presetName(c.presetId),10)+item(u8"颜色与柔光",21)+item(u8"动画、速度与停留",22)+item(u8"同步偏移 "+std::to_string(c.offset)+"ms",16);
- int saved=saveState.load();rows+=item(saved==1?u8"正在保存…":saved==2?u8"保存设置（上次成功）":saved<0?u8"保存设置（上次失败，见日志）":u8"保存设置",18);return page("L4D2DangoMusic",rows);}
+ int saved=saveState.load();rows+=item(saved==1?u8"正在保存…":saved==2?u8"保存设置（上次成功）":saved<0?u8"保存设置（上次失败，见日志）":u8"保存设置",18);rows+=item(u8"版本、路径与播放器诊断",24);return page("L4D2DangoMusic 0.7.1",rows);}
 class LyricsPlugin final:public IL4NPlugin {
- bool started=false;
+ bool started=false,attempted=false,duplicate=false;HANDLE renderOwner=nullptr;
 public:
  const char* GetName()override{return "L4D2DangoMusic";}
- const char* GetVersion()override{return "0.7.0";}
- const char* RequestHudMenu(bool title)override{start();return rootMenu(title);}
- void start(){if(started)return;HMODULE self=nullptr;GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,reinterpret_cast<const wchar_t*>(&fileLog),&self);wchar_t path[32768]{};if(!GetModuleFileNameW(self,path,32768))return;pluginDirectory=std::filesystem::path(path).parent_path();logger=fileLog;started=load(pluginDirectory);source_camera::logger=note;}
+ const char* GetVersion()override{return "0.7.1";}
+ const char* RequestHudMenu(bool title)override{start();if(duplicate){if(title)return u8"L4D2DangoMusic 0.7.1 · 重复副本已阻止";return page(u8"重复副本未启用绘制",item(u8"查看实际 DLL 路径与其他模块",24));}return rootMenu(title);}
+ void start(){if(attempted)return;attempted=true;GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,reinterpret_cast<const wchar_t*>(&fileLog),&ownModule);wchar_t path[32768]{};if(!GetModuleFileNameW(ownModule,path,32768))return;ownPath=path;pluginDirectory=ownPath.parent_path();logger=fileLog;
+ std::wstring ownerName=L"Local\\L4D2DangoMusic-render-"+std::to_wstring(GetCurrentProcessId());SetLastError(ERROR_SUCCESS);renderOwner=CreateMutexW(nullptr,FALSE,ownerName.c_str());DWORD ownerError=GetLastError();
+ if(!renderOwner||ownerError==ERROR_ALREADY_EXISTS){duplicate=true;if(renderOwner)CloseHandle(renderOwner);renderOwner=nullptr;note("Duplicate renderer blocked pid="+std::to_string(GetCurrentProcessId())+" dll="+ownPath.u8string());return;}
+ note("Runtime pid="+std::to_string(GetCurrentProcessId())+" dll="+ownPath.u8string());for(auto& other:relatedModules())note("Other lyric module: "+other);
+ started=load(pluginDirectory);if(!started){CloseHandle(renderOwner);renderOwner=nullptr;}source_camera::logger=note;}
  void OnModuleLoaded(const char* name,std::uintptr_t handle)override{start();if(!started||!name)return;std::string n(name);if(n=="client"||n=="client.dll")source_camera::clientModule=reinterpret_cast<HMODULE>(handle);if(n=="engine"||n=="engine.dll")source_camera::engineModule=reinterpret_cast<HMODULE>(handle);source_camera::connect();}
  void OnGameLaunch()override{start();if(!started)return;if(!source_camera::clientModule)source_camera::clientModule=GetModuleHandleW(L"client.dll");if(!source_camera::engineModule)source_camera::engineModule=GetModuleHandleW(L"engine.dll");source_camera::connect();}
  void OnD3DDeviceCreated(void* pointer,bool)override{start();if(!started||!pointer)return;auto device=static_cast<IDirect3DDevice9*>(pointer);auto table=*reinterpret_cast<void***>(device);
  cfg=*std::atomic_load(&settings);created(device);patch(table,17,reinterpret_cast<void*>(&devicePresent));patch(table,16,reinterpret_cast<void*>(&resetDevice));patch(table,14,reinterpret_cast<void*>(&getChain));patch(table,13,reinterpret_cast<void*>(&addChain));IDirect3DSwapChain9* chain=nullptr;if(SUCCEEDED(device->GetSwapChain(0,&chain))&&chain){hookChain(chain);chain->Release();}IDirect3DDevice9Ex* ex=nullptr;if(SUCCEEDED(device->QueryInterface(__uuidof(IDirect3DDevice9Ex),reinterpret_cast<void**>(&ex)))&&ex){auto et=*reinterpret_cast<void***>(ex);patch(et,121,reinterpret_cast<void*>(&presentEx));patch(et,132,reinterpret_cast<void*>(&resetEx));ex->Release();}note("x86 Client D3D9 callbacks installed; no Host plugin required");}
- void stop(){source_camera::stop();if(started){shutdown();started=false;}for(size_t i=patchCount.load();i>0;--i){auto& p=patches[i-1];if(!source_camera::readable(p.slot,sizeof(void*)))continue;DWORD old=0;if(VirtualProtect(p.slot,sizeof(void*),PAGE_READWRITE,&old)){InterlockedCompareExchangePointer(p.slot,p.original,p.replacement);DWORD ignored=0;VirtualProtect(p.slot,sizeof(void*),old,&ignored);}}patchCount.store(0);}
+ void stop(){source_camera::stop();if(started){shutdown();started=false;}for(size_t i=patchCount.load();i>0;--i){auto& p=patches[i-1];if(!source_camera::readable(p.slot,sizeof(void*)))continue;DWORD old=0;if(VirtualProtect(p.slot,sizeof(void*),PAGE_READWRITE,&old)){InterlockedCompareExchangePointer(p.slot,p.original,p.replacement);DWORD ignored=0;VirtualProtect(p.slot,sizeof(void*),old,&ignored);}}patchCount.store(0);if(renderOwner){CloseHandle(renderOwner);renderOwner=nullptr;}}
  ~LyricsPlugin()override{stop();}
 };
 }

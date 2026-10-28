@@ -18,3 +18,5 @@ g++ -std=c++17 -Wall -Wextra -Werror -Isrc tests/lyric_lifecycle_test.cpp -o bui
 ./build/lyric_lifecycle_test
 g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc -Ivendor tests/component_layout_test.cpp -o build/component_layout_test
 ./build/component_layout_test
+g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc -Ivendor tests/player_session_test.cpp -o build/player_session_test
+./build/player_session_test
