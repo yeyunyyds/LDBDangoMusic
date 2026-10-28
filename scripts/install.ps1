@@ -15,6 +15,14 @@ $candidates = @($path, (Join-Path $target "$legacy/config.json"), (Join-Path $Ga
 $sourceConfig = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
 $settings = if ($sourceConfig) { Get-Content -Raw -Encoding UTF8 $sourceConfig | ConvertFrom-Json } else { $defaults }
 if ($null -eq $settings -or $settings -isnot [pscustomobject]) { throw 'Config must be a JSON object.' }
+# Migrate legacy custom distance before filling the new per-component defaults.
+if ($null -eq $settings.PSObject.Properties['layout']) {
+    $layout = $defaults.layout | ConvertTo-Json -Depth 16 | ConvertFrom-Json
+    if ($null -ne $settings.PSObject.Properties['worldDistance']) {
+        foreach ($position in $layout.lyrics) { $position.distance = $settings.worldDistance }
+    }
+    $settings | Add-Member -NotePropertyName layout -NotePropertyValue $layout
+}
 foreach ($p in $defaults.PSObject.Properties) { if ($null -eq $settings.PSObject.Properties[$p.Name]) { $settings | Add-Member -NotePropertyName $p.Name -NotePropertyValue $p.Value } }
 if ($PSBoundParameters.ContainsKey('OffsetMs')) { $settings | Add-Member -NotePropertyName offsetMs -NotePropertyValue $OffsetMs -Force }
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss-ffff'
@@ -28,4 +36,4 @@ foreach ($old in @((Join-Path $target "$legacy.dll"), (Join-Path $GameRoot "bin/
 }
 Copy-Item $sourceDll $dll -Force
 [IO.File]::WriteAllText($path, ($settings | ConvertTo-Json -Depth 16), [System.Text.UTF8Encoding]::new($false))
-Write-Host 'Installed L4D2DangoMusic 0.6.1; existing settings migrated. Restart game, open the L4N menu.'
+Write-Host 'Installed L4D2DangoMusic 0.7.0; existing settings migrated. Restart game, open the L4N menu.'

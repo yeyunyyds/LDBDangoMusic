@@ -15,24 +15,24 @@ struct PlaybackCursor {
  last=position;return {position,seek};
  }
 };
-struct LyricLease {uint64_t id=0;int index=-1;std::string text;double retired=-1,expires=-1;};
-// One active sentence plus one bounded outgoing sentence. Once retired, an
+struct LyricLease {uint64_t id=0;int index=-1;std::string text;int slot=0;double retired=-1,expires=-1;};
+// One active sentence plus a bounded set of outgoing sentences. Once retired, an
 // instance is never reactivated. A genuine seek clears both before selection.
 struct LyricLifecycle {
  std::vector<LyricLease> entries;std::string key;int current=-1;uint64_t serial=0;
  void reset(){entries.clear();current=-1;key.clear();}
- void update(const std::string& song,int index,const std::string& text,double now,int lingerMs,int fadeMs,bool discontinuity=false){
+ void update(const std::string& song,int index,const std::string& text,double now,int lingerMs,int fadeMs,bool discontinuity=false,int capacity=2){
  if(discontinuity||song!=key){reset();key=song;}
  entries.erase(std::remove_if(entries.begin(),entries.end(),[&](auto& e){return e.expires>=0&&now>=e.expires;}),entries.end());
  if(index==current)return;
- // Drop any older outgoing entry; only the immediately previous active line may linger.
- entries.erase(std::remove_if(entries.begin(),entries.end(),[](auto& e){return e.retired>=0;}),entries.end());
- for(auto& e:entries){e.retired=now;e.expires=now+(std::max(0,lingerMs)+std::max(1,fadeMs))/1000.;}
+ capacity=std::clamp(capacity,1,9);int slot=index<0?0:index%capacity;
+ for(auto& e:entries)if(e.retired<0){e.retired=now;e.expires=now+(std::max(0,lingerMs)+std::max(1,fadeMs))/1000.;}
  current=index;
  if(index<0||text.empty()){entries.clear();return;}
  // Repeated chorus text is a new occurrence, but must not overlap its old copy.
- entries.erase(std::remove_if(entries.begin(),entries.end(),[&](auto& e){return e.index==index||e.text==text;}),entries.end());
- entries.push_back({++serial,index,text,-1,-1});
+ entries.erase(std::remove_if(entries.begin(),entries.end(),[&](auto& e){return e.index==index||e.text==text||e.slot==slot;}),entries.end());
+ while(entries.size()>=size_t(capacity))entries.erase(entries.begin());
+ entries.push_back({++serial,index,text,slot,-1,-1});
  }
 };
 // The application-owned buffer must be restored even on Present failure. The
