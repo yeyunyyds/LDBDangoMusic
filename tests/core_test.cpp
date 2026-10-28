@@ -1,6 +1,7 @@
 #include "core.hpp"
 #include "present_target.hpp"
 #include "presentation.hpp"
+#include "camera_diagnostics.hpp"
 #include <iostream>
 #include <stdexcept>
 void check(bool b){if(!b)throw std::runtime_error("check failed");}
@@ -16,6 +17,11 @@ int main(){using namespace dango;
  auto words=reveal(timed,2000,false);check(words.size()==1&&words[0].text=="你好");
  Line plain{1000,"Hello world 你好","",{}};auto estimated=reveal(plain,5000,false);check(estimated[0].text=="Hello"&&estimated[1].text==" "&&estimated.back().text=="好");
  check(reveal(Line{0,"","",{}},0,true).empty());
+ CameraQueue<3> queue;CameraSample camera;camera.tick=123;camera.view[0]=camera.view[5]=camera.view[10]=camera.view[15]=1;
+ check(identityMatrix(camera.view));check(queue.push(camera)&&queue.push(camera)&&!queue.push(camera)&&queue.dropped==1);CameraSample output;check(queue.pop(output)&&output.tick==123&&queue.pop(output)&&!queue.pop(output));
+ check(queue.push(camera)&&queue.pop(output)&&!queue.pop(output));
+ auto record=cameraJson(camera);check(record["camera_confirmed"]==false&&record["view_identity"]==true&&record["view"].size()==16);
+ camera.view[0]=std::numeric_limits<float>::quiet_NaN();check(!finiteMatrix(camera.view)&&!identityMatrix(camera.view));
  FakeDevice dev;FakeChain primary{{2}},additional{{3}};Surface* target=nullptr;
  check(currentBackBuffer(&dev,&additional,true,0,&target,-1)==0&&target->id==3&&dev.calls==0);
  check(currentBackBuffer(&dev,&primary,false,0,&target,-1)==0&&target->id==2&&dev.calls==0);

@@ -13,26 +13,44 @@
 #include <map>
 #include <cstdio>
 #include <cstddef>
+#include <cstring>
 #include "ldb_host_plugin.h"
 #include "core.hpp"
 #include "present_target.hpp"
 #include "presentation.hpp"
+#include "camera_diagnostics.hpp"
 static_assert(sizeof(LDBHostPluginV1)==96, "Requires updated x64 Host SDK");
 static_assert(sizeof(LDBHostPresentInfoV1)==56, "Requires updated x64 Present SDK");
 namespace {
 using namespace dango;
 int64_t now(){return static_cast<int64_t>(GetTickCount64());}
-struct Config {int port=23330,size=32;bool demo=true,translation=true,alternate=true;float y=.72f;int offset=500;bool outline=true,glow=true;float glowStrength=.18f,opacity=1.f,width=.44f;int transition=380;std::string mode="character";DWORD textColor=0xfff4eaff,accent=0xffb9dfff;};
+struct Config {int port=23330,size=32;bool cameraDiagnostics=false,demo=true,translation=true,alternate=true;float y=.72f;int offset=500;bool outline=true,glow=true;float glowStrength=.18f,opacity=1.f,width=.44f;int transition=380;std::string mode="character";DWORD textColor=0xfff4eaff,accent=0xffb9dfff;};
 Config cfg;std::filesystem::path directory;LDBHostLogFn logger=nullptr;
 std::atomic<bool> stopping{false};std::thread worker;std::mutex sleepMutex;std::condition_variable wake;
 std::shared_ptr<const State> snapshot=std::make_shared<State>();
 bool presentLogged[2]={false,false};uint64_t reportedErrors=0;bool drewPixels=false;
 void note(const std::string& message){if(logger)logger(LDB_HOST_LOG_INFO,message.c_str());}
+CameraQueue<> cameraQueue;uint64_t nextCameraCapture=0;uint32_t deviceGeneration=0;
+void captureCamera(IDirect3DDevice9* device,const LDBHostPresentInfoV1* present){
+ if(!cfg.cameraDiagnostics)return;auto tick=uint64_t(now());if(tick<nextCameraCapture)return;nextCameraCapture=tick+250;
+ CameraSample s;s.tick=tick;s.chain=reinterpret_cast<uintptr_t>(present->swap_chain);s.path=present->is_swapchain_present;s.generation=deviceGeneration;
+ D3DMATRIX view{},projection{};D3DVIEWPORT9 viewport{};
+ s.viewResult=device->GetTransform(D3DTS_VIEW,&view);s.projectionResult=device->GetTransform(D3DTS_PROJECTION,&projection);s.viewportResult=device->GetViewport(&viewport);
+ std::memcpy(s.view.data(),&view,sizeof(view));std::memcpy(s.projection.data(),&projection,sizeof(projection));
+ s.viewport={float(viewport.X),float(viewport.Y),float(viewport.Width),float(viewport.Height),viewport.MinZ,viewport.MaxZ};cameraQueue.push(s);
+}
+struct CameraWriter {
+ std::ofstream file;size_t bytes=0,records=0;bool attempted=false,disabled=false;
+ void drain(){if(!cfg.cameraDiagnostics)return;
+ if(!attempted){attempted=true;try{std::filesystem::create_directories(directory);auto path=directory/("camera-"+std::to_string(GetCurrentProcessId())+"-"+std::to_string(now())+".jsonl");file.open(path,std::ios::out|std::ios::binary|std::ios::app);if(!file)throw std::runtime_error("Cannot open diagnostic file");note("LDBDangoMusic camera diagnostic="+path.u8string()+" sample=4Hz max=2MiB/2400records; matrices unconfirmed");}catch(const std::exception& e){disabled=true;note(std::string("LDBDangoMusic camera diagnostic disabled: ")+e.what());}}
+ CameraSample s;while(cameraQueue.pop(s)){if(disabled)continue;auto json=cameraJson(s);json["dropped_total"]=cameraQueue.dropped.load();auto line=json.dump()+"\n";if(bytes+line.size()>2*1024*1024||records>=2400){disabled=true;note("LDBDangoMusic camera diagnostic reached limit; restart to capture again");continue;}file<<line;if(!file){disabled=true;note("LDBDangoMusic camera diagnostic write failed");continue;}bytes+=line.size();++records;}if(file)file.flush();
+ }
+};
 bool checked(HRESULT hr,unsigned stage,const char* operation){if(SUCCEEDED(hr))return true;auto bit=uint64_t(1)<<stage;if(!(reportedErrors&bit)){reportedErrors|=bit;char msg[256];std::snprintf(msg,sizeof(msg),"LDBDangoMusic render-error operation=%s hr=0x%08lx",operation,static_cast<unsigned long>(hr));if(logger)logger(LDB_HOST_LOG_WARNING,msg);}return false;}
 void publish(State s){std::atomic_store(&snapshot,std::make_shared<const State>(std::move(s)));}
 struct Internet {HINTERNET h; explicit Internet(HINTERNET v):h(v){if(!h)throw std::runtime_error("WinHTTP handle failed");}~Internet(){WinHttpCloseHandle(h);}Internet(const Internet&)=delete;};
 nlohmann::json get(const wchar_t* path,size_t limit){
- Internet session(WinHttpOpen(L"LDBDangoMusic/0.3",WINHTTP_ACCESS_TYPE_NO_PROXY,WINHTTP_NO_PROXY_NAME,WINHTTP_NO_PROXY_BYPASS,0));
+ Internet session(WinHttpOpen(L"LDBDangoMusic/0.3.1",WINHTTP_ACCESS_TYPE_NO_PROXY,WINHTTP_NO_PROXY_NAME,WINHTTP_NO_PROXY_BYPASS,0));
  WinHttpSetTimeouts(session.h,500,500,500,500);
  Internet connection(WinHttpConnect(session.h,L"127.0.0.1",static_cast<INTERNET_PORT>(cfg.port),0));
  Internet request(WinHttpOpenRequest(connection.h,L"GET",path,nullptr,WINHTTP_NO_REFERER,WINHTTP_DEFAULT_ACCEPT_TYPES,0));
@@ -45,8 +63,8 @@ nlohmann::json get(const wchar_t* path,size_t limit){
 }
 constexpr auto statusPath=L"/status?filter=status,name,singer,duration,progress,playbackRate";
 void run() noexcept {
- try {Timeline timeline;std::string key;int64_t retry=0;auto demoStart=now();
- while(!stopping){try{State s;
+ try {CameraWriter cameraWriter;Timeline timeline;std::string key;int64_t retry=0;auto demoStart=now();
+ while(!stopping){cameraWriter.drain();try{State s;
  if(cfg.demo){s.connected=s.playing=true;s.title="Offline demonstration";s.key="demo";s.duration=16000;s.position=(now()-demoStart)%16000;s.sampled=now();s.timeline=parse("[00:01.00]<1000,500>你好 <1500,500>求生之路\n[00:05.00]Left and right floating lyrics\n[00:09.00]暂停、换歌与逐字时间轴\n[00:13.00]LDBDangoMusic");s.message="Offline demo";}
  else {s=status(get(statusPath,65536),now());if(s.key!=key){key=s.key;timeline.clear();retry=0;}
  if(!key.empty()&&timeline.empty()&&now()>=retry){publish(s);retry=now()+5000;auto next=lyrics(get(L"/lyric-all",2*1024*1024));auto verified=status(get(statusPath,65536),now());if(verified.key!=key){key.clear();continue;}s=std::move(verified);timeline=std::move(next);retry=now()+5000;}
@@ -55,6 +73,7 @@ void run() noexcept {
  }catch(const std::exception&){auto old=std::atomic_load(&snapshot);if(now()-old->sampled>3000){State s;s.message="Disconnected: enable BLF / LX local API";publish(std::move(s));}}
  std::unique_lock<std::mutex> lock(sleepMutex);wake.wait_for(lock,std::chrono::milliseconds(cfg.demo?50:150),[]{return stopping.load();});
  }
+ cameraWriter.drain();
  }catch(...){if(logger)logger(LDB_HOST_LOG_ERROR,"Music worker stopped unexpectedly");}
 }
 std::wstring wide(const std::string& s){int n=MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,s.data(),static_cast<int>(s.size()),nullptr,0);if(n<=0)return L"";std::wstring w(n,0);MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,s.data(),static_cast<int>(s.size()),w.data(),n);return w;}
@@ -102,6 +121,7 @@ struct DrawGuard {
 };
 void WINAPI render(IDirect3DDevice9* dev,const LDBHostPresentInfoV1* present){
  if(!dev||!present||present->struct_size!=sizeof(*present))return;
+ captureCamera(dev,present);
  const unsigned path=present->is_swapchain_present?1:0;
  if(!presentLogged[path]){presentLogged[path]=true;note(std::string("LDBDangoMusic first Present path=")+(path?"SwapChain":"Device")+(present->swap_chain?" current-chain=yes":" current-chain=no"));}
  try {if(cache.size()>256)clear();auto state=std::atomic_load(&snapshot);auto position=state->at(now());auto at=position<0?-1:indexAt(state->timeline,lyricPosition(position,cfg.demo?0:cfg.offset));
@@ -121,7 +141,7 @@ void WINAPI render(IDirect3DDevice9* dev,const LDBHostPresentInfoV1* present){
  for(auto stage:{D3DTSS_COLOROP,D3DTSS_ALPHAOP})dev->SetTextureStageState(0,stage,D3DTOP_MODULATE);
  dev->SetTextureStageState(0,D3DTSS_COLORARG1,D3DTA_TEXTURE);dev->SetTextureStageState(0,D3DTSS_COLORARG2,D3DTA_DIFFUSE);dev->SetTextureStageState(0,D3DTSS_ALPHAARG1,D3DTA_TEXTURE);dev->SetTextureStageState(0,D3DTSS_ALPHAARG2,D3DTA_DIFFUSE);dev->SetTextureStageState(0,D3DTSS_TEXCOORDINDEX,0);dev->SetTextureStageState(0,D3DTSS_TEXTURETRANSFORMFLAGS,D3DTTFF_DISABLE);dev->SetTextureStageState(1,D3DTSS_COLOROP,D3DTOP_DISABLE);dev->SetTextureStageState(1,D3DTSS_ALPHAOP,D3DTOP_DISABLE);
  dev->SetSamplerState(0,D3DSAMP_MINFILTER,D3DTEXF_LINEAR);dev->SetSamplerState(0,D3DSAMP_MAGFILTER,D3DTEXF_LINEAR);dev->SetSamplerState(0,D3DSAMP_ADDRESSU,D3DTADDRESS_CLAMP);dev->SetSamplerState(0,D3DSAMP_ADDRESSV,D3DTADDRESS_CLAMP);dev->SetSamplerState(0,D3DSAMP_SRGBTEXTURE,FALSE);
- if(cfg.demo){auto banner=image(dev,"LDBDangoMusic 0.3.0 DEMO - "+std::string(path?"SwapChain":"Device"));draw(dev,banner,16,16,std::min(1.f,desc.Width*.9f/std::max(banner.width,1)),1.f);}
+ if(cfg.demo){auto banner=image(dev,"LDBDangoMusic 0.3.1 DEMO - "+std::string(path?"SwapChain":"Device"));draw(dev,banner,16,16,std::min(1.f,desc.Width*.9f/std::max(banner.width,1)),1.f);}
  if(at>=0){auto song=lyricPosition(position,cfg.demo?0:cfg.offset);auto age=song-state->timeline[at].start;
  if(at>0&&age>=0&&age<cfg.transition){float fade=outgoingAlpha(age,cfg.transition);lineFrame(dev,state->timeline,at-1,song,float(desc.Width),float(desc.Height),fade,14.f*(1-fade),true);}
  lineFrame(dev,state->timeline,at,song,float(desc.Width),float(desc.Height));
@@ -132,16 +152,16 @@ void WINAPI render(IDirect3DDevice9* dev,const LDBHostPresentInfoV1* present){
  }catch(...){if(logger)logger(LDB_HOST_LOG_ERROR,"Lyric render failed");}
 }
 BOOL WINAPI load(const LDBHostApiV1* host){try{if(!host||host->struct_size<sizeof(*host)||host->abi_version!=1||host->host_bits!=64)return FALSE;logger=host->log;directory=std::filesystem::path(host->host_directory)/L"plugins"/L"LDBDangoMusic";auto path=directory/L"config.json";
- if(std::filesystem::exists(path)){std::ifstream f(path);auto j=nlohmann::json::parse(f);cfg.port=std::clamp(j.value("port",23330),1,65535);cfg.size=std::clamp(j.value("fontSize",32),12,96);cfg.demo=j.value("demo",true);cfg.translation=j.value("translation",true);cfg.alternate=j.value("alternate",true);cfg.y=std::clamp(j.value("verticalPosition",.72f),.1f,.85f);cfg.offset=std::clamp(j.value("offsetMs",500),-10000,10000);
+ if(std::filesystem::exists(path)){std::ifstream f(path);auto j=nlohmann::json::parse(f);cfg.cameraDiagnostics=j.value("cameraDiagnostics",false);cfg.port=std::clamp(j.value("port",23330),1,65535);cfg.size=std::clamp(j.value("fontSize",32),12,96);cfg.demo=j.value("demo",true);cfg.translation=j.value("translation",true);cfg.alternate=j.value("alternate",true);cfg.y=std::clamp(j.value("verticalPosition",.72f),.1f,.85f);cfg.offset=std::clamp(j.value("offsetMs",500),-10000,10000);
  cfg.outline=j.value("outline",true);cfg.glow=j.value("glow",true);cfg.glowStrength=std::clamp(j.value("glowStrength",.18f),0.f,.5f);cfg.opacity=std::clamp(j.value("opacity",1.f),.1f,1.f);cfg.width=std::clamp(j.value("maxWidth",.44f),.2f,.9f);cfg.transition=std::clamp(j.value("transitionMs",380),0,1000);cfg.mode=j.value("displayMode",std::string("character"));if(cfg.mode!="character"&&cfg.mode!="word"&&cfg.mode!="line")throw std::runtime_error("displayMode must be character/word/line");
  auto color=[&](const char* name,DWORD fallback){auto value=j.value(name,std::string{});if(value.empty())return fallback;if(value.size()!=7||value[0]!='#'||value.find_first_not_of("0123456789abcdefABCDEF",1)!=std::string::npos)throw std::runtime_error("Color must be #RRGGBB");return DWORD(std::stoul(value.substr(1),nullptr,16));};cfg.textColor=color("textColor",cfg.textColor);cfg.accent=color("accentColor",cfg.accent);}
- note("LDBDangoMusic 0.3.0 config="+path.u8string()+" mode="+(cfg.demo?"DEMO":"BLF/LX")+" port="+std::to_string(cfg.port)+" offsetMs="+std::to_string(cfg.offset)+" displayMode="+cfg.mode);
+ note("LDBDangoMusic 0.3.1 config="+path.u8string()+" mode="+(cfg.demo?"DEMO":"BLF/LX")+" port="+std::to_string(cfg.port)+" offsetMs="+std::to_string(cfg.offset)+" displayMode="+cfg.mode);
  stopping=false;worker=std::thread(run);return TRUE;}catch(const std::exception& e){if(logger)logger(LDB_HOST_LOG_ERROR,e.what());return FALSE;}catch(...){return FALSE;}}
-void WINAPI created(IDirect3DDevice9*){clear();reportedErrors=0;drewPixels=false;note("LDBDangoMusic device lifecycle: created/destroyed; textures cleared");}
+void WINAPI created(IDirect3DDevice9*){++deviceGeneration;clear();reportedErrors=0;drewPixels=false;note("LDBDangoMusic device lifecycle: created/destroyed; textures cleared");}
 void WINAPI swapCreated(IDirect3DSwapChain9*){note("LDBDangoMusic SwapChain created (borrowed)");}
 void WINAPI swapDestroyed(IDirect3DSwapChain9*){note("LDBDangoMusic SwapChain destroyed (no retained references)");}
 void WINAPI beforeReset(IDirect3DDevice9*,const D3DPRESENT_PARAMETERS*,BOOL){clear();}
-void WINAPI afterReset(IDirect3DDevice9*,HRESULT hr,BOOL){reportedErrors=0;checked(hr,5,"Reset");note("LDBDangoMusic Reset completed; textures will rebuild");}
+void WINAPI afterReset(IDirect3DDevice9*,HRESULT hr,BOOL){++deviceGeneration;reportedErrors=0;checked(hr,5,"Reset");note("LDBDangoMusic Reset completed; textures will rebuild");}
 void WINAPI shutdown(){stopping=true;wake.notify_all();if(worker.joinable())worker.join();clear();}
 }
-extern "C" __declspec(dllexport) BOOL WINAPI LDBHostPluginQuery(uint32_t abi,LDBHostPluginV1* out){if(abi!=1||!out||out->struct_size!=sizeof(*out))return FALSE;*out={sizeof(*out),1,"LDBDangoMusic","0.3.0",load,created,swapCreated,render,beforeReset,afterReset,swapDestroyed,created,shutdown};return TRUE;}
+extern "C" __declspec(dllexport) BOOL WINAPI LDBHostPluginQuery(uint32_t abi,LDBHostPluginV1* out){if(abi!=1||!out||out->struct_size!=sizeof(*out))return FALSE;*out={sizeof(*out),1,"LDBDangoMusic","0.3.1",load,created,swapCreated,render,beforeReset,afterReset,swapDestroyed,created,shutdown};return TRUE;}

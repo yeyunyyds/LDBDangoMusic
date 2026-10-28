@@ -14,5 +14,6 @@
   "transitionMs": 380,
   "displayMode": "character",
   "textColor": "#F4EAFF",
-  "accentColor": "#B9DFFF"
+  "accentColor": "#B9DFFF",
+  "cameraDiagnostics": false
 }

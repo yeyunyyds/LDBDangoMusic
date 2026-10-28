@@ -55,3 +55,11 @@ MSVC /MD 产物需要 Visual C++ x64 运行库；ZIP 中 MinGW 静态运行库�
 0.2.0 的接口排错记录保留在 [旧版验证说明](docs/0.2.0-validation.md)。
 
 源码 GPL-3.0，来源与独立依赖许可见 NOTICE.md。
+
+## 0.3.1 相机诊断增量
+
+最新测试包为 `releases/LDBDangoMusic-0.3.1-diagnostics.zip`，保留上述歌词效果。
+默认不启用诊断。实际配置添加 `cameraDiagnostics: true` 后完整重启；
+也可使用包内 `config.camera-demo.json` 测试离线演示并记录矩阵。
+操作步骤、日志位置和判断边界见 [相机诊断](docs/camera-diagnostics.md)。
+本版仅验证 Present 时的固定功能矩阵，不宣称已支持世界歌词。

@@ -4,7 +4,7 @@ $testRoot = Join-Path ([IO.Path]::GetTempPath()) ('ldbdango-' + [guid]::NewGuid(
 New-Item -ItemType Directory -Force (Join-Path $testRoot 'build'), (Join-Path $testRoot 'plugins/LDBDangoMusic') | Out-Null
 try {
     Copy-Item (Join-Path $repo 'build/LDBDangoMusic.dll') (Join-Path $testRoot 'build')
-    '{"demo":true}' | Set-Content -Encoding ASCII (Join-Path $testRoot 'plugins/LDBDangoMusic/config.json')
+    '{"demo":true,"cameraDiagnostics":true}' | Set-Content -Encoding ASCII (Join-Path $testRoot 'plugins/LDBDangoMusic/config.json')
     Push-Location $testRoot
     try {
         & (Join-Path $repo 'build/host_smoke.exe')

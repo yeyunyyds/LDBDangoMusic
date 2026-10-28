@@ -5,13 +5,13 @@ from pathlib import Path
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = '0.3.0'
+VERSION = '0.3.1'
 files = {}
 for folder in ('src', 'tests', 'scripts', 'vendor', 'docs'):
     for path in (ROOT / folder).rglob('*'):
         if path.is_file() and '__pycache__' not in path.parts:
             files['source/' + path.relative_to(ROOT).as_posix()] = path
-for name in ('README.md', 'NOTICE.md', 'LICENSE', 'config.example.json', 'config.demo.json', '.gitignore'):
+for name in ('README.md', 'NOTICE.md', 'LICENSE', 'config.example.json', 'config.demo.json', 'config.camera-demo.json', '.gitignore'):
     files['source/' + name] = ROOT / name
 for name in ('LDBDangoMusic.dll', 'host_smoke.exe', 'core_test.exe'):
     path = ROOT / 'build' / name
@@ -23,11 +23,13 @@ files['bin/.l4d2bridge/plugins/LDBDangoMusic/config.json'] = ROOT / 'config.exam
 files['README.md'] = ROOT / 'README.md'
 files['docs/0.3.0-visuals.md'] = ROOT / 'docs/0.3.0-visuals.md'
 files['config.demo.json'] = ROOT / 'config.demo.json'
+files['config.camera-demo.json'] = ROOT / 'config.camera-demo.json'
+files['docs/camera-diagnostics.md'] = ROOT / 'docs/camera-diagnostics.md'
 files['LICENSE'] = ROOT / 'LICENSE'
 files['NOTICE.md'] = ROOT / 'NOTICE.md'
 if json.loads((ROOT / 'config.example.json').read_text())['offsetMs'] != 500:
     raise RuntimeError('Visual package must include 500ms compensation')
-output = ROOT / 'releases' / f'LDBDangoMusic-{VERSION}-visual.zip'
+output = ROOT / 'releases' / f'LDBDangoMusic-{VERSION}-diagnostics.zip'
 output.parent.mkdir(exist_ok=True)
 manifest = {name: hashlib.sha256(path.read_bytes()).hexdigest() for name, path in files.items()}
 with zipfile.ZipFile(output, 'w', zipfile.ZIP_DEFLATED) as archive:

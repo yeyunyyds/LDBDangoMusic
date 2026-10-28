@@ -5,6 +5,8 @@
 #include <filesystem>
 #include <iostream>
 #include <cstring>
+#include <fstream>
+#include "json.hpp"
 #include "ldb_host_plugin.h"
 void require(bool ok,const char* message){if(!ok){std::cerr<<message<<'\n';ExitProcess(1);}}
 void WINAPI logMessage(LDBHostLogLevel,const char* message){std::cout<<message<<'\n';}
@@ -25,6 +27,7 @@ void frame(LDBHostPluginV1& plugin,IDirect3DDevice9* device,IDirect3DSwapChain9*
  D3DCAPS9 caps{};device->GetDeviceCaps(&caps);IDirect3DSurface9* secondary=nullptr;
  if(caps.NumSimultaneousRTs>1){require(SUCCEEDED(device->CreateRenderTarget(256,128,D3DFMT_X8R8G8B8,D3DMULTISAMPLE_NONE,0,FALSE,&secondary,nullptr)),"MRT allocation failed");device->ColorFill(secondary,nullptr,0xff000000);device->SetRenderTarget(1,secondary);}
  device->SetRenderTarget(0,original);D3DVIEWPORT9 vp{4,5,128,64,0,1};device->SetViewport(&vp);device->SetRenderState(D3DRS_ALPHABLENDENABLE,FALSE);
+ D3DMATRIX view{};view._11=view._22=view._33=view._44=1;view._41=-10;view._42=-20;view._43=-30;device->SetTransform(D3DTS_VIEW,&view);
  LDBHostPresentInfoV1 present{};present.struct_size=sizeof(present);present.is_swapchain_present=swapPath;present.swap_chain=supplyChain?chain:nullptr;
  plugin.on_before_present(device,&present);
  IDirect3DSurface9* restored=nullptr;device->GetRenderTarget(0,&restored);require(restored==original,"Render target leaked");restored->Release();
@@ -53,6 +56,11 @@ int main(){
  D3DPRESENT_PARAMETERS extra=params;extra.BackBufferWidth=640;extra.BackBufferHeight=360;IDirect3DSwapChain9* additional=nullptr;require(SUCCEEDED(device->CreateAdditionalSwapChain(&extra,&additional)),"Additional chain creation failed");plugin.on_swapchain_created(additional);frame(plugin,device,additional,true);plugin.on_swapchain_destroyed(additional);additional->Release();
  IDirect3DSurface9* mainBack=nullptr;primary->GetBackBuffer(0,D3DBACKBUFFER_TYPE_MONO,&mainBack);device->SetRenderTarget(0,mainBack);mainBack->Release();plugin.on_swapchain_destroyed(primary);primary->Release();
  plugin.on_before_reset(device,&params,FALSE);auto hr=device->Reset(&params);plugin.on_after_reset(device,hr,FALSE);require(SUCCEEDED(hr),"Reset failed");require(SUCCEEDED(device->GetSwapChain(0,&primary)),"Post-reset chain missing");plugin.on_swapchain_created(primary);frame(plugin,device,primary,true);plugin.on_swapchain_destroyed(primary);primary->Release();
- plugin.on_device_destroyed(device);device->Release();d3d->Release();plugin.on_shutdown();FreeLibrary(module);DestroyWindow(window);
+ plugin.on_device_destroyed(device);device->Release();d3d->Release();plugin.on_shutdown();
+ auto settingsPath=root/L"plugins"/L"LDBDangoMusic"/L"config.json";std::ifstream settingsFile(settingsPath);
+ if(settingsFile&&nlohmann::json::parse(settingsFile).value("cameraDiagnostics",false)){
+ bool captured=false;for(const auto& entry:std::filesystem::directory_iterator(settingsPath.parent_path())){if(entry.path().extension()!=L".jsonl")continue;std::ifstream file(entry.path());std::string line;while(std::getline(file,line)){auto sample=nlohmann::json::parse(line);if(sample["view"][12]==-10&&sample["view"][13]==-20&&sample["viewport"][2]==128)captured=true;require(sample["camera_confirmed"]==false,"Diagnostic incorrectly confirmed camera");}}
+ require(captured,"No pre-overlay matrix/viewport diagnostic captured");}
+ FreeLibrary(module);DestroyWindow(window);
  std::cout<<"Passed: ABI layout, Device/SwapChain/additional-chain pixels, missing-chain rejection, RT/viewport/blend restoration, Reset redraw, shutdown\n";
 }

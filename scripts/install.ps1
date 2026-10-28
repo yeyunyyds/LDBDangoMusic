@@ -31,4 +31,4 @@ if (Test-Path $targetDll) { Copy-Item $targetDll ($targetDll + '.' + $stamp + '.
 # A locked DLL causes a terminating error; exit the game and Host before installation.
 Copy-Item $sourceDll $targetDll -Force
 [IO.File]::WriteAllText($path, ($settings | ConvertTo-Json -Depth 16), [System.Text.UTF8Encoding]::new($false))
-Write-Host "Installed 0.3.0, preserved existing config; offsetMs=$OffsetMs. Restart game and Host."
+Write-Host "Installed 0.3.1, preserved existing config; offsetMs=$OffsetMs. Restart game and Host."
