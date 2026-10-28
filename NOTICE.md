@@ -25,3 +25,11 @@ Its full copyright and license text are embedded in the header.
 client.dll / engine.dll. The verified profile in vendor/source-binary-profile.json
 supersedes the old public-SDK slot inventory for runtime binding. Uploaded game
 DLLs are not bundled or committed; only hashes and interface metadata are saved.
+
+0.5.0 Peak-inspired visuals:
+Native C++ adaptations of LyricAnimation, LyricLineView rules, layout and
+placement from ZHIZHU4410/PeakDangoMusic c9fe555b53f7d3cea85bfdcb92476a1ed6853ad0,
+GPL-3.0, are in src/peak_style.hpp. Animation math, deterministic wiggle, timing
+and lifecycle are adapted for the existing D3D9 renderer. No Unity/TMP engine,
+shader, material, font, game, or music resources are included. Cached alpha blur
+is a native approximation; see docs/peak-style.md for differences.

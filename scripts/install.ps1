@@ -15,6 +15,10 @@ $sourceConfig = if (Test-Path $path) { $path } elseif (Test-Path $oldConfig) { $
 $settings = if ($sourceConfig) { Get-Content -Raw $sourceConfig | ConvertFrom-Json } else { $defaults }
 if ($null -eq $settings -or $settings -isnot [pscustomobject]) { throw 'Config must be a JSON object.' }
 foreach ($p in $defaults.PSObject.Properties) { if ($null -eq $settings.PSObject.Properties[$p.Name]) { $settings | Add-Member -NotePropertyName $p.Name -NotePropertyValue $p.Value } }
+# Apply the requested Peak-inspired visual preset, preserving player/offset/world mode.
+foreach ($name in @('translation','outline','glow','glowStrength','glowRadius','opacity','displayMode','textColor','accentColor','pop','wiggle','wiggleFrequency','wiggleAmount','spreadDegrees','keepAway','debugOverlay','worldTestAnchor','transitionMs','verticalPosition','maxWidth')) {
+    $settings | Add-Member -NotePropertyName $name -NotePropertyValue $defaults.$name -Force
+}
 $settings | Add-Member -NotePropertyName offsetMs -NotePropertyValue $OffsetMs -Force
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss-ffff'
 New-Item -ItemType Directory -Force $settingsDir | Out-Null
@@ -26,4 +30,4 @@ $oldDll = Join-Path $oldRoot 'LDBDangoMusic.dll'
 if (Test-Path $oldDll) { Move-Item $oldDll ($oldDll + '.' + $stamp + '.disabled') }
 Copy-Item $sourceDll $dll -Force
 [IO.File]::WriteAllText($path, ($settings | ConvertTo-Json -Depth 16), [System.Text.UTF8Encoding]::new($false))
-Write-Host 'Installed pure x86 L4N 0.4.3, migrated settings; legacy Host DLL disabled. Fully restart game.'
+Write-Host 'Installed pure x86 L4N 0.5.0, migrated settings; legacy Host DLL disabled. Fully restart game.'

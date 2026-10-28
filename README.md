@@ -1,9 +1,9 @@
-# L4N LyricsPlugin 0.4.3 — 纯 x86 L4N 架构
+# L4N LyricsPlugin 0.5.0 — 纯 x86 L4N 架构
 
 Source Engine 相机、LX API、动画、world-to-screen 和 D3D9 绘制均在单个 L4N 插件中。
 绘制经 LDB Client 正常转发至 Host → DXVK，不需要歌词 Host DLL 或共享内存。
 
-下载包：`releases/LDBDangoMusic-0.4.3-l4n.zip`。
+下载包：`releases/LDBDangoMusic-0.5.0-l4n.zip`。
 
 **旧安装目录已改变。** 退出游戏，将旧 Host 歌词 DLL 改名停用，新 DLL 放入 `bin/neko/plugins/`。
 配置在 `bin/neko/plugins/LDBDangoMusic/config.json`。包内默认 LX 模式、提前 500ms、实验世界歌词开启；离线测试用 config.world-demo.json。
@@ -42,3 +42,8 @@ MinGW 32 位 POSIX：`bash scripts/build-mingw.sh`，可用 DANGO_CXX 指定 i68
 本版打印各项构建值和方法入口，并在已核对的游戏构建上支持现有 L4N/其他插件回调串接。
 构建不匹配或不可执行的入口继续拒绝启用相机。
 升级只需退出后替换 L4N DLL，保留配置。详见 [校验与回调链](docs/0.4.3-callback-chain.md)。
+
+## 0.5.0 Peak 风格
+
+按词弹出、8Hz 轻微抖动、暖白字色、三行布局、400ms 退场上浮和缓存柔光，默认隐藏诊断字样。
+仍为纯 x86 L4N / D3D9，没有 Unity/TMP 依赖。完整预设迁移和实际差异见 [Peak 风格说明](docs/peak-style.md)。
