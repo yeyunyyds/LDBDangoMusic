@@ -1,0 +1,4 @@
+LIBRARY LDBDangoMusic
+EXPORTS
+    GetL4NPluginInstance
+    L4NLyricsShutdown

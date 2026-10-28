@@ -15,5 +15,10 @@
   "displayMode": "character",
   "textColor": "#F4EAFF",
   "accentColor": "#B9DFFF",
-  "cameraDiagnostics": false
+  "cameraDiagnostics": false,
+  "worldLyrics": true,
+  "worldTestAnchor": true,
+  "worldDistance": 200,
+  "worldSide": 75,
+  "worldHeight": 8
 }

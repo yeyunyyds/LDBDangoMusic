@@ -3,33 +3,40 @@ import hashlib
 import json
 from pathlib import Path
 import zipfile
+import struct
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = '0.3.1'
+VERSION = '0.4.0'
 files = {}
 for folder in ('src', 'tests', 'scripts', 'vendor', 'docs'):
     for path in (ROOT / folder).rglob('*'):
         if path.is_file() and '__pycache__' not in path.parts:
             files['source/' + path.relative_to(ROOT).as_posix()] = path
-for name in ('README.md', 'NOTICE.md', 'LICENSE', 'config.example.json', 'config.demo.json', 'config.camera-demo.json', '.gitignore'):
+for name in ('README.md', 'NOTICE.md', 'LICENSE', 'config.example.json', 'config.demo.json', 'config.camera-demo.json', 'config.world-demo.json', '.gitignore'):
     files['source/' + name] = ROOT / name
-for name in ('LDBDangoMusic.dll', 'host_smoke.exe', 'core_test.exe'):
+for name in ('LDBDangoMusic.dll', 'l4n_smoke.exe', 'core_test.exe'):
     path = ROOT / 'build' / name
-    if path.read_bytes()[:2] != b'MZ':
+    blob=path.read_bytes()
+    if blob[:2] != b'MZ':
         raise RuntimeError(f'Not a Windows artifact: {name}')
+    pe=struct.unpack_from('<I',blob,0x3c)[0]
+    if struct.unpack_from('<H',blob,pe+4)[0] != 0x14c:
+        raise RuntimeError(f'Pure L4N artifacts must be x86: {name}')
     files['source/build/' + name] = path
-files['bin/.l4d2bridge/plugins/LDBDangoMusic.dll'] = ROOT / 'build/LDBDangoMusic.dll'
-files['bin/.l4d2bridge/plugins/LDBDangoMusic/config.json'] = ROOT / 'config.example.json'
+files['bin/neko/plugins/LDBDangoMusic.dll'] = ROOT / 'build/LDBDangoMusic.dll'
+files['bin/neko/plugins/LDBDangoMusic/config.json'] = ROOT / 'config.example.json'
 files['README.md'] = ROOT / 'README.md'
 files['docs/0.3.0-visuals.md'] = ROOT / 'docs/0.3.0-visuals.md'
 files['config.demo.json'] = ROOT / 'config.demo.json'
 files['config.camera-demo.json'] = ROOT / 'config.camera-demo.json'
+files['config.world-demo.json'] = ROOT / 'config.world-demo.json'
+files['docs/l4n-world-lyrics.md'] = ROOT / 'docs/l4n-world-lyrics.md'
 files['docs/camera-diagnostics.md'] = ROOT / 'docs/camera-diagnostics.md'
 files['LICENSE'] = ROOT / 'LICENSE'
 files['NOTICE.md'] = ROOT / 'NOTICE.md'
 if json.loads((ROOT / 'config.example.json').read_text())['offsetMs'] != 500:
     raise RuntimeError('Visual package must include 500ms compensation')
-output = ROOT / 'releases' / f'LDBDangoMusic-{VERSION}-diagnostics.zip'
+output = ROOT / 'releases' / f'LDBDangoMusic-{VERSION}-l4n.zip'
 output.parent.mkdir(exist_ok=True)
 manifest = {name: hashlib.sha256(path.read_bytes()).hexdigest() for name, path in files.items()}
 with zipfile.ZipFile(output, 'w', zipfile.ZIP_DEFLATED) as archive:

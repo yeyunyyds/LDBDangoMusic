@@ -1,12 +1,12 @@
 $ErrorActionPreference = 'Stop'
 Set-Location (Join-Path $PSScriptRoot '..')
 New-Item -ItemType Directory -Force build | Out-Null
-# Run from an x64 Native Tools Command Prompt / initialized MSVC PowerShell.
-& cl.exe /nologo /std:c++17 /EHsc /utf-8 /W4 /O2 /MD /LD /Isrc /Ivendor src/plugin.cpp /Fobuild/plugin.obj /link /OUT:build/LDBDangoMusic.dll winhttp.lib d3d9.lib gdi32.lib user32.lib
-if ($LASTEXITCODE -ne 0) { throw 'Plugin build failed' }
+# Run from an x86 Native Tools / MSVC developer PowerShell.
+& cl.exe /nologo /std:c++17 /EHsc /utf-8 /W4 /O2 /MD /LD /Isrc /Ivendor src/plugin.cpp /Fobuild/plugin.obj /link /DEF:src/LDBDangoMusic.def /OUT:build/LDBDangoMusic.dll winhttp.lib d3d9.lib gdi32.lib user32.lib dxguid.lib
+if ($LASTEXITCODE -ne 0) { throw 'x86 L4N plugin build failed' }
 & cl.exe /nologo /std:c++17 /EHsc /utf-8 /W4 /Isrc /Ivendor tests/core_test.cpp /Fobuild/core_test.obj /Febuild/core_test.exe
-if ($LASTEXITCODE -ne 0) { throw 'Test build failed' }
+if ($LASTEXITCODE -ne 0) { throw 'Core build failed' }
 & ./build/core_test.exe
 if ($LASTEXITCODE -ne 0) { throw 'Core tests failed' }
-& cl.exe /nologo /std:c++17 /EHsc /utf-8 /W4 /Ivendor tests/host_smoke.cpp /Fobuild/host_smoke.obj /Febuild/host_smoke.exe /link d3d9.lib user32.lib
-if ($LASTEXITCODE -ne 0) { throw 'Smoke harness build failed' }
+& cl.exe /nologo /std:c++17 /EHsc /utf-8 /W4 /Ivendor tests/l4n_smoke.cpp /Fobuild/l4n_smoke.obj /Febuild/l4n_smoke.exe /link d3d9.lib user32.lib
+if ($LASTEXITCODE -ne 0) { throw 'L4N smoke build failed' }

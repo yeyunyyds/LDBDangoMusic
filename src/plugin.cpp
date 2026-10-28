@@ -14,24 +14,36 @@
 #include <cstdio>
 #include <cstddef>
 #include <cstring>
-#include "ldb_host_plugin.h"
+#include "l4n/l4n_plugin.h"
 #include "core.hpp"
 #include "present_target.hpp"
 #include "presentation.hpp"
 #include "camera_diagnostics.hpp"
-static_assert(sizeof(LDBHostPluginV1)==96, "Requires updated x64 Host SDK");
-static_assert(sizeof(LDBHostPresentInfoV1)==56, "Requires updated x64 Present SDK");
+#include "source_camera.hpp"
+static_assert(sizeof(void*)==4,"Pure L4N plugin must be x86");
+struct PresentInfo {bool is_swapchain_present=false;IDirect3DSwapChain9* swap_chain=nullptr;};
 namespace {
 using namespace dango;
 int64_t now(){return static_cast<int64_t>(GetTickCount64());}
-struct Config {int port=23330,size=32;bool cameraDiagnostics=false,demo=true,translation=true,alternate=true;float y=.72f;int offset=500;bool outline=true,glow=true;float glowStrength=.18f,opacity=1.f,width=.44f;int transition=380;std::string mode="character";DWORD textColor=0xfff4eaff,accent=0xffb9dfff;};
-Config cfg;std::filesystem::path directory;LDBHostLogFn logger=nullptr;
+struct Config {int port=23330,size=32;bool worldLyrics=false,worldTestAnchor=true;float worldDistance=200,worldSide=75,worldHeight=8;bool cameraDiagnostics=false,demo=true,translation=true,alternate=true;float y=.72f;int offset=500;bool outline=true,glow=true;float glowStrength=.18f,opacity=1.f,width=.44f;int transition=380;std::string mode="character";DWORD textColor=0xfff4eaff,accent=0xffb9dfff;};
+Config cfg;std::filesystem::path directory;using LogFn=void(*)(int,const char*);LogFn logger=nullptr;
+constexpr int LDB_HOST_LOG_INFO=0,LDB_HOST_LOG_WARNING=1,LDB_HOST_LOG_ERROR=2;
 std::atomic<bool> stopping{false};std::thread worker;std::mutex sleepMutex;std::condition_variable wake;
 std::shared_ptr<const State> snapshot=std::make_shared<State>();
 bool presentLogged[2]={false,false};uint64_t reportedErrors=0;bool drewPixels=false;
 void note(const std::string& message){if(logger)logger(LDB_HOST_LOG_INFO,message.c_str());}
+struct WorldAnchors {
+ std::string key;uint32_t epoch=0;bool ready=false;int currentIndex=-1,previousIndex=-1;Vec3 current{},previous{},test{},lastEye{};
+ void reset(){ready=false;currentIndex=previousIndex=-1;key.clear();}
+ void update(const GameCameraFrame& frame,const CameraPose& pose,const std::string& song,int at){
+ if(!ready||epoch!=frame.epoch||key!=song||length(pose.eye-lastEye)>1024){reset();ready=true;epoch=frame.epoch;key=song;test=anchorAt(pose,cfg.worldDistance,0,18);}
+ lastEye=pose.eye;
+ if(at>=0&&currentIndex!=at){previous=current;previousIndex=currentIndex;current=anchorAt(pose,cfg.worldDistance,cfg.alternate?(at%2?cfg.worldSide:-cfg.worldSide):0,0);currentIndex=at;}
+ }
+};
+WorldAnchors anchors;
 CameraQueue<> cameraQueue;uint64_t nextCameraCapture=0;uint32_t deviceGeneration=0;
-void captureCamera(IDirect3DDevice9* device,const LDBHostPresentInfoV1* present){
+void captureCamera(IDirect3DDevice9* device,const PresentInfo* present){
  if(!cfg.cameraDiagnostics)return;auto tick=uint64_t(now());if(tick<nextCameraCapture)return;nextCameraCapture=tick+250;
  CameraSample s;s.tick=tick;s.chain=reinterpret_cast<uintptr_t>(present->swap_chain);s.path=present->is_swapchain_present;s.generation=deviceGeneration;
  D3DMATRIX view{},projection{};D3DVIEWPORT9 viewport{};
@@ -43,14 +55,14 @@ struct CameraWriter {
  std::ofstream file;size_t bytes=0,records=0;bool attempted=false,disabled=false;
  void drain(){if(!cfg.cameraDiagnostics)return;
  if(!attempted){attempted=true;try{std::filesystem::create_directories(directory);auto path=directory/("camera-"+std::to_string(GetCurrentProcessId())+"-"+std::to_string(now())+".jsonl");file.open(path,std::ios::out|std::ios::binary|std::ios::app);if(!file)throw std::runtime_error("Cannot open diagnostic file");note("LDBDangoMusic camera diagnostic="+path.u8string()+" sample=4Hz max=2MiB/2400records; matrices unconfirmed");}catch(const std::exception& e){disabled=true;note(std::string("LDBDangoMusic camera diagnostic disabled: ")+e.what());}}
- CameraSample s;while(cameraQueue.pop(s)){if(disabled)continue;auto json=cameraJson(s);json["dropped_total"]=cameraQueue.dropped.load();auto line=json.dump()+"\n";if(bytes+line.size()>2*1024*1024||records>=2400){disabled=true;note("LDBDangoMusic camera diagnostic reached limit; restart to capture again");continue;}file<<line;if(!file){disabled=true;note("LDBDangoMusic camera diagnostic write failed");continue;}bytes+=line.size();++records;}if(file)file.flush();
+ CameraSample s;while(cameraQueue.pop(s)){if(disabled)continue;auto json=cameraJson(s);json["dropped_total"]=cameraQueue.dropped.load();auto camera=std::atomic_load(&source_camera::snapshot);json["source_camera"]={{"active",camera->active},{"tick_ms",camera->tick},{"epoch",camera->epoch},{"world_to_view",camera->worldToView},{"world_to_clip",camera->worldToClip},{"width",camera->width},{"height",camera->height}};auto line=json.dump()+"\n";if(bytes+line.size()>2*1024*1024||records>=2400){disabled=true;note("LDBDangoMusic camera diagnostic reached limit; restart to capture again");continue;}file<<line;if(!file){disabled=true;note("LDBDangoMusic camera diagnostic write failed");continue;}bytes+=line.size();++records;}if(file)file.flush();
  }
 };
 bool checked(HRESULT hr,unsigned stage,const char* operation){if(SUCCEEDED(hr))return true;auto bit=uint64_t(1)<<stage;if(!(reportedErrors&bit)){reportedErrors|=bit;char msg[256];std::snprintf(msg,sizeof(msg),"LDBDangoMusic render-error operation=%s hr=0x%08lx",operation,static_cast<unsigned long>(hr));if(logger)logger(LDB_HOST_LOG_WARNING,msg);}return false;}
 void publish(State s){std::atomic_store(&snapshot,std::make_shared<const State>(std::move(s)));}
 struct Internet {HINTERNET h; explicit Internet(HINTERNET v):h(v){if(!h)throw std::runtime_error("WinHTTP handle failed");}~Internet(){WinHttpCloseHandle(h);}Internet(const Internet&)=delete;};
 nlohmann::json get(const wchar_t* path,size_t limit){
- Internet session(WinHttpOpen(L"LDBDangoMusic/0.3.1",WINHTTP_ACCESS_TYPE_NO_PROXY,WINHTTP_NO_PROXY_NAME,WINHTTP_NO_PROXY_BYPASS,0));
+ Internet session(WinHttpOpen(L"LDBDangoMusic/0.4.0",WINHTTP_ACCESS_TYPE_NO_PROXY,WINHTTP_NO_PROXY_NAME,WINHTTP_NO_PROXY_BYPASS,0));
  WinHttpSetTimeouts(session.h,500,500,500,500);
  Internet connection(WinHttpConnect(session.h,L"127.0.0.1",static_cast<INTERNET_PORT>(cfg.port),0));
  Internet request(WinHttpOpenRequest(connection.h,L"GET",path,nullptr,WINHTTP_NO_REFERER,WINHTTP_DEFAULT_ACCEPT_TYPES,0));
@@ -100,17 +112,17 @@ void styled(IDirect3DDevice9* dev,Image im,float x,float y,float scale,float alp
  if(cfg.outline){for(auto dx:{-1.f,1.f})for(auto dy:{-1.f,1.f})draw(dev,im,x+dx*scale,y+dy*scale,scale,alpha*.8f,0x101018);}
  draw(dev,im,x,y,scale,alpha,color);
 }
-void lineFrame(IDirect3DDevice9* dev,const Timeline& timeline,int at,int64_t song,float width,float height,float externalAlpha=1,float outgoingLift=0,bool completed=false){
+void lineFrame(IDirect3DDevice9* dev,const Timeline& timeline,int at,int64_t song,float width,float height,float externalAlpha=1,float outgoingLift=0,bool completed=false,const Placement* place=nullptr){
  const auto& line=timeline[at];int64_t next=at+1<int(timeline.size())?timeline[at+1].start:line.start+5000;
  auto whole=cfg.mode=="line"?image(dev,line.text):Image{};auto units=reveal(line,next,cfg.mode=="character");
  float measured=0;for(auto& unit:units)measured+=std::max(0,image(dev,unit.text).width-8);
  if(cfg.mode=="line")measured=float(std::max(0,whole.width-8));
- float scale=std::min(1.f,width*cfg.width/std::max(measured+8,1.f));float center=width*(cfg.alternate?(at%2?.72f:.28f):.5f);
- float left=std::clamp(center-(measured+8)*scale*.5f,8.f,std::max(8.f,width-(measured+8)*scale-8));
- auto entry=motion(song-line.start,180);float alpha=externalAlpha*cfg.opacity;float y=height*cfg.y+(completed?0:entry.lift)-outgoingLift;
+ float scale=std::min(place?place->scale:1.f,width*cfg.width/std::max(measured+8,1.f));float center=place?place->x:width*(cfg.alternate?(at%2?.72f:.28f):.5f);
+ float left=center-(measured+8)*scale*.5f;if(!place)left=std::clamp(left,8.f,std::max(8.f,width-(measured+8)*scale-8));
+ auto entry=motion(song-line.start,180);float alpha=externalAlpha*cfg.opacity;float y=(place?place->y-cfg.size*scale*.5f:height*cfg.y)+(completed?0:entry.lift)-outgoingLift;
  if(cfg.mode=="line")styled(dev,whole,left,y,scale,alpha*(completed?1:entry.alpha),cfg.textColor);
  else{float pen=left;for(auto& unit:units){auto im=image(dev,unit.text);auto frame=motion(song-unit.start,140);if(completed)frame={1,1,0};float pop=scale*frame.scale;if(unit.text.find_first_not_of(" \t\r\n")!=std::string::npos)styled(dev,im,pen-im.width*(pop-scale)*.5f,y+frame.lift,pop,alpha*frame.alpha,cfg.textColor);pen+=std::max(0,im.width-8)*scale;}}
- if(cfg.translation&&!line.translation.empty()){auto tr=image(dev,line.translation);float ts=std::min(scale*.76f,width*cfg.width/std::max(tr.width,1));styled(dev,tr,std::clamp(center-tr.width*ts*.5f,8.f,std::max(8.f,width-tr.width*ts-8)),y+cfg.size*scale*1.5f,ts,alpha*.8f*(completed?1:entry.alpha),cfg.accent);}
+ if(cfg.translation&&!line.translation.empty()){auto tr=image(dev,line.translation);float ts=std::min(scale*.76f,width*cfg.width/std::max(tr.width,1));styled(dev,tr,(place?center-tr.width*ts*.5f:std::clamp(center-tr.width*ts*.5f,8.f,std::max(8.f,width-tr.width*ts-8))),y+cfg.size*scale*1.5f,ts,alpha*.8f*(completed?1:entry.alpha),cfg.accent);}
 }
 struct DrawGuard {
  IDirect3DDevice9* dev; IDirect3DStateBlock9* block=nullptr;
@@ -119,8 +131,8 @@ struct DrawGuard {
  explicit DrawGuard(IDirect3DDevice9* d):dev(d){}
  ~DrawGuard(){if(scene)dev->EndScene();if(block){if(captured){dev->SetDepthStencilSurface(nullptr);if(target)dev->SetRenderTarget(0,target);for(unsigned i=0;i<extraCount;++i)dev->SetRenderTarget(i+1,extra[i]);dev->SetDepthStencilSurface(depth);}block->Apply();block->Release();}for(auto* surface:extra)if(surface)surface->Release();if(back)back->Release();if(target)target->Release();if(depth)depth->Release();}
 };
-void WINAPI render(IDirect3DDevice9* dev,const LDBHostPresentInfoV1* present){
- if(!dev||!present||present->struct_size!=sizeof(*present))return;
+void WINAPI render(IDirect3DDevice9* dev,const PresentInfo* present){
+ if(!dev||!present)return;
  captureCamera(dev,present);
  const unsigned path=present->is_swapchain_present?1:0;
  if(!presentLogged[path]){presentLogged[path]=true;note(std::string("LDBDangoMusic first Present path=")+(path?"SwapChain":"Device")+(present->swap_chain?" current-chain=yes":" current-chain=no"));}
@@ -141,27 +153,98 @@ void WINAPI render(IDirect3DDevice9* dev,const LDBHostPresentInfoV1* present){
  for(auto stage:{D3DTSS_COLOROP,D3DTSS_ALPHAOP})dev->SetTextureStageState(0,stage,D3DTOP_MODULATE);
  dev->SetTextureStageState(0,D3DTSS_COLORARG1,D3DTA_TEXTURE);dev->SetTextureStageState(0,D3DTSS_COLORARG2,D3DTA_DIFFUSE);dev->SetTextureStageState(0,D3DTSS_ALPHAARG1,D3DTA_TEXTURE);dev->SetTextureStageState(0,D3DTSS_ALPHAARG2,D3DTA_DIFFUSE);dev->SetTextureStageState(0,D3DTSS_TEXCOORDINDEX,0);dev->SetTextureStageState(0,D3DTSS_TEXTURETRANSFORMFLAGS,D3DTTFF_DISABLE);dev->SetTextureStageState(1,D3DTSS_COLOROP,D3DTOP_DISABLE);dev->SetTextureStageState(1,D3DTSS_ALPHAOP,D3DTOP_DISABLE);
  dev->SetSamplerState(0,D3DSAMP_MINFILTER,D3DTEXF_LINEAR);dev->SetSamplerState(0,D3DSAMP_MAGFILTER,D3DTEXF_LINEAR);dev->SetSamplerState(0,D3DSAMP_ADDRESSU,D3DTADDRESS_CLAMP);dev->SetSamplerState(0,D3DSAMP_ADDRESSV,D3DTADDRESS_CLAMP);dev->SetSamplerState(0,D3DSAMP_SRGBTEXTURE,FALSE);
- if(cfg.demo){auto banner=image(dev,"LDBDangoMusic 0.3.1 DEMO - "+std::string(path?"SwapChain":"Device"));draw(dev,banner,16,16,std::min(1.f,desc.Width*.9f/std::max(banner.width,1)),1.f);}
+ if(cfg.demo){auto banner=image(dev,"LDBDangoMusic 0.4.0 DEMO - "+std::string(path?"SwapChain":"Device"));draw(dev,banner,16,16,std::min(1.f,desc.Width*.9f/std::max(banner.width,1)),1.f);}
+ auto camera=std::atomic_load(&source_camera::snapshot);const auto& gameFrame=*camera;CameraPose pose;
+ bool cameraValid=cfg.worldLyrics&&usableCamera(gameFrame,now())&&cameraPose(gameFrame,pose);
+ if(cfg.worldLyrics){auto status=image(dev,cameraValid?"GAME CAMERA: ACTIVE (experimental)":"GAME CAMERA: waiting/invalid - screen fallback");draw(dev,status,16,cfg.demo?64.f:16.f,std::min(.65f,desc.Width*.9f/std::max(status.width,1)),.8f,cameraValid?0x99ffbb:0xffcc88);}
+ if(!cameraValid)anchors.reset();else anchors.update(gameFrame,pose,state->key,at);
+ if(cameraValid&&cfg.worldTestAnchor){Placement test;if(projectAnchor(gameFrame,anchors.test,float(desc.Width),float(desc.Height),cfg.worldHeight,cfg.size,test)){auto im=image(dev,"WORLD ANCHOR +");styled(dev,im,test.x-im.width*test.scale*.5f,test.y,test.scale,.9f,0x99ffbb);}}
  if(at>=0){auto song=lyricPosition(position,cfg.demo?0:cfg.offset);auto age=song-state->timeline[at].start;
- if(at>0&&age>=0&&age<cfg.transition){float fade=outgoingAlpha(age,cfg.transition);lineFrame(dev,state->timeline,at-1,song,float(desc.Width),float(desc.Height),fade,14.f*(1-fade),true);}
- lineFrame(dev,state->timeline,at,song,float(desc.Width),float(desc.Height));
+ if(at>0&&age>=0&&age<cfg.transition){float fade=outgoingAlpha(age,cfg.transition);Placement previous;
+ if(!cameraValid)lineFrame(dev,state->timeline,at-1,song,float(desc.Width),float(desc.Height),fade,14.f*(1-fade),true);
+ else if(anchors.previousIndex==at-1&&projectAnchor(gameFrame,anchors.previous,float(desc.Width),float(desc.Height),cfg.worldHeight,cfg.size,previous))lineFrame(dev,state->timeline,at-1,song,float(desc.Width),float(desc.Height),fade,14.f*(1-fade),true,&previous);}
+ Placement current;if(!cameraValid)lineFrame(dev,state->timeline,at,song,float(desc.Width),float(desc.Height));
+ else if(projectAnchor(gameFrame,anchors.current,float(desc.Width),float(desc.Height),cfg.worldHeight,cfg.size,current))lineFrame(dev,state->timeline,at,song,float(desc.Width),float(desc.Height),1,0,false,&current);
  }else{auto im=image(dev,text);float scale=std::min(1.f,desc.Width*.8f/std::max(im.width,1));styled(dev,im,std::max(8.f,(desc.Width-im.width*scale)*.5f),desc.Height*cfg.y,scale,.7f,cfg.textColor);}
  dev->EndScene();guard.scene=false;}
  }
 
  }catch(...){if(logger)logger(LDB_HOST_LOG_ERROR,"Lyric render failed");}
 }
-BOOL WINAPI load(const LDBHostApiV1* host){try{if(!host||host->struct_size<sizeof(*host)||host->abi_version!=1||host->host_bits!=64)return FALSE;logger=host->log;directory=std::filesystem::path(host->host_directory)/L"plugins"/L"LDBDangoMusic";auto path=directory/L"config.json";
- if(std::filesystem::exists(path)){std::ifstream f(path);auto j=nlohmann::json::parse(f);cfg.cameraDiagnostics=j.value("cameraDiagnostics",false);cfg.port=std::clamp(j.value("port",23330),1,65535);cfg.size=std::clamp(j.value("fontSize",32),12,96);cfg.demo=j.value("demo",true);cfg.translation=j.value("translation",true);cfg.alternate=j.value("alternate",true);cfg.y=std::clamp(j.value("verticalPosition",.72f),.1f,.85f);cfg.offset=std::clamp(j.value("offsetMs",500),-10000,10000);
+bool load(const std::filesystem::path& pluginDirectory){try{directory=pluginDirectory/L"LDBDangoMusic";auto path=directory/L"config.json";
+ if(std::filesystem::exists(path)){std::ifstream f(path);auto j=nlohmann::json::parse(f);cfg.worldLyrics=j.value("worldLyrics",false);cfg.worldTestAnchor=j.value("worldTestAnchor",true);cfg.worldDistance=std::clamp(j.value("worldDistance",200.f),32.f,1000.f);cfg.worldSide=std::clamp(j.value("worldSide",75.f),0.f,300.f);cfg.worldHeight=std::clamp(j.value("worldHeight",8.f),1.f,64.f);cfg.cameraDiagnostics=j.value("cameraDiagnostics",false);cfg.port=std::clamp(j.value("port",23330),1,65535);cfg.size=std::clamp(j.value("fontSize",32),12,96);cfg.demo=j.value("demo",true);cfg.translation=j.value("translation",true);cfg.alternate=j.value("alternate",true);cfg.y=std::clamp(j.value("verticalPosition",.72f),.1f,.85f);cfg.offset=std::clamp(j.value("offsetMs",500),-10000,10000);
  cfg.outline=j.value("outline",true);cfg.glow=j.value("glow",true);cfg.glowStrength=std::clamp(j.value("glowStrength",.18f),0.f,.5f);cfg.opacity=std::clamp(j.value("opacity",1.f),.1f,1.f);cfg.width=std::clamp(j.value("maxWidth",.44f),.2f,.9f);cfg.transition=std::clamp(j.value("transitionMs",380),0,1000);cfg.mode=j.value("displayMode",std::string("character"));if(cfg.mode!="character"&&cfg.mode!="word"&&cfg.mode!="line")throw std::runtime_error("displayMode must be character/word/line");
  auto color=[&](const char* name,DWORD fallback){auto value=j.value(name,std::string{});if(value.empty())return fallback;if(value.size()!=7||value[0]!='#'||value.find_first_not_of("0123456789abcdefABCDEF",1)!=std::string::npos)throw std::runtime_error("Color must be #RRGGBB");return DWORD(std::stoul(value.substr(1),nullptr,16));};cfg.textColor=color("textColor",cfg.textColor);cfg.accent=color("accentColor",cfg.accent);}
- note("LDBDangoMusic 0.3.1 config="+path.u8string()+" mode="+(cfg.demo?"DEMO":"BLF/LX")+" port="+std::to_string(cfg.port)+" offsetMs="+std::to_string(cfg.offset)+" displayMode="+cfg.mode);
+ note("LDBDangoMusic 0.4.0 config="+path.u8string()+" mode="+(cfg.demo?"DEMO":"BLF/LX")+" port="+std::to_string(cfg.port)+" offsetMs="+std::to_string(cfg.offset)+" displayMode="+cfg.mode);
  stopping=false;worker=std::thread(run);return TRUE;}catch(const std::exception& e){if(logger)logger(LDB_HOST_LOG_ERROR,e.what());return FALSE;}catch(...){return FALSE;}}
-void WINAPI created(IDirect3DDevice9*){++deviceGeneration;clear();reportedErrors=0;drewPixels=false;note("LDBDangoMusic device lifecycle: created/destroyed; textures cleared");}
-void WINAPI swapCreated(IDirect3DSwapChain9*){note("LDBDangoMusic SwapChain created (borrowed)");}
-void WINAPI swapDestroyed(IDirect3DSwapChain9*){note("LDBDangoMusic SwapChain destroyed (no retained references)");}
-void WINAPI beforeReset(IDirect3DDevice9*,const D3DPRESENT_PARAMETERS*,BOOL){clear();}
+void WINAPI created(IDirect3DDevice9*){++deviceGeneration;anchors.reset();clear();reportedErrors=0;drewPixels=false;note("LDBDangoMusic device lifecycle: created/destroyed; textures cleared");}
+void WINAPI beforeReset(IDirect3DDevice9*,const D3DPRESENT_PARAMETERS*,BOOL){anchors.reset();clear();}
 void WINAPI afterReset(IDirect3DDevice9*,HRESULT hr,BOOL){++deviceGeneration;reportedErrors=0;checked(hr,5,"Reset");note("LDBDangoMusic Reset completed; textures will rebuild");}
 void WINAPI shutdown(){stopping=true;wake.notify_all();if(worker.joinable())worker.join();clear();}
 }
-extern "C" __declspec(dllexport) BOOL WINAPI LDBHostPluginQuery(uint32_t abi,LDBHostPluginV1* out){if(abi!=1||!out||out->struct_size!=sizeof(*out))return FALSE;*out={sizeof(*out),1,"LDBDangoMusic","0.3.1",load,created,swapCreated,render,beforeReset,afterReset,swapDestroyed,created,shutdown};return TRUE;}
+namespace {
+struct Patch {void** slot;void* original;void* replacement;};
+std::array<Patch,64> patches{};std::atomic<size_t> patchCount{0};SRWLOCK patchLock=SRWLOCK_INIT;std::filesystem::path pluginDirectory;
+void fileLog(int,const char* message){std::ofstream file(pluginDirectory/L"LDBDangoMusic.log",std::ios::app);file<<"L4N LyricsPlugin 0.4.0 "<<message<<'\n';}
+bool patch(void** table,size_t slot,void* replacement){
+ if(!TryAcquireSRWLockExclusive(&patchLock))return false;auto count=patchCount.load(std::memory_order_acquire);
+ for(size_t i=0;i<count;++i)if(patches[i].slot==table+slot){bool same=patches[i].replacement==replacement;ReleaseSRWLockExclusive(&patchLock);return same;}
+ if(count>=patches.size()){ReleaseSRWLockExclusive(&patchLock);return false;}
+ DWORD old=0;if(!VirtualProtect(table+slot,sizeof(void*),PAGE_READWRITE,&old)){ReleaseSRWLockExclusive(&patchLock);return false;}
+ void* before=table[slot];patches[count]={table+slot,before,replacement};patchCount.store(count+1,std::memory_order_release);
+ void* actual=InterlockedCompareExchangePointer(table+slot,replacement,before);DWORD ignored=0;VirtualProtect(table+slot,sizeof(void*),old,&ignored);
+ if(actual!=before)patchCount.store(count,std::memory_order_release);ReleaseSRWLockExclusive(&patchLock);return actual==before;
+}
+void* original(void* object,size_t slot){auto table=*reinterpret_cast<void***>(object);auto count=patchCount.load(std::memory_order_acquire);for(size_t i=0;i<count;++i)if(patches[i].slot==table+slot)return patches[i].original;return nullptr;}
+thread_local unsigned presentDepth=0;
+HRESULT WINAPI devicePresent(IDirect3DDevice9* device,const RECT* source,const RECT* target,HWND window,const RGNDATA* dirty){
+ auto fn=reinterpret_cast<HRESULT(WINAPI*)(IDirect3DDevice9*,const RECT*,const RECT*,HWND,const RGNDATA*)>(original(device,17));
+ ++presentDepth;if(presentDepth==1){PresentInfo info;render(device,&info);}auto hr=fn(device,source,target,window,dirty);--presentDepth;return hr;
+}
+HRESULT WINAPI chainPresent(IDirect3DSwapChain9* chain,const RECT* source,const RECT* target,HWND window,const RGNDATA* dirty,DWORD flags){
+ auto fn=reinterpret_cast<HRESULT(WINAPI*)(IDirect3DSwapChain9*,const RECT*,const RECT*,HWND,const RGNDATA*,DWORD)>(original(chain,3));
+ ++presentDepth;if(presentDepth==1){IDirect3DDevice9* device=nullptr;if(SUCCEEDED(chain->GetDevice(&device))&&device){PresentInfo info{true,chain};render(device,&info);device->Release();}}
+ auto hr=fn(chain,source,target,window,dirty,flags);--presentDepth;return hr;
+}
+void hookChain(IDirect3DSwapChain9* chain){if(chain&&(*reinterpret_cast<void***>(chain))[3]!=reinterpret_cast<void*>(&chainPresent)&&patch(*reinterpret_cast<void***>(chain),3,reinterpret_cast<void*>(&chainPresent)))note("SwapChain Present attached");}
+HRESULT WINAPI getChain(IDirect3DDevice9* device,UINT index,IDirect3DSwapChain9** chain){auto fn=reinterpret_cast<HRESULT(WINAPI*)(IDirect3DDevice9*,UINT,IDirect3DSwapChain9**)>(original(device,14));auto hr=fn(device,index,chain);if(SUCCEEDED(hr)&&chain&&*chain)hookChain(*chain);return hr;}
+HRESULT WINAPI addChain(IDirect3DDevice9* device,D3DPRESENT_PARAMETERS* params,IDirect3DSwapChain9** chain){auto fn=reinterpret_cast<HRESULT(WINAPI*)(IDirect3DDevice9*,D3DPRESENT_PARAMETERS*,IDirect3DSwapChain9**)>(original(device,13));auto hr=fn(device,params,chain);if(SUCCEEDED(hr)&&chain&&*chain)hookChain(*chain);return hr;}
+HRESULT WINAPI resetDevice(IDirect3DDevice9* device,D3DPRESENT_PARAMETERS* params){auto fn=reinterpret_cast<HRESULT(WINAPI*)(IDirect3DDevice9*,D3DPRESENT_PARAMETERS*)>(original(device,16));beforeReset(device,params,FALSE);auto hr=fn(device,params);afterReset(device,hr,FALSE);if(SUCCEEDED(hr)){IDirect3DSwapChain9* chain=nullptr;if(SUCCEEDED(device->GetSwapChain(0,&chain))){hookChain(chain);chain->Release();}}return hr;}
+HRESULT WINAPI presentEx(IDirect3DDevice9Ex* device,const RECT* source,const RECT* target,HWND window,const RGNDATA* dirty,DWORD flags){auto fn=reinterpret_cast<HRESULT(WINAPI*)(IDirect3DDevice9Ex*,const RECT*,const RECT*,HWND,const RGNDATA*,DWORD)>(original(device,121));++presentDepth;if(presentDepth==1){PresentInfo info;render(device,&info);}auto hr=fn(device,source,target,window,dirty,flags);--presentDepth;return hr;}
+HRESULT WINAPI resetEx(IDirect3DDevice9Ex* device,D3DPRESENT_PARAMETERS* params,D3DDISPLAYMODEEX* mode){auto fn=reinterpret_cast<HRESULT(WINAPI*)(IDirect3DDevice9Ex*,D3DPRESENT_PARAMETERS*,D3DDISPLAYMODEEX*)>(original(device,132));beforeReset(device,params,TRUE);auto hr=fn(device,params,mode);afterReset(device,hr,TRUE);return hr;}
+class LyricsPlugin final:public IL4NPlugin {
+ bool started=false;
+public:
+ const char* GetName()override{return "L4N LyricsPlugin";}
+ const char* GetVersion()override{return "0.4.0";}
+ void start(){if(started)return;HMODULE self=nullptr;GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,reinterpret_cast<const wchar_t*>(&fileLog),&self);wchar_t path[32768]{};if(!GetModuleFileNameW(self,path,32768))return;pluginDirectory=std::filesystem::path(path).parent_path();logger=fileLog;started=load(pluginDirectory);source_camera::logger=note;}
+ void OnModuleLoaded(const char* name,std::uintptr_t handle)override{start();if(!started||!name)return;std::string n(name);if(n=="client"||n=="client.dll")source_camera::clientModule=reinterpret_cast<HMODULE>(handle);if(n=="engine"||n=="engine.dll")source_camera::engineModule=reinterpret_cast<HMODULE>(handle);if(cfg.worldLyrics)source_camera::connect();}
+ void OnGameLaunch()override{start();if(!started)return;if(!source_camera::clientModule)source_camera::clientModule=GetModuleHandleW(L"client.dll");if(!source_camera::engineModule)source_camera::engineModule=GetModuleHandleW(L"engine.dll");if(cfg.worldLyrics)source_camera::connect();}
+ void OnD3DDeviceCreated(void* pointer,bool)override{start();if(!started||!pointer)return;auto device=static_cast<IDirect3DDevice9*>(pointer);auto table=*reinterpret_cast<void***>(device);
+ created(device);patch(table,17,reinterpret_cast<void*>(&devicePresent));patch(table,16,reinterpret_cast<void*>(&resetDevice));patch(table,14,reinterpret_cast<void*>(&getChain));patch(table,13,reinterpret_cast<void*>(&addChain));IDirect3DSwapChain9* chain=nullptr;if(SUCCEEDED(device->GetSwapChain(0,&chain))&&chain){hookChain(chain);chain->Release();}IDirect3DDevice9Ex* ex=nullptr;if(SUCCEEDED(device->QueryInterface(__uuidof(IDirect3DDevice9Ex),reinterpret_cast<void**>(&ex)))&&ex){auto et=*reinterpret_cast<void***>(ex);patch(et,121,reinterpret_cast<void*>(&presentEx));patch(et,132,reinterpret_cast<void*>(&resetEx));ex->Release();}note("x86 Client D3D9 callbacks installed; no Host plugin required");}
+ void stop(){source_camera::stop();if(started){shutdown();started=false;}for(size_t i=patchCount.load();i>0;--i){auto& p=patches[i-1];if(!source_camera::readable(p.slot,sizeof(void*)))continue;DWORD old=0;if(VirtualProtect(p.slot,sizeof(void*),PAGE_READWRITE,&old)){InterlockedCompareExchangePointer(p.slot,p.original,p.replacement);DWORD ignored=0;VirtualProtect(p.slot,sizeof(void*),old,&ignored);}}patchCount.store(0);}
+ ~LyricsPlugin()override{stop();}
+};
+}
+LyricsPlugin& instance(){static LyricsPlugin plugin;return plugin;}
+#if defined(__GNUC__) && !defined(_MSC_VER)
+// L4N is an MSVC C++ interface. GNU's two destructor vtable entries are NOT
+// compatible. Export an explicit MSVC x86 table; delegate into the native object.
+namespace {
+void* __fastcall abiDestructor(void* self,void*,unsigned){instance().stop();return self;}
+unsigned __fastcall abiVersion(void*,void*){return 2;}
+const char* __fastcall abiName(void*,void*){return instance().GetName();}
+const char* __fastcall abiRelease(void*,void*){return instance().GetVersion();}
+void __fastcall abiModule(void*,void*,const char* name,uintptr_t handle){instance().OnModuleLoaded(name,handle);}
+void __fastcall abiLaunch(void*,void*){instance().OnGameLaunch();}
+void __fastcall abiD3D(void*,void*,void*){}
+void __fastcall abiDevice(void*,void*,void* device,bool dxvk){instance().OnD3DDeviceCreated(device,dxvk);}
+const char* __fastcall abiMenu(void*,void*,bool){return nullptr;}
+void* msvcVtable[]={reinterpret_cast<void*>(&abiDestructor),reinterpret_cast<void*>(&abiVersion),reinterpret_cast<void*>(&abiName),reinterpret_cast<void*>(&abiRelease),reinterpret_cast<void*>(&abiModule),reinterpret_cast<void*>(&abiLaunch),reinterpret_cast<void*>(&abiD3D),reinterpret_cast<void*>(&abiDevice),reinterpret_cast<void*>(&abiMenu)};
+struct MsvcObject{void** table;};MsvcObject msvcObject{msvcVtable};
+}
+extern "C" __declspec(dllexport) IL4NPlugin* GetL4NPluginInstance(){return reinterpret_cast<IL4NPlugin*>(&msvcObject);}
+#else
+extern "C" __declspec(dllexport) IL4NPlugin* GetL4NPluginInstance(){return &instance();}
+#endif
+extern "C" __declspec(dllexport) void L4NLyricsShutdown(){instance().stop();}

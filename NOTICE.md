@@ -11,3 +11,12 @@ It retains its MIT SPDX identifier and copyright notice.
 
 vendor/json.hpp: nlohmann/json v3.11.3, Copyright Niels Lohmann, MIT.
 Its full copyright and license text are embedded in the header.
+
+0.4.0 pure L4N migration:
+- vendor/l4n/l4n_plugin.h: copied unchanged from LDB main cafc0442446c502a0de0ebb52d5e73ccaae67516,
+  plugins/l4n/sdk/l4n_plugin.h. Supplied L4N SDK header has no license declaration;
+  it is not relicensed under GPL by this project.
+- Source interface names, signatures and slot inventory were checked against
+  AlliedModders HL2SDK l4d2 2a31cd007b2d7d2f964dc093eedcf7a812cf9dd6,
+  public/cdll_int.h. See vendor/source-interface-contract.json. No Valve SDK
+  engine implementation or game binaries are redistributed.
