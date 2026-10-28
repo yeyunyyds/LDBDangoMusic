@@ -6,7 +6,7 @@ import zipfile
 import struct
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = '0.7.1'
+VERSION = '0.7.2'
 files = {}
 for folder in ('src', 'tests', 'scripts', 'vendor', 'docs', 'presets'):
     for path in (ROOT / folder).rglob('*'):
@@ -40,6 +40,7 @@ files['docs/0.6.0-menu-and-ghosting.md'] = ROOT / 'docs/0.6.0-menu-and-ghosting.
 files['docs/0.6.1-stale-lyrics.md'] = ROOT / 'docs/0.6.1-stale-lyrics.md'
 files['docs/0.7.0-layout-editor.md'] = ROOT / 'docs/0.7.0-layout-editor.md'
 files['docs/0.7.1-player-session.md'] = ROOT / 'docs/0.7.1-player-session.md'
+files['docs/0.7.2-motion-and-placement.md'] = ROOT / 'docs/0.7.2-motion-and-placement.md'
 files['docs/camera-diagnostics.md'] = ROOT / 'docs/camera-diagnostics.md'
 files['LICENSE'] = ROOT / 'LICENSE'
 files['NOTICE.md'] = ROOT / 'NOTICE.md'

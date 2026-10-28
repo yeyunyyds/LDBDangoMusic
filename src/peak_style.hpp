@@ -42,6 +42,22 @@ struct Animation {
  if(wiggle){auto bucket=uint64_t(std::max(0.,std::floor(seconds*std::clamp(frequency,4.f,24.f))));float a=std::clamp(amount,0.f,2.f);f.rotation=noise(unsigned(i),bucket,1,textSeed)*9*a*.01745329252f;f.x=noise(unsigned(i),bucket,2,textSeed)*.8f*a;f.y+=noise(unsigned(i),bucket,3,textSeed)*1.6f*a;f.scale*=1+noise(unsigned(i),bucket,4,textSeed)*.12f*a;}return f;
  }
 };
+// Start the visual pop when a glyph actually reaches the renderer, rather
+// than letting API latency or the sync offset consume the entire 160 ms pop.
+struct VisibleAnimation {
+ std::vector<double> appeared;
+ explicit VisibleAnimation(size_t count=0):appeared(count,-1){}
+ GlyphFrame sample(const Animation& animation,size_t index,int64_t song,double seconds,float speed,bool pop,bool wiggle,float frequency,float amount){
+ if(index>=animation.glyphs.size()||blank(animation.glyphs[index])||song<animation.starts[index])return {};
+ if(appeared.size()!=animation.glyphs.size())appeared.assign(animation.glyphs.size(),-1);
+ if(appeared[index]<0)appeared[index]=seconds-1./60.;
+ double age=std::max(0.,seconds-appeared[index])*1000*std::clamp(speed,.25f,3.f);
+ auto frame=animation.sample(index,animation.starts[index]+int64_t(age),seconds,true,wiggle,frequency,amount);
+ double back=std::clamp(1-double(int64_t(age))/160.,0.,1.);float popScale=float(1+.55*back*back);
+ if(!pop){frame.alpha=1;frame.scale/=popScale;}else{double t=std::clamp(age/160.,0.,1.);frame.y-=float(10*4*t*(1-t));}
+ return frame;
+ }
+};
 struct LayoutGlyph {size_t index;float x,y,width;};
 struct Layout {std::vector<LayoutGlyph> glyphs;std::vector<float> rows;float height=0;};
 template<class Measure> Layout layout(const std::vector<Glyph>& glyphs,Measure measure,float maxWidth,float lineHeight){

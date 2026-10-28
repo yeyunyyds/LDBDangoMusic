@@ -13,3 +13,8 @@ for index, name in enumerate(('warm-white', 'soft', 'neon-pink', 'ice-blue', 'am
         elif value != expected:
             raise RuntimeError((name, key, value, expected))
 print('Passed: all distributed preset files match runtime presets')
+for name in ('config.example.json', 'config.demo.json', 'config.camera-demo.json', 'config.world-demo.json'):
+    config = json.loads((ROOT / name).read_text())
+    if config['layout'] != actual[0]['layout'] or config['reanchorMs'] != 0 or config['defaultsVersion'] != 2 or config['verticalPosition'] != 0.44:
+        raise RuntimeError(('Stale bundled layout/defaults', name))
+print('Passed: bundled configs use elevated lyric layout and disabled reanchor defaults')

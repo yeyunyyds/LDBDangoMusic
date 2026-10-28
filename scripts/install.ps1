@@ -24,7 +24,12 @@ if ($null -eq $settings.PSObject.Properties['layout']) {
     }
     $settings | Add-Member -NotePropertyName layout -NotePropertyValue $layout
 }
-foreach ($p in $defaults.PSObject.Properties) { if ($null -eq $settings.PSObject.Properties[$p.Name]) { $settings | Add-Member -NotePropertyName $p.Name -NotePropertyValue $p.Value } }
+# Leave legacy configs unversioned until the runtime performs its one-time
+# defaults migration; saving in-game then writes defaultsVersion=2.
+foreach ($p in $defaults.PSObject.Properties) {
+    if ($p.Name -eq 'defaultsVersion' -and $sourceConfig -and $null -eq $settings.PSObject.Properties['defaultsVersion']) { continue }
+    if ($null -eq $settings.PSObject.Properties[$p.Name]) { $settings | Add-Member -NotePropertyName $p.Name -NotePropertyValue $p.Value }
+}
 if ($PSBoundParameters.ContainsKey('OffsetMs')) { $settings | Add-Member -NotePropertyName offsetMs -NotePropertyValue $OffsetMs -Force }
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss-ffff'
 New-Item -ItemType Directory -Force $settingsDir | Out-Null
@@ -59,7 +64,7 @@ foreach ($location in $locations) {
 }
 Copy-Item $sourceDll $dll -Force
 [IO.File]::WriteAllText($path, ($settings | ConvertTo-Json -Depth 16), [System.Text.UTF8Encoding]::new($false))
-Write-Host 'Installed L4D2DangoMusic 0.7.1; settings preserved. Restart game and Host; use the L4D2DangoMusic 0.7.1 menu.'
+Write-Host 'Installed L4D2DangoMusic 0.7.2; settings preserved. Restart game and Host; use the L4D2DangoMusic 0.7.2 menu.'
 
 Write-Host ('Active DLL: ' + [IO.Path]::GetFullPath($dll))
 Write-Host ('Backups outside plugin search paths: ' + $backupRoot)

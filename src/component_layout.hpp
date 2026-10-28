@@ -4,12 +4,12 @@
 #include <stdexcept>
 namespace dango {
 constexpr int MaxLyricSlots=9;
-struct ComponentPosition {float x=.5f,y=.56f,distance=200,size=1;};
+struct ComponentPosition {float x=.5f,y=.44f,distance=200,size=1;};
 struct ComponentLayout {
  int lyricCount=2;
  ComponentPosition title{.5f,.14f,420,1.5f},artist{.5f,.21f,420,1.1f};
  std::array<ComponentPosition,MaxLyricSlots> lyrics{};
- ComponentLayout(){for(int i=0;i<MaxLyricSlots;++i)lyrics[i]={i%2?.7f:.3f,.56f+(i/2)*.08f,200,1};}
+ ComponentLayout(){for(int i=0;i<MaxLyricSlots;++i)lyrics[i]={i%2?.7f:.3f,.44f+(i/2)*.08f,200,1};}
 };
 inline ComponentPosition& component(ComponentLayout& l,int index){if(index==0)return l.title;if(index==1)return l.artist;return l.lyrics.at(size_t(index-2));}
 inline const ComponentPosition& component(const ComponentLayout& l,int index){if(index==0)return l.title;if(index==1)return l.artist;return l.lyrics.at(size_t(index-2));}
@@ -20,6 +20,8 @@ inline void adjustPosition(ComponentLayout& l,int index,int axis,int choice){
  const float fine[]={.01f,.01f,10,.05f},coarse[]={.05f,.05f,50,.25f},lo[]={.02f,.02f,32,.25f},hi[]={.98f,.98f,1600,3};
  float delta=choice==0?-coarse[axis]:choice==1?-fine[axis]:choice==2?fine[axis]:coarse[axis];value=std::clamp(value+delta,lo[axis],hi[axis]);
 }
+inline void adjustLyricGroup(ComponentLayout& l,int axis,int choice){for(int i=0;i<MaxLyricSlots;++i)adjustPosition(l,i+2,axis,choice);}
+inline void migrateDefaultHeights(ComponentLayout& l){auto defaults=ComponentLayout{};for(int i=0;i<MaxLyricSlots;++i)if(std::abs(l.lyrics[i].y-(.56f+(i/2)*.08f))<.0001f)l.lyrics[i].y=defaults.lyrics[i].y;}
 inline nlohmann::json positionJson(const ComponentPosition& p){return {{"x",p.x},{"y",p.y},{"distance",p.distance},{"size",p.size}};}
 inline ComponentPosition readPosition(const nlohmann::json& j,ComponentPosition p){
  if(!j.is_object())throw std::runtime_error("Component position must be an object");

@@ -6,7 +6,7 @@ void check(bool value){if(!value)throw std::runtime_error("Settings/lifecycle re
 int main(int argc,char**){using namespace dango;
  if(argc>1){auto list=nlohmann::json::array();for(int i=0;i<6;++i)list.push_back(encodeConfig(applyPreset(Config{},i)));std::cout<<list.dump();return 0;}
  Config c;c.port=12345;c.offset=350;c.demo=false;c.worldLyrics=true;c.translation=true;
- for(int i=0;i<6;++i){auto preset=applyPreset(c,i);check(preset.port==12345&&preset.offset==350&&preset.translation&&preset.worldLyrics&&preset.presetId==i);auto copy=decodeConfig(encodeConfig(preset));check(copy.textColor==preset.textColor&&copy.port==12345&&copy.lingerMs==1000&&copy.reanchorMs==3000);}
+ for(int i=0;i<6;++i){auto preset=applyPreset(c,i);check(preset.port==12345&&preset.offset==350&&preset.translation&&preset.worldLyrics&&preset.presetId==i);auto copy=decodeConfig(encodeConfig(preset));check(copy.textColor==preset.textColor&&copy.port==12345&&copy.lingerMs==1000&&copy.reanchorMs==0);}
  bool invalid=false;try{parseColor("#BADHEX");}catch(...){invalid=true;}check(invalid);check(colorText(parseColor("#12ABef"))=="#12ABEF");
  check(!needsReanchor(2.999,0,3000)&&needsReanchor(3,0,3000)&&!needsReanchor(4,0,0));
 
