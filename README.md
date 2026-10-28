@@ -2,7 +2,7 @@
 
 为《求生之路 2》（Left 4 Dead 2）提供音乐歌词显示的 L4N 插件。通过兼容 LX / BLF 的本地音乐 API 获取播放进度和歌词，在游戏中呈现带逐字动画的歌词，并支持世界空间定位、歌名与作者显示以及游戏内调节。
 
-插件在 **32 位游戏进程**中运行，使用 Source Engine 相机信息和 D3D9 绘制，适配 [L4D2_Dxvk_32to64_Bridge](https://github.com/yeyunyyds/L4D2_Dxvk_32to64_Bridge)（LDB）的 Client → Host → DXVK 渲染链路。
+插件由 L4N 加载，在 **32 位游戏进程**中直接读取 Source Engine 相机信息并使用 D3D9 绘制。运行依赖为 L4N 和音乐播放器的本地 API，不需要 LDB 或 DXVK。
 
 ## 功能
 
@@ -20,7 +20,6 @@
 
 - Windows 版《求生之路 2》。
 - 已安装并正常工作的 L4N，支持插件接口 v2 的 HUD 菜单功能。
-- 本项目面向的 [LDB 渲染桥](https://github.com/yeyunyyds/L4D2_Dxvk_32to64_Bridge)环境。
 - 提供兼容 `/status` 和 `/lyric-all` HTTP 接口的 LX / BLF 音乐播放器，并已开启本地 API。
 
 默认连接 `127.0.0.1:23330`。不同播放器版本提供的 API 可能不同，请先确认所用版本支持上述接口。
@@ -33,7 +32,7 @@
 
 ### 使用安装脚本
 
-1. 退出游戏和 LDB Host。
+1. 退出游戏。
 2. 解压安装包，在包内的 **`source` 文件夹**打开 PowerShell。
 3. 执行以下命令，将 `GameRoot` 改为自己的游戏根目录：
 
@@ -48,7 +47,7 @@ Set-ExecutionPolicy -Scope Process Bypass
 .\install.ps1 -GameRoot "D:\Steam\steamapps\common\Left 4 Dead 2"
 ```
 
-脚本会安装 DLL、保留已有配置，并将检测到的本项目旧副本移至 `bin\neko\plugins-disabled` 下备份。安装完成后，重新启动游戏和 Host。
+脚本会安装 DLL、保留已有配置，并将检测到的本项目旧副本移至 `bin\neko\plugins-disabled` 下备份。安装完成后，重新启动游戏。
 
 ### 手动安装
 
@@ -59,9 +58,9 @@ bin/neko/plugins/L4D2DangoMusic.dll
 bin/neko/plugins/L4D2DangoMusic/config.json
 ```
 
-升级时替换 DLL，保留自己的 `config.json`。插件在 L4N 游戏侧加载，当前安装包无需另装 Host 端歌词 DLL。
+升级时替换 DLL，保留自己的 `config.json`。插件由 L4N 加载，安装位置为游戏的 `bin/neko/plugins` 目录。
 
-请只保留一份启用的歌词插件。旧的 `LDBDangoMusic.dll`、改名副本或 Host 端旧歌词插件应移出加载目录，否则可能出现两份歌词或菜单分别控制不同副本的情况。
+请只保留一份启用的歌词插件。旧的 `LDBDangoMusic.dll` 和改名副本应移出加载目录，否则可能出现两份歌词或菜单分别控制不同副本的情况。
 
 ## 使用与设置
 
@@ -95,7 +94,7 @@ bin/neko/plugins/L4D2DangoMusic/config.json
 
 - **没有歌词**：确认播放器 API 已开启、端口一致，且歌曲带有同步歌词。正常播放模式在暂停、停止或断开时会隐藏歌词。
 - **歌词有提前或延后**：在菜单中调整同步偏移；正值使歌词提前，负值使歌词延后。
-- **出现双份歌词**：检查 L4N 和 Host 的插件目录，移出旧副本后完整重启游戏和 Host。
+- **出现双份歌词**：检查 L4N 插件目录，移出旧副本后完整重启游戏。若曾安装旧版 Host 歌词插件，也需停用该副本并重启对应 Host。
 - **动画不明显**：部分预设会关闭动画，可选择“恢复默认动画”，再进入“动画预览”检查。
 
 菜单中的 **版本、路径与播放器诊断** 可查看实际加载的 DLL 路径和播放状态。日志位于 `bin/neko/plugins/L4D2DangoMusic.log`；反馈问题时，请附上日志、插件版本和复现步骤。
@@ -127,7 +126,7 @@ bash scripts/build-mingw.sh
 python scripts/package.py
 ```
 
-跨平台回归测试和交叉编译不能替代实际 L4N / LDB 游戏环境验证。
+跨平台回归测试和交叉编译不能替代实际 L4N 游戏环境验证。
 
 ## 参考项目与第三方代码
 
@@ -135,7 +134,7 @@ python scripts/package.py
 | --- | --- |
 | [Sorihiko/DangoMusic](https://github.com/Sorihiko/DangoMusic) | 歌词呈现与音乐 API 集成参考。 |
 | [ZHIZHU4410/PeakDangoMusic](https://github.com/ZHIZHU4410/PeakDangoMusic) | 歌词动画、逐字时序、排版与位置规则参考；相关逻辑适配为原生 C++ 实现。 |
-| [yeyunyyds/L4D2_Dxvk_32to64_Bridge](https://github.com/yeyunyyds/L4D2_Dxvk_32to64_Bridge) | LDB 渲染桥与所使用的 L4N 插件 SDK 头文件来源。 |
+| [yeyunyyds/L4D2_Dxvk_32to64_Bridge](https://github.com/yeyunyyds/L4D2_Dxvk_32to64_Bridge) | 本项目所用 L4N SDK 头文件的取得来源；不作为运行依赖。 |
 | [AlliedModders/hl2sdk · l4d2](https://github.com/alliedmodders/hl2sdk/tree/l4d2) | Source 接口资料参考。 |
 | [nlohmann/json](https://github.com/nlohmann/json) | JSON 配置与 API 数据解析。 |
 

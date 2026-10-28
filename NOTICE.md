@@ -2,7 +2,9 @@ L4D2DangoMusic is distributed under GPL-3.0 (see LICENSE).
 The lyric presentation and LX integration are developed with reference to:
 - Sorihiko/DangoMusic, da696d0871fa348323782d7d299ba10df46e07db (GPL-3.0)
 - ZHIZHU4410/PeakDangoMusic, c9fe555b53f7d3cea85bfdcb92476a1ed6853ad0 (GPL-3.0)
-This project implements a native C++ D3D9 Host plugin, not a Minecraft or Unity mod.
+The current project implements a native C++ L4N plugin in the 32-bit game process,
+using Source camera interfaces and D3D9 drawing. LDB and DXVK are not runtime
+dependencies. Historical Host SDK files remain attributed below.
 No upstream game binaries, audio, fonts, or account data are included.
 
 vendor/ldb_host_plugin.h is copied verbatim from yeyunyyds/L4D2_Dxvk_32to64_Bridge,
