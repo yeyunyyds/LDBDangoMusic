@@ -26,4 +26,4 @@ $oldDll = Join-Path $oldRoot 'LDBDangoMusic.dll'
 if (Test-Path $oldDll) { Move-Item $oldDll ($oldDll + '.' + $stamp + '.disabled') }
 Copy-Item $sourceDll $dll -Force
 [IO.File]::WriteAllText($path, ($settings | ConvertTo-Json -Depth 16), [System.Text.UTF8Encoding]::new($false))
-Write-Host 'Installed pure x86 L4N 0.4.0, migrated settings; legacy Host DLL disabled. Fully restart game.'
+Write-Host 'Installed pure x86 L4N 0.4.2, migrated settings; legacy Host DLL disabled. Fully restart game.'

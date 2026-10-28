@@ -10,3 +10,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Core build failed' }
 if ($LASTEXITCODE -ne 0) { throw 'Core tests failed' }
 & cl.exe /nologo /std:c++17 /EHsc /utf-8 /W4 /Ivendor tests/l4n_smoke.cpp /Fobuild/l4n_smoke.obj /Febuild/l4n_smoke.exe /link d3d9.lib user32.lib
 if ($LASTEXITCODE -ne 0) { throw 'L4N smoke build failed' }
+& cl.exe /nologo /std:c++17 /EHsc /utf-8 /W4 /Isrc /Ivendor tests/interface_inventory_test.cpp /Fobuild/interface_inventory_test.obj /Febuild/interface_inventory_test.exe
+if ($LASTEXITCODE -ne 0) { throw 'Interface inventory test build failed' }
+& ./build/interface_inventory_test.exe
+if ($LASTEXITCODE -ne 0) { throw 'Interface inventory tests failed' }

@@ -7,7 +7,7 @@
 
 L4N LyricsPlugin → Source 相机 / LX HTTP / 动画 / 世界投影 / D3D9 绘制 → LDB Client → Host → DXVK。
 
-Source 采样：核对 VClient015 / VEngineClient013 接口后，在 View_Render 原函数返回时读取引擎维护的 world-to-view / world-to-screen 矩阵。
+Source 采样：核对 VClient016 / VEngineClient013 接口后，在 View_Render 原函数返回时读取引擎维护的 world-to-view / world-to-screen 矩阵。
 不再使用 D3D9 GetTransform 推断相机。游戏侧快照在进程内发布；渲染回调只读快照。
 未找到准确接口或检测到其他来源的函数指针时，拒绝安装相机钩子，继续屏幕歌词。
 这两个接口与 Steam 实机的兼容性尚待验证，不能仅根据 SDK 编译成功认定兼容。
@@ -59,3 +59,5 @@ ZIP source/scripts/install.ps1 可自动备份、迁移配置并禁用旧 Host D
 ## 编译器边界
 
 MSVC 构建直接使用原始 L4N SDK 虚接口。MinGW 构建通过显式的 MSVC x86 九项虚表适配（单个 scalar-deleting destructor 槽）导出接口，避免 GNU 双析构槽造成回调错位。Windows smoke 也按 MSVC 槽位调用导出实例。实际 L4N 加载器兼容仍需运行验证。
+
+0.4.2 以用户 DLL 的静态布局为准，见 0.4.2-source-build.md；旧 SDK 的方法索引不适用。

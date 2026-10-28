@@ -20,3 +20,8 @@ Its full copyright and license text are embedded in the header.
   AlliedModders HL2SDK l4d2 2a31cd007b2d7d2f964dc093eedcf7a812cf9dd6,
   public/cdll_int.h. See vendor/source-interface-contract.json. No Valve SDK
   engine implementation or game binaries are redistributed.
+
+0.4.2 corrects the Source binding using static inspection of user-supplied
+client.dll / engine.dll. The verified profile in vendor/source-binary-profile.json
+supersedes the old public-SDK slot inventory for runtime binding. Uploaded game
+DLLs are not bundled or committed; only hashes and interface metadata are saved.
