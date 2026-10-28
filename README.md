@@ -1,65 +1,146 @@
-# L4D2DangoMusic 0.7.2
+# L4D2DangoMusic
 
-纯 x86 L4N 歌词插件：Source 相机、LX API、Peak 风格动画、世界投影、D3D9 绘制，正常经过 LDB Client → Host → DXVK。
+为《求生之路 2》（Left 4 Dead 2）提供音乐歌词显示的 L4N 插件。通过兼容 LX / BLF 的本地音乐 API 获取播放进度和歌词，在游戏中呈现带逐字动画的歌词，并支持世界空间定位、歌名与作者显示以及游戏内调节。
 
-0.7.2补充分组高度/距离调节、恢复可见弹跳和抖动、提供动画预览；默认歌词位于屏幕中心稍上方（距顶部44%），长句回屏默认关闭。保留0.7.1的暂停/重连清理和重复副本防护。
+插件在 **32 位游戏进程**中运行，使用 Source Engine 相机信息和 D3D9 绘制，适配 [L4D2_Dxvk_32to64_Bridge](https://github.com/yeyunyyds/L4D2_Dxvk_32to64_Bridge)（LDB）的 Client → Host → DXVK 渲染链路。
 
-带固定预览的位置菜单：歌名、作者及1～9个歌词轮换位置可分别调整高度、左右、距离和大小，并可保存或重置。保留六套视觉预设、旧句额外停留1秒和长句回屏默认关闭，可在菜单开启。
+## 功能
 
-## 安装与升级
+- 同步显示 LRC / LX 歌词，支持逐字时间信息及翻译。
+- 世界空间歌词：歌词随相机移动产生视差，也可使用屏幕显示模式。
+- 支持 1～9 个歌词位置依次轮换，分别调整高度、左右、距离和大小。
+- 歌名、作者独立显示与定位，歌词支持整体位置调节。
+- 提供六套视觉预设、自定义颜色、柔光、逐字弹跳和抖动效果。
+- 通过 L4N 菜单实时设置，支持固定内容预览、动画预览、位置重置与配置保存。
+- 支持暂停、恢复播放、换歌及播放器断开后的重新同步。
 
-退出游戏和 Host，解压发布包，在 **source 文件夹**打开 PowerShell：
+本插件负责显示歌词，不播放音乐，也不提供音乐资源。
+
+## 运行要求
+
+- Windows 版《求生之路 2》。
+- 已安装并正常工作的 L4N，支持插件接口 v2 的 HUD 菜单功能。
+- 本项目面向的 [LDB 渲染桥](https://github.com/yeyunyyds/L4D2_Dxvk_32to64_Bridge)环境。
+- 提供兼容 `/status` 和 `/lyric-all` HTTP 接口的 LX / BLF 音乐播放器，并已开启本地 API。
+
+默认连接 `127.0.0.1:23330`。不同播放器版本提供的 API 可能不同，请先确认所用版本支持上述接口。
+
+世界空间模式依赖受支持的 Source 相机接口与游戏构建；无法取得有效相机信息时，插件会回退到屏幕显示。世界空间歌词目前不提供墙体遮挡效果。
+
+## 安装
+
+[下载安装包：L4D2DangoMusic 0.7.2](https://github.com/yeyunyyds/LDBDangoMusic/raw/refs/heads/zip/releases/L4D2DangoMusic-0.7.2-l4n.zip)
+
+### 使用安装脚本
+
+1. 退出游戏和 LDB Host。
+2. 解压安装包，在包内的 **`source` 文件夹**打开 PowerShell。
+3. 执行以下命令，将 `GameRoot` 改为自己的游戏根目录：
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass
 .\scripts\install.ps1 -GameRoot "D:\Steam\steamapps\common\Left 4 Dead 2"
 ```
 
-如果已经在 source/scripts 目录，只需 `.\install.ps1 ...`。
-工具会迁移旧 LDBDangoMusic 配置，并停用旧歌词 DLL，保留旧文件供回滚。
+如果 PowerShell 已位于 `source\scripts` 文件夹，使用：
 
-手动安装位置：`bin/neko/plugins/L4D2DangoMusic.dll`。
-配置：`bin/neko/plugins/L4D2DangoMusic/config.json`；日志：`bin/neko/plugins/L4D2DangoMusic.log`。
-**手动升级务必停用旧 LDBDangoMusic.dll，不能让新旧歌词插件同时加载。**
+```powershell
+.\install.ps1 -GameRoot "D:\Steam\steamapps\common\Left 4 Dead 2"
+```
 
-游戏中进入 L4N → L4D2DangoMusic。改动实时生效，点击“保存设置”后才在下次启动保留。
-详情见 [菜单、迁移及重影说明](docs/0.6.0-menu-and-ghosting.md)。
+脚本会安装 DLL、保留已有配置，并将检测到的本项目旧副本移至 `bin\neko\plugins-disabled` 下备份。安装完成后，重新启动游戏和 Host。
 
-## 构建与验证
+### 手动安装
 
-Windows 使用 x86 MSVC 开发者 PowerShell：`./scripts/build.ps1`；独立验证：`./scripts/smoke.ps1`。
-Linux 回归：`bash scripts/test.sh`。MinGW i686 POSIX 编译：`bash scripts/build-mingw.sh`，可通过 DANGO_CXX 指定编译器。
-打包：`python scripts/package.py`。预设资料在 presets/。
+首次安装时，将安装包内的以下文件复制到游戏根目录下的对应位置：
 
-Source 游戏构建适配与此前0.4.3相同，仅支持已核对的 DLL 资料；不匹配则保留屏幕歌词。
-云端测试和交叉编译不代表 Windows L4N 菜单或重影问题已经游戏内验收。
-旧包和 GitHub 仓库原名可能保留，当前软件名、代码和产物统一为 L4D2DangoMusic。
+```text
+bin/neko/plugins/L4D2DangoMusic.dll
+bin/neko/plugins/L4D2DangoMusic/config.json
+```
 
-GPL-3.0；来源与 SDK 单独许可见 NOTICE.md。
+升级时替换 DLL，保留自己的 `config.json`。插件在 L4N 游戏侧加载，当前安装包无需另装 Host 端歌词 DLL。
 
-## 0.6.1 旧句残留修正
+请只保留一份启用的歌词插件。旧的 `LDBDangoMusic.dll`、改名副本或 Host 端旧歌词插件应移出加载目录，否则可能出现两份歌词或菜单分别控制不同副本的情况。
 
-取消基于场景计数跳过呈现，改为保存干净底图 → 绘制/呈现 → 恢复底图，避免文字留在游戏 backbuffer。
-当前句/退场句使用独立生命周期，不复活旧实例。默认预设改名“暖白浮光”。
-修正依据与未验收范围见 [旧句残留说明](docs/0.6.1-stale-lyrics.md)。
+## 使用与设置
 
-## 0.7.0 位置调节与预览
+1. 启动音乐播放器并开启本地 API，播放一首有歌词的歌曲。
+2. 启动游戏，在 L4N 菜单中选择 **L4D2DangoMusic**。
+3. 按需调整显示、翻译、预设、颜色、动画及同步偏移。
+4. 点击 **保存设置**，使修改在下次启动时继续生效。
 
-L4N → L4D2DangoMusic → **位置与数量（固定预览）**。
-歌名、作者、歌词1～9可分别调整左右、高度、距离和大小，支持单项/全部位置重置。
-预览期间暂时隐藏实时歌词，播放器继续播放；各级页面均可“保存设置并结束预览”，恢复当前歌词。
-默认2个轮换位置位于屏幕中心略下方；歌名在上边缘附近，距离更远。
-详情和旧配置说明见 [位置编辑说明](docs/0.7.0-layout-editor.md)。
+进入 **位置与数量** 页面后，实时歌词会暂时替换为固定的歌名、作者和编号歌词，方便调节位置；音乐仍继续播放。各级页面均可选择 **保存设置并结束预览**，恢复当前歌曲的歌词显示。
 
-## 0.7.1 暂停、重连与旧副本清理
+默认使用两个轮换位置，歌词位于屏幕中心稍上方，长句自动回到视野的功能默认关闭。歌名和作者可在显示菜单中分别开启。
 
-暂停/停止/断开后清理歌词与回屏状态，恢复播放或重开软件时重新核对进度并获取歌词。
-菜单标明0.7.1，新增实际DLL路径、其他已加载模块和播放器状态诊断。
-**有旧版本时，请退出游戏和Host，使用安装脚本升级。** 脚本会将本项目旧副本、改名副本及DLL备份移出插件目录，保留配置。
-更多说明见 [播放器会话与重复副本](docs/0.7.1-player-session.md)。
+### 配置文件
 
-## 0.7.2 分组位置与动画
+配置路径为 `bin/neko/plugins/L4D2DangoMusic/config.json`。通常使用游戏内菜单即可；手动编辑配置时，请先退出游戏。
 
-位置页可分别调整歌名、作者；歌词增加“全部歌词高度 / 远近”，保留逐个编号设置。
-歌词默认高度改为44%，长句回屏默认关闭。弹跳从实际显示起算，抖动不再随远近缩得过小；提供示例动画预览和恢复默认动画入口。
-旧默认值会迁移一次，自定义位置保留。详情见 [位置、动画与默认值迁移](docs/0.7.2-motion-and-placement.md)。
+| 配置项 | 用途 | 默认值 |
+| --- | --- | --- |
+| `port` | 本地音乐 API 端口 | `23330` |
+| `demo` | 使用离线示例歌词 | `false` |
+| `translation` | 显示翻译 | `false` |
+| `worldLyrics` | 使用世界空间显示 | `true` |
+| `offsetMs` | 歌词同步偏移，正值提前 | `500` |
+| `layout.lyricCount` | 歌词轮换位置数量 | `2` |
+| `reanchorMs` | 长句回到视野的间隔，`0` 表示关闭 | `0` |
+| `showTitle` / `showArtist` | 显示歌名 / 作者 | `false` |
+
+完整配置见 [config.example.json](config.example.json)，视觉预设见 [presets](presets/)。如需独立检查显示效果，可使用游戏内预览，或将 `demo` 设为 `true`。
+
+### 问题排查
+
+- **没有歌词**：确认播放器 API 已开启、端口一致，且歌曲带有同步歌词。正常播放模式在暂停、停止或断开时会隐藏歌词。
+- **歌词有提前或延后**：在菜单中调整同步偏移；正值使歌词提前，负值使歌词延后。
+- **出现双份歌词**：检查 L4N 和 Host 的插件目录，移出旧副本后完整重启游戏和 Host。
+- **动画不明显**：部分预设会关闭动画，可选择“恢复默认动画”，再进入“动画预览”检查。
+
+菜单中的 **版本、路径与播放器诊断** 可查看实际加载的 DLL 路径和播放状态。日志位于 `bin/neko/plugins/L4D2DangoMusic.log`；反馈问题时，请附上日志、插件版本和复现步骤。
+
+## 从源码构建
+
+### Windows / MSVC
+
+安装 Visual Studio C++ 构建工具，在 **x86 开发者 PowerShell** 中进入源码根目录并运行：
+
+```powershell
+.\scripts\build.ps1
+```
+
+生成文件位于 `build` 目录。构建使用项目内附带的 SDK 头文件，无需提供游戏 DLL。
+
+### Linux / MinGW
+
+安装支持 C++17 的 GCC、Python 3，以及 i686 MinGW-w64 POSIX 工具链：
+
+```bash
+bash scripts/test.sh
+bash scripts/build-mingw.sh
+```
+
+可通过 `DANGO_CXX` 环境变量指定 MinGW 编译器路径。Windows D3D9 验证程序可通过 `scripts/smoke.ps1` 运行；打包使用 Python 3：
+
+```bash
+python scripts/package.py
+```
+
+跨平台回归测试和交叉编译不能替代实际 L4N / LDB 游戏环境验证。
+
+## 参考项目与第三方代码
+
+| 项目 | 用途 |
+| --- | --- |
+| [Sorihiko/DangoMusic](https://github.com/Sorihiko/DangoMusic) | 歌词呈现与音乐 API 集成参考。 |
+| [ZHIZHU4410/PeakDangoMusic](https://github.com/ZHIZHU4410/PeakDangoMusic) | 歌词动画、逐字时序、排版与位置规则参考；相关逻辑适配为原生 C++ 实现。 |
+| [yeyunyyds/L4D2_Dxvk_32to64_Bridge](https://github.com/yeyunyyds/L4D2_Dxvk_32to64_Bridge) | LDB 渲染桥与所使用的 L4N 插件 SDK 头文件来源。 |
+| [AlliedModders/hl2sdk · l4d2](https://github.com/alliedmodders/hl2sdk/tree/l4d2) | Source 接口资料参考。 |
+| [nlohmann/json](https://github.com/nlohmann/json) | JSON 配置与 API 数据解析。 |
+
+具体来源、参考提交及第三方许可见 [NOTICE.md](NOTICE.md)。本项目不打包 Unity / TextMesh Pro 材质、上游游戏二进制、字体或音乐资源。
+
+## 许可
+
+本项目采用 [GPL-3.0](LICENSE) 许可。第三方代码与 SDK 头文件遵循各自的许可及声明，详见 [NOTICE.md](NOTICE.md)。
