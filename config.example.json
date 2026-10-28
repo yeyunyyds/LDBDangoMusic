@@ -1,6 +1,6 @@
 {
   "port": 23330,
-  "demo": false,
+  "demo": true,
   "fontSize": 32,
   "translation": true,
   "alternate": true,

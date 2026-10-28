@@ -11,19 +11,27 @@
 #include <fstream>
 #include <filesystem>
 #include <map>
+#include <cstdio>
+#include <cstddef>
 #include "ldb_host_plugin.h"
 #include "core.hpp"
+#include "present_target.hpp"
+static_assert(sizeof(LDBHostPluginV1)==96, "Requires updated x64 Host SDK");
+static_assert(sizeof(LDBHostPresentInfoV1)==56, "Requires updated x64 Present SDK");
 namespace {
 using namespace dango;
 int64_t now(){return static_cast<int64_t>(GetTickCount64());}
-struct Config {int port=23330,size=32;bool demo=false,translation=true,alternate=true;float y=.72f;int offset=0;};
+struct Config {int port=23330,size=32;bool demo=true,translation=true,alternate=true;float y=.72f;int offset=0;};
 Config cfg;std::filesystem::path directory;LDBHostLogFn logger=nullptr;
 std::atomic<bool> stopping{false};std::thread worker;std::mutex sleepMutex;std::condition_variable wake;
 std::shared_ptr<const State> snapshot=std::make_shared<State>();
+bool presentLogged[2]={false,false};uint64_t reportedErrors=0;bool drewPixels=false;
+void note(const std::string& message){if(logger)logger(LDB_HOST_LOG_INFO,message.c_str());}
+bool checked(HRESULT hr,unsigned stage,const char* operation){if(SUCCEEDED(hr))return true;auto bit=uint64_t(1)<<stage;if(!(reportedErrors&bit)){reportedErrors|=bit;char msg[256];std::snprintf(msg,sizeof(msg),"LDBDangoMusic render-error operation=%s hr=0x%08lx",operation,static_cast<unsigned long>(hr));if(logger)logger(LDB_HOST_LOG_WARNING,msg);}return false;}
 void publish(State s){std::atomic_store(&snapshot,std::make_shared<const State>(std::move(s)));}
 struct Internet {HINTERNET h; explicit Internet(HINTERNET v):h(v){if(!h)throw std::runtime_error("WinHTTP handle failed");}~Internet(){WinHttpCloseHandle(h);}Internet(const Internet&)=delete;};
 nlohmann::json get(const wchar_t* path,size_t limit){
- Internet session(WinHttpOpen(L"LDBDangoMusic/0.1",WINHTTP_ACCESS_TYPE_NO_PROXY,WINHTTP_NO_PROXY_NAME,WINHTTP_NO_PROXY_BYPASS,0));
+ Internet session(WinHttpOpen(L"LDBDangoMusic/0.2",WINHTTP_ACCESS_TYPE_NO_PROXY,WINHTTP_NO_PROXY_NAME,WINHTTP_NO_PROXY_BYPASS,0));
  WinHttpSetTimeouts(session.h,500,500,500,500);
  Internet connection(WinHttpConnect(session.h,L"127.0.0.1",static_cast<INTERNET_PORT>(cfg.port),0));
  Internet request(WinHttpOpenRequest(connection.h,L"GET",path,nullptr,WINHTTP_NO_REFERER,WINHTTP_DEFAULT_ACCEPT_TYPES,0));
@@ -63,30 +71,38 @@ Image raster(IDirect3DDevice9* dev,const std::string& text){
  SelectObject(dc,old);DeleteObject(bmp);}
  SelectObject(dc,oldFont);DeleteObject(font);DeleteDC(dc);return result;
 }
-Image image(IDirect3DDevice9* dev,const std::string& text){auto it=cache.find(text);if(it!=cache.end())return it->second;auto im=raster(dev,text);cache.emplace(text,im);return im;}
+Image image(IDirect3DDevice9* dev,const std::string& text){auto it=cache.find(text);if(it!=cache.end())return it->second;auto im=raster(dev,text);if(im.texture)cache.emplace(text,im);else checked(E_FAIL,7,"Create glyph texture (GDI/CreateTexture/LockRect)");return im;}
 struct Vertex{float x,y,z,rhw;DWORD color;float u,v;};
-void draw(IDirect3DDevice9* dev,Image im,float x,float y,float scale,float alpha){if(!im.texture||alpha<=0)return;float r=x+im.width*scale,b=y+im.height*scale;DWORD color=(DWORD(std::clamp(alpha,0.f,1.f)*255)<<24)|0xffffff;Vertex v[]={{x-.5f,y-.5f,0,1,color,0,0},{r-.5f,y-.5f,0,1,color,1,0},{x-.5f,b-.5f,0,1,color,0,1},{r-.5f,b-.5f,0,1,color,1,1}};dev->SetTexture(0,im.texture);dev->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP,2,v,sizeof(Vertex));}
+void draw(IDirect3DDevice9* dev,Image im,float x,float y,float scale,float alpha){if(!im.texture||alpha<=0)return;float r=x+im.width*scale,b=y+im.height*scale;DWORD color=(DWORD(std::clamp(alpha,0.f,1.f)*255)<<24)|0xffffff;Vertex v[]={{x-.5f,y-.5f,0,1,color,0,0},{r-.5f,y-.5f,0,1,color,1,0},{x-.5f,b-.5f,0,1,color,0,1},{r-.5f,b-.5f,0,1,color,1,1}};dev->SetTexture(0,im.texture);if(checked(dev->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP,2,v,sizeof(Vertex)),6,"DrawPrimitiveUP")&&!drewPixels){drewPixels=true;note("LDBDangoMusic first textured draw submitted");}}
 struct DrawGuard {
  IDirect3DDevice9* dev; IDirect3DStateBlock9* block=nullptr;
- IDirect3DSurface9 *target=nullptr,*depth=nullptr,*back=nullptr; bool scene=false;
+ IDirect3DSurface9 *target=nullptr,*depth=nullptr,*back=nullptr;
+ IDirect3DSurface9* extra[3]={nullptr,nullptr,nullptr};unsigned extraCount=0;bool captured=false;bool scene=false;
  explicit DrawGuard(IDirect3DDevice9* d):dev(d){}
- ~DrawGuard(){if(scene)dev->EndScene();if(block){if(target)dev->SetRenderTarget(0,target);dev->SetDepthStencilSurface(depth);block->Apply();block->Release();}if(back)back->Release();if(target)target->Release();if(depth)depth->Release();}
+ ~DrawGuard(){if(scene)dev->EndScene();if(block){if(captured){dev->SetDepthStencilSurface(nullptr);if(target)dev->SetRenderTarget(0,target);for(unsigned i=0;i<extraCount;++i)dev->SetRenderTarget(i+1,extra[i]);dev->SetDepthStencilSurface(depth);}block->Apply();block->Release();}for(auto* surface:extra)if(surface)surface->Release();if(back)back->Release();if(target)target->Release();if(depth)depth->Release();}
 };
-void render(IDirect3DDevice9* dev,const LDBHostPresentInfoV1* present){
+void WINAPI render(IDirect3DDevice9* dev,const LDBHostPresentInfoV1* present){
+ if(!dev||!present||present->struct_size!=sizeof(*present))return;
+ const unsigned path=present->is_swapchain_present?1:0;
+ if(!presentLogged[path]){presentLogged[path]=true;note(std::string("LDBDangoMusic first Present path=")+(path?"SwapChain":"Device")+(present->swap_chain?" current-chain=yes":" current-chain=no"));}
  try {if(cache.size()>128)clear();auto state=std::atomic_load(&snapshot);auto position=state->at(now());auto at=position<0?-1:indexAt(state->timeline,position+cfg.offset);
  std::string text=at<0?state->message:state->timeline[at].text;
  DrawGuard guard(dev);auto& target=guard.target;auto& depth=guard.depth;auto& back=guard.back;auto& block=guard.block;
- if(FAILED(dev->CreateStateBlock(D3DSBT_ALL,&block)))return;
- dev->GetRenderTarget(0,&target);dev->GetDepthStencilSurface(&depth);
- // SwapChain Present does not identify its swap chain in ABI v1. Skip it rather than paint the wrong target.
- if(present&&present->is_swapchain_present){return;}
- if(SUCCEEDED(dev->GetBackBuffer(0,0,D3DBACKBUFFER_TYPE_MONO,&back))){D3DSURFACE_DESC desc{};back->GetDesc(&desc);dev->SetRenderTarget(0,back);dev->SetDepthStencilSurface(nullptr);D3DVIEWPORT9 vp{0,0,desc.Width,desc.Height,0,1};dev->SetViewport(&vp);
- if(SUCCEEDED(dev->BeginScene())){guard.scene=true;
+ if(!checked(dev->CreateStateBlock(D3DSBT_ALL,&block),0,"CreateStateBlock"))return;
+ if(!checked(dev->GetRenderTarget(0,&target),1,"GetRenderTarget"))return;dev->GetDepthStencilSurface(&depth);
+ D3DCAPS9 caps{};if(!checked(dev->GetDeviceCaps(&caps),8,"GetDeviceCaps"))return;
+ guard.extraCount=std::max(1u,std::min<unsigned>(caps.NumSimultaneousRTs,4))-1;
+ for(unsigned i=0;i<guard.extraCount;++i)dev->GetRenderTarget(i+1,&guard.extra[i]);guard.captured=true;
+ // The supplied chain is borrowed. Only GetBackBuffer's returned reference is released.
+ HRESULT backResult=currentBackBuffer(dev,present->swap_chain,path!=0,D3DBACKBUFFER_TYPE_MONO,&back,D3DERR_INVALIDCALL);
+ if(checked(backResult,2,"Get current SwapChain backbuffer")){D3DSURFACE_DESC desc{};if(!checked(back->GetDesc(&desc),9,"Get backbuffer description"))return;dev->SetDepthStencilSurface(nullptr);for(unsigned i=0;i<guard.extraCount;++i)dev->SetRenderTarget(i+1,nullptr);if(!checked(dev->SetRenderTarget(0,back),3,"SetRenderTarget"))return;D3DVIEWPORT9 vp{0,0,desc.Width,desc.Height,0,1};if(!checked(dev->SetViewport(&vp),10,"SetViewport"))return;
+ if(checked(dev->BeginScene(),4,"BeginScene")){guard.scene=true;
  dev->SetVertexShader(nullptr);dev->SetPixelShader(nullptr);dev->SetFVF(D3DFVF_XYZRHW|D3DFVF_DIFFUSE|D3DFVF_TEX1);
  dev->SetRenderState(D3DRS_FILLMODE,D3DFILL_SOLID);dev->SetRenderState(D3DRS_ZENABLE,FALSE);dev->SetRenderState(D3DRS_ZWRITEENABLE,FALSE);dev->SetRenderState(D3DRS_CULLMODE,D3DCULL_NONE);dev->SetRenderState(D3DRS_LIGHTING,FALSE);dev->SetRenderState(D3DRS_FOGENABLE,FALSE);dev->SetRenderState(D3DRS_STENCILENABLE,FALSE);dev->SetRenderState(D3DRS_SCISSORTESTENABLE,FALSE);dev->SetRenderState(D3DRS_ALPHATESTENABLE,FALSE);dev->SetRenderState(D3DRS_ALPHABLENDENABLE,TRUE);dev->SetRenderState(D3DRS_SRCBLEND,D3DBLEND_SRCALPHA);dev->SetRenderState(D3DRS_DESTBLEND,D3DBLEND_INVSRCALPHA);dev->SetRenderState(D3DRS_BLENDOP,D3DBLENDOP_ADD);dev->SetRenderState(D3DRS_SEPARATEALPHABLENDENABLE,FALSE);dev->SetRenderState(D3DRS_COLORWRITEENABLE,15);dev->SetRenderState(D3DRS_SRGBWRITEENABLE,FALSE);
  for(auto stage:{D3DTSS_COLOROP,D3DTSS_ALPHAOP})dev->SetTextureStageState(0,stage,D3DTOP_MODULATE);
  dev->SetTextureStageState(0,D3DTSS_COLORARG1,D3DTA_TEXTURE);dev->SetTextureStageState(0,D3DTSS_COLORARG2,D3DTA_DIFFUSE);dev->SetTextureStageState(0,D3DTSS_ALPHAARG1,D3DTA_TEXTURE);dev->SetTextureStageState(0,D3DTSS_ALPHAARG2,D3DTA_DIFFUSE);dev->SetTextureStageState(0,D3DTSS_TEXCOORDINDEX,0);dev->SetTextureStageState(0,D3DTSS_TEXTURETRANSFORMFLAGS,D3DTTFF_DISABLE);dev->SetTextureStageState(1,D3DTSS_COLOROP,D3DTOP_DISABLE);dev->SetTextureStageState(1,D3DTSS_ALPHAOP,D3DTOP_DISABLE);
  dev->SetSamplerState(0,D3DSAMP_MINFILTER,D3DTEXF_LINEAR);dev->SetSamplerState(0,D3DSAMP_MAGFILTER,D3DTEXF_LINEAR);dev->SetSamplerState(0,D3DSAMP_ADDRESSU,D3DTADDRESS_CLAMP);dev->SetSamplerState(0,D3DSAMP_ADDRESSV,D3DTADDRESS_CLAMP);dev->SetSamplerState(0,D3DSAMP_SRGBTEXTURE,FALSE);
+ if(cfg.demo){auto banner=image(dev,"LDBDangoMusic 0.2.0 DEMO - "+std::string(path?"SwapChain":"Device"));draw(dev,banner,16,16,std::min(1.f,desc.Width*.9f/std::max(banner.width,1)),1.f);}
  auto im=image(dev,text);float scale=std::min(1.f,desc.Width*.7f/std::max(im.width,1));float center=desc.Width*((cfg.alternate&&at>=0)?(at%2?.67f:.33f):.5f);float x=std::clamp(center-im.width*scale*.5f,8.f,std::max(8.f,desc.Width-im.width*scale-8));float y=desc.Height*cfg.y;
  if(at>=0){const auto& line=state->timeline[at];auto elapsed=position+cfg.offset-line.start;float fade=std::clamp(elapsed/250.f,0.f,1.f);y+=(1-fade)*8;
  if(line.words.empty())draw(dev,im,x,y,scale,fade);
@@ -95,15 +111,18 @@ void render(IDirect3DDevice9* dev,const LDBHostPresentInfoV1* present){
  }else draw(dev,im,x,y,scale,.7f);
  dev->EndScene();guard.scene=false;}
  }
- 
+
  }catch(...){if(logger)logger(LDB_HOST_LOG_ERROR,"Lyric render failed");}
 }
 BOOL WINAPI load(const LDBHostApiV1* host){try{if(!host||host->struct_size<sizeof(*host)||host->abi_version!=1||host->host_bits!=64)return FALSE;logger=host->log;directory=std::filesystem::path(host->host_directory)/L"plugins"/L"LDBDangoMusic";auto path=directory/L"config.json";
- if(std::filesystem::exists(path)){std::ifstream f(path);auto j=nlohmann::json::parse(f);cfg.port=std::clamp(j.value("port",23330),1,65535);cfg.size=std::clamp(j.value("fontSize",32),12,96);cfg.demo=j.value("demo",false);cfg.translation=j.value("translation",true);cfg.alternate=j.value("alternate",true);cfg.y=std::clamp(j.value("verticalPosition",.72f),.1f,.85f);cfg.offset=std::clamp(j.value("offsetMs",0),-10000,10000);}
- stopping=false;worker=std::thread(run);if(logger)logger(LDB_HOST_LOG_INFO,"LDBDangoMusic loaded (x64 prototype)");return TRUE;}catch(...){return FALSE;}}
-void WINAPI created(IDirect3DDevice9*){clear();}
+ if(std::filesystem::exists(path)){std::ifstream f(path);auto j=nlohmann::json::parse(f);cfg.port=std::clamp(j.value("port",23330),1,65535);cfg.size=std::clamp(j.value("fontSize",32),12,96);cfg.demo=j.value("demo",true);cfg.translation=j.value("translation",true);cfg.alternate=j.value("alternate",true);cfg.y=std::clamp(j.value("verticalPosition",.72f),.1f,.85f);cfg.offset=std::clamp(j.value("offsetMs",0),-10000,10000);}
+ note("LDBDangoMusic 0.2.0 config="+path.u8string()+" mode="+(cfg.demo?"DEMO":"BLF/LX")+" port="+std::to_string(cfg.port));
+ stopping=false;worker=std::thread(run);return TRUE;}catch(const std::exception& e){if(logger)logger(LDB_HOST_LOG_ERROR,e.what());return FALSE;}catch(...){return FALSE;}}
+void WINAPI created(IDirect3DDevice9*){clear();reportedErrors=0;drewPixels=false;note("LDBDangoMusic device lifecycle: created/destroyed; textures cleared");}
+void WINAPI swapCreated(IDirect3DSwapChain9*){note("LDBDangoMusic SwapChain created (borrowed)");}
+void WINAPI swapDestroyed(IDirect3DSwapChain9*){note("LDBDangoMusic SwapChain destroyed (no retained references)");}
 void WINAPI beforeReset(IDirect3DDevice9*,const D3DPRESENT_PARAMETERS*,BOOL){clear();}
-void WINAPI afterReset(IDirect3DDevice9*,HRESULT,BOOL){}
+void WINAPI afterReset(IDirect3DDevice9*,HRESULT hr,BOOL){reportedErrors=0;checked(hr,5,"Reset");note("LDBDangoMusic Reset completed; textures will rebuild");}
 void WINAPI shutdown(){stopping=true;wake.notify_all();if(worker.joinable())worker.join();clear();}
 }
-extern "C" __declspec(dllexport) BOOL WINAPI LDBHostPluginQuery(uint32_t abi,LDBHostPluginV1* out){if(abi!=1||!out||out->struct_size<sizeof(*out))return FALSE;*out={sizeof(*out),1,"LDBDangoMusic","0.1.0",load,created,render,beforeReset,afterReset,created,shutdown};return TRUE;}
+extern "C" __declspec(dllexport) BOOL WINAPI LDBHostPluginQuery(uint32_t abi,LDBHostPluginV1* out){if(abi!=1||!out||out->struct_size!=sizeof(*out))return FALSE;*out={sizeof(*out),1,"LDBDangoMusic","0.2.0",load,created,swapCreated,render,beforeReset,afterReset,swapDestroyed,created,shutdown};return TRUE;}

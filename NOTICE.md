@@ -6,7 +6,7 @@ This project implements a native C++ D3D9 Host plugin, not a Minecraft or Unity 
 No upstream game binaries, audio, fonts, or account data are included.
 
 vendor/ldb_host_plugin.h is copied verbatim from yeyunyyds/L4D2_Dxvk_32to64_Bridge,
-90083c0a0f9685638fddd51ff8e6b098287f5648, plugins/host-sdk/ldb_host_plugin.h.
+db5cb944314bb50c2e61835d5f0e8855c089e2e6, plugins/host-sdk/ldb_host_plugin.h.
 It retains its MIT SPDX identifier and copyright notice.
 
 vendor/json.hpp: nlohmann/json v3.11.3, Copyright Niels Lohmann, MIT.
