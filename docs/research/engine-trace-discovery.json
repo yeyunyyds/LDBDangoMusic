@@ -1,0 +1,46 @@
+{
+  "sha256": "8a6d468059394bf4cfce32f11dcba12ef45de88da1373084d5a2916d0bf7ba86",
+  "timestamp": 1782845142,
+  "image_size": 7598080,
+  "interfaces": [
+    {
+      "name": "EngineTraceServer003",
+      "name_rva": "0x3876a8",
+      "registration_rva": "0x340e40",
+      "factory_rva": "0x1774d0",
+      "object_rva": "0x42fa40",
+      "vtable_rva": "0x3873fc",
+      "first_8_method_rvas": [
+        "0x177630",
+        "0x177600",
+        "0x178950",
+        "0x177990",
+        "0x179ff0",
+        "0x179760",
+        "0x177d60",
+        "0x177da0"
+      ]
+    },
+    {
+      "name": "EngineTraceClient003",
+      "name_rva": "0x3876c0",
+      "registration_rva": "0x340e60",
+      "factory_rva": "0x1774e0",
+      "object_rva": "0x42fa5c",
+      "vtable_rva": "0x387474",
+      "first_8_method_rvas": [
+        "0x177630",
+        "0x177600",
+        "0x178950",
+        "0x177990",
+        "0x179ff0",
+        "0x179760",
+        "0x177d60",
+        "0x177da0"
+      ]
+    }
+  ],
+  "runtime_dispatch_verified": false,
+  "sdk_trace_ray_candidate_slot": 5,
+  "note": "Public SDK candidate only. Validate Ray_t, trace_t, filter ABI and game-thread invocation before dispatch."
+}
