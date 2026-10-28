@@ -1,9 +1,18 @@
 {
   "port": 23330,
-  "demo": true,
+  "demo": false,
   "fontSize": 32,
   "translation": true,
   "alternate": true,
   "verticalPosition": 0.72,
-  "offsetMs": 0
+  "offsetMs": 500,
+  "outline": true,
+  "glow": true,
+  "glowStrength": 0.18,
+  "opacity": 1.0,
+  "maxWidth": 0.44,
+  "transitionMs": 380,
+  "displayMode": "character",
+  "textColor": "#F4EAFF",
+  "accentColor": "#B9DFFF"
 }

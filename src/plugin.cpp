@@ -16,12 +16,13 @@
 #include "ldb_host_plugin.h"
 #include "core.hpp"
 #include "present_target.hpp"
+#include "presentation.hpp"
 static_assert(sizeof(LDBHostPluginV1)==96, "Requires updated x64 Host SDK");
 static_assert(sizeof(LDBHostPresentInfoV1)==56, "Requires updated x64 Present SDK");
 namespace {
 using namespace dango;
 int64_t now(){return static_cast<int64_t>(GetTickCount64());}
-struct Config {int port=23330,size=32;bool demo=true,translation=true,alternate=true;float y=.72f;int offset=0;};
+struct Config {int port=23330,size=32;bool demo=true,translation=true,alternate=true;float y=.72f;int offset=500;bool outline=true,glow=true;float glowStrength=.18f,opacity=1.f,width=.44f;int transition=380;std::string mode="character";DWORD textColor=0xfff4eaff,accent=0xffb9dfff;};
 Config cfg;std::filesystem::path directory;LDBHostLogFn logger=nullptr;
 std::atomic<bool> stopping{false};std::thread worker;std::mutex sleepMutex;std::condition_variable wake;
 std::shared_ptr<const State> snapshot=std::make_shared<State>();
@@ -31,7 +32,7 @@ bool checked(HRESULT hr,unsigned stage,const char* operation){if(SUCCEEDED(hr))r
 void publish(State s){std::atomic_store(&snapshot,std::make_shared<const State>(std::move(s)));}
 struct Internet {HINTERNET h; explicit Internet(HINTERNET v):h(v){if(!h)throw std::runtime_error("WinHTTP handle failed");}~Internet(){WinHttpCloseHandle(h);}Internet(const Internet&)=delete;};
 nlohmann::json get(const wchar_t* path,size_t limit){
- Internet session(WinHttpOpen(L"LDBDangoMusic/0.2",WINHTTP_ACCESS_TYPE_NO_PROXY,WINHTTP_NO_PROXY_NAME,WINHTTP_NO_PROXY_BYPASS,0));
+ Internet session(WinHttpOpen(L"LDBDangoMusic/0.3",WINHTTP_ACCESS_TYPE_NO_PROXY,WINHTTP_NO_PROXY_NAME,WINHTTP_NO_PROXY_BYPASS,0));
  WinHttpSetTimeouts(session.h,500,500,500,500);
  Internet connection(WinHttpConnect(session.h,L"127.0.0.1",static_cast<INTERNET_PORT>(cfg.port),0));
  Internet request(WinHttpOpenRequest(connection.h,L"GET",path,nullptr,WINHTTP_NO_REFERER,WINHTTP_DEFAULT_ACCEPT_TYPES,0));
@@ -52,7 +53,7 @@ void run() noexcept {
  s.timeline=timeline;if(!timeline.empty())s.message="Connected to BLF / LX";}
  publish(std::move(s));
  }catch(const std::exception&){auto old=std::atomic_load(&snapshot);if(now()-old->sampled>3000){State s;s.message="Disconnected: enable BLF / LX local API";publish(std::move(s));}}
- std::unique_lock<std::mutex> lock(sleepMutex);wake.wait_for(lock,std::chrono::milliseconds(cfg.demo?50:500),[]{return stopping.load();});
+ std::unique_lock<std::mutex> lock(sleepMutex);wake.wait_for(lock,std::chrono::milliseconds(cfg.demo?50:150),[]{return stopping.load();});
  }
  }catch(...){if(logger)logger(LDB_HOST_LOG_ERROR,"Music worker stopped unexpectedly");}
 }
@@ -73,7 +74,25 @@ Image raster(IDirect3DDevice9* dev,const std::string& text){
 }
 Image image(IDirect3DDevice9* dev,const std::string& text){auto it=cache.find(text);if(it!=cache.end())return it->second;auto im=raster(dev,text);if(im.texture)cache.emplace(text,im);else checked(E_FAIL,7,"Create glyph texture (GDI/CreateTexture/LockRect)");return im;}
 struct Vertex{float x,y,z,rhw;DWORD color;float u,v;};
-void draw(IDirect3DDevice9* dev,Image im,float x,float y,float scale,float alpha){if(!im.texture||alpha<=0)return;float r=x+im.width*scale,b=y+im.height*scale;DWORD color=(DWORD(std::clamp(alpha,0.f,1.f)*255)<<24)|0xffffff;Vertex v[]={{x-.5f,y-.5f,0,1,color,0,0},{r-.5f,y-.5f,0,1,color,1,0},{x-.5f,b-.5f,0,1,color,0,1},{r-.5f,b-.5f,0,1,color,1,1}};dev->SetTexture(0,im.texture);if(checked(dev->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP,2,v,sizeof(Vertex)),6,"DrawPrimitiveUP")&&!drewPixels){drewPixels=true;note("LDBDangoMusic first textured draw submitted");}}
+void draw(IDirect3DDevice9* dev,Image im,float x,float y,float scale,float alpha,DWORD tint=0xffffff){if(!im.texture||alpha<=0)return;float r=x+im.width*scale,b=y+im.height*scale;DWORD color=(DWORD(std::clamp(alpha,0.f,1.f)*255)<<24)|(tint&0xffffff);Vertex v[]={{x-.5f,y-.5f,0,1,color,0,0},{r-.5f,y-.5f,0,1,color,1,0},{x-.5f,b-.5f,0,1,color,0,1},{r-.5f,b-.5f,0,1,color,1,1}};dev->SetTexture(0,im.texture);if(checked(dev->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP,2,v,sizeof(Vertex)),6,"DrawPrimitiveUP")&&!drewPixels){drewPixels=true;note("LDBDangoMusic first textured draw submitted");}}
+void styled(IDirect3DDevice9* dev,Image im,float x,float y,float scale,float alpha,DWORD color){
+ if(alpha<=.002f||!im.texture)return;
+ if(cfg.glow&&cfg.glowStrength>0){for(auto delta:{-3.f,3.f}){draw(dev,im,x+delta*scale,y,scale,alpha*cfg.glowStrength,cfg.accent);draw(dev,im,x,y+delta*scale,scale,alpha*cfg.glowStrength,cfg.accent);}}
+ if(cfg.outline){for(auto dx:{-1.f,1.f})for(auto dy:{-1.f,1.f})draw(dev,im,x+dx*scale,y+dy*scale,scale,alpha*.8f,0x101018);}
+ draw(dev,im,x,y,scale,alpha,color);
+}
+void lineFrame(IDirect3DDevice9* dev,const Timeline& timeline,int at,int64_t song,float width,float height,float externalAlpha=1,float outgoingLift=0,bool completed=false){
+ const auto& line=timeline[at];int64_t next=at+1<int(timeline.size())?timeline[at+1].start:line.start+5000;
+ auto whole=cfg.mode=="line"?image(dev,line.text):Image{};auto units=reveal(line,next,cfg.mode=="character");
+ float measured=0;for(auto& unit:units)measured+=std::max(0,image(dev,unit.text).width-8);
+ if(cfg.mode=="line")measured=float(std::max(0,whole.width-8));
+ float scale=std::min(1.f,width*cfg.width/std::max(measured+8,1.f));float center=width*(cfg.alternate?(at%2?.72f:.28f):.5f);
+ float left=std::clamp(center-(measured+8)*scale*.5f,8.f,std::max(8.f,width-(measured+8)*scale-8));
+ auto entry=motion(song-line.start,180);float alpha=externalAlpha*cfg.opacity;float y=height*cfg.y+(completed?0:entry.lift)-outgoingLift;
+ if(cfg.mode=="line")styled(dev,whole,left,y,scale,alpha*(completed?1:entry.alpha),cfg.textColor);
+ else{float pen=left;for(auto& unit:units){auto im=image(dev,unit.text);auto frame=motion(song-unit.start,140);if(completed)frame={1,1,0};float pop=scale*frame.scale;if(unit.text.find_first_not_of(" \t\r\n")!=std::string::npos)styled(dev,im,pen-im.width*(pop-scale)*.5f,y+frame.lift,pop,alpha*frame.alpha,cfg.textColor);pen+=std::max(0,im.width-8)*scale;}}
+ if(cfg.translation&&!line.translation.empty()){auto tr=image(dev,line.translation);float ts=std::min(scale*.76f,width*cfg.width/std::max(tr.width,1));styled(dev,tr,std::clamp(center-tr.width*ts*.5f,8.f,std::max(8.f,width-tr.width*ts-8)),y+cfg.size*scale*1.5f,ts,alpha*.8f*(completed?1:entry.alpha),cfg.accent);}
+}
 struct DrawGuard {
  IDirect3DDevice9* dev; IDirect3DStateBlock9* block=nullptr;
  IDirect3DSurface9 *target=nullptr,*depth=nullptr,*back=nullptr;
@@ -85,7 +104,7 @@ void WINAPI render(IDirect3DDevice9* dev,const LDBHostPresentInfoV1* present){
  if(!dev||!present||present->struct_size!=sizeof(*present))return;
  const unsigned path=present->is_swapchain_present?1:0;
  if(!presentLogged[path]){presentLogged[path]=true;note(std::string("LDBDangoMusic first Present path=")+(path?"SwapChain":"Device")+(present->swap_chain?" current-chain=yes":" current-chain=no"));}
- try {if(cache.size()>128)clear();auto state=std::atomic_load(&snapshot);auto position=state->at(now());auto at=position<0?-1:indexAt(state->timeline,position+cfg.offset);
+ try {if(cache.size()>256)clear();auto state=std::atomic_load(&snapshot);auto position=state->at(now());auto at=position<0?-1:indexAt(state->timeline,lyricPosition(position,cfg.demo?0:cfg.offset));
  std::string text=at<0?state->message:state->timeline[at].text;
  DrawGuard guard(dev);auto& target=guard.target;auto& depth=guard.depth;auto& back=guard.back;auto& block=guard.block;
  if(!checked(dev->CreateStateBlock(D3DSBT_ALL,&block),0,"CreateStateBlock"))return;
@@ -102,21 +121,21 @@ void WINAPI render(IDirect3DDevice9* dev,const LDBHostPresentInfoV1* present){
  for(auto stage:{D3DTSS_COLOROP,D3DTSS_ALPHAOP})dev->SetTextureStageState(0,stage,D3DTOP_MODULATE);
  dev->SetTextureStageState(0,D3DTSS_COLORARG1,D3DTA_TEXTURE);dev->SetTextureStageState(0,D3DTSS_COLORARG2,D3DTA_DIFFUSE);dev->SetTextureStageState(0,D3DTSS_ALPHAARG1,D3DTA_TEXTURE);dev->SetTextureStageState(0,D3DTSS_ALPHAARG2,D3DTA_DIFFUSE);dev->SetTextureStageState(0,D3DTSS_TEXCOORDINDEX,0);dev->SetTextureStageState(0,D3DTSS_TEXTURETRANSFORMFLAGS,D3DTTFF_DISABLE);dev->SetTextureStageState(1,D3DTSS_COLOROP,D3DTOP_DISABLE);dev->SetTextureStageState(1,D3DTSS_ALPHAOP,D3DTOP_DISABLE);
  dev->SetSamplerState(0,D3DSAMP_MINFILTER,D3DTEXF_LINEAR);dev->SetSamplerState(0,D3DSAMP_MAGFILTER,D3DTEXF_LINEAR);dev->SetSamplerState(0,D3DSAMP_ADDRESSU,D3DTADDRESS_CLAMP);dev->SetSamplerState(0,D3DSAMP_ADDRESSV,D3DTADDRESS_CLAMP);dev->SetSamplerState(0,D3DSAMP_SRGBTEXTURE,FALSE);
- if(cfg.demo){auto banner=image(dev,"LDBDangoMusic 0.2.0 DEMO - "+std::string(path?"SwapChain":"Device"));draw(dev,banner,16,16,std::min(1.f,desc.Width*.9f/std::max(banner.width,1)),1.f);}
- auto im=image(dev,text);float scale=std::min(1.f,desc.Width*.7f/std::max(im.width,1));float center=desc.Width*((cfg.alternate&&at>=0)?(at%2?.67f:.33f):.5f);float x=std::clamp(center-im.width*scale*.5f,8.f,std::max(8.f,desc.Width-im.width*scale-8));float y=desc.Height*cfg.y;
- if(at>=0){const auto& line=state->timeline[at];auto elapsed=position+cfg.offset-line.start;float fade=std::clamp(elapsed/250.f,0.f,1.f);y+=(1-fade)*8;
- if(line.words.empty())draw(dev,im,x,y,scale,fade);
- else {float pen=x;for(auto& word:line.words){auto wi=image(dev,word.text);auto age=position+cfg.offset-word.start;float alpha=std::clamp(age/120.f,0.f,1.f);draw(dev,wi,pen,y+(1-alpha)*6,scale,alpha);pen+=std::max(0,wi.width-8)*scale;}}
- if(cfg.translation&&!line.translation.empty()){auto tr=image(dev,line.translation);draw(dev,tr,std::max(8.f,center-tr.width*scale*.4f),y+cfg.size*1.5f,scale*.8f,fade*.8f);}
- }else draw(dev,im,x,y,scale,.7f);
+ if(cfg.demo){auto banner=image(dev,"LDBDangoMusic 0.3.0 DEMO - "+std::string(path?"SwapChain":"Device"));draw(dev,banner,16,16,std::min(1.f,desc.Width*.9f/std::max(banner.width,1)),1.f);}
+ if(at>=0){auto song=lyricPosition(position,cfg.demo?0:cfg.offset);auto age=song-state->timeline[at].start;
+ if(at>0&&age>=0&&age<cfg.transition){float fade=outgoingAlpha(age,cfg.transition);lineFrame(dev,state->timeline,at-1,song,float(desc.Width),float(desc.Height),fade,14.f*(1-fade),true);}
+ lineFrame(dev,state->timeline,at,song,float(desc.Width),float(desc.Height));
+ }else{auto im=image(dev,text);float scale=std::min(1.f,desc.Width*.8f/std::max(im.width,1));styled(dev,im,std::max(8.f,(desc.Width-im.width*scale)*.5f),desc.Height*cfg.y,scale,.7f,cfg.textColor);}
  dev->EndScene();guard.scene=false;}
  }
 
  }catch(...){if(logger)logger(LDB_HOST_LOG_ERROR,"Lyric render failed");}
 }
 BOOL WINAPI load(const LDBHostApiV1* host){try{if(!host||host->struct_size<sizeof(*host)||host->abi_version!=1||host->host_bits!=64)return FALSE;logger=host->log;directory=std::filesystem::path(host->host_directory)/L"plugins"/L"LDBDangoMusic";auto path=directory/L"config.json";
- if(std::filesystem::exists(path)){std::ifstream f(path);auto j=nlohmann::json::parse(f);cfg.port=std::clamp(j.value("port",23330),1,65535);cfg.size=std::clamp(j.value("fontSize",32),12,96);cfg.demo=j.value("demo",true);cfg.translation=j.value("translation",true);cfg.alternate=j.value("alternate",true);cfg.y=std::clamp(j.value("verticalPosition",.72f),.1f,.85f);cfg.offset=std::clamp(j.value("offsetMs",0),-10000,10000);}
- note("LDBDangoMusic 0.2.0 config="+path.u8string()+" mode="+(cfg.demo?"DEMO":"BLF/LX")+" port="+std::to_string(cfg.port));
+ if(std::filesystem::exists(path)){std::ifstream f(path);auto j=nlohmann::json::parse(f);cfg.port=std::clamp(j.value("port",23330),1,65535);cfg.size=std::clamp(j.value("fontSize",32),12,96);cfg.demo=j.value("demo",true);cfg.translation=j.value("translation",true);cfg.alternate=j.value("alternate",true);cfg.y=std::clamp(j.value("verticalPosition",.72f),.1f,.85f);cfg.offset=std::clamp(j.value("offsetMs",500),-10000,10000);
+ cfg.outline=j.value("outline",true);cfg.glow=j.value("glow",true);cfg.glowStrength=std::clamp(j.value("glowStrength",.18f),0.f,.5f);cfg.opacity=std::clamp(j.value("opacity",1.f),.1f,1.f);cfg.width=std::clamp(j.value("maxWidth",.44f),.2f,.9f);cfg.transition=std::clamp(j.value("transitionMs",380),0,1000);cfg.mode=j.value("displayMode",std::string("character"));if(cfg.mode!="character"&&cfg.mode!="word"&&cfg.mode!="line")throw std::runtime_error("displayMode must be character/word/line");
+ auto color=[&](const char* name,DWORD fallback){auto value=j.value(name,std::string{});if(value.empty())return fallback;if(value.size()!=7||value[0]!='#'||value.find_first_not_of("0123456789abcdefABCDEF",1)!=std::string::npos)throw std::runtime_error("Color must be #RRGGBB");return DWORD(std::stoul(value.substr(1),nullptr,16));};cfg.textColor=color("textColor",cfg.textColor);cfg.accent=color("accentColor",cfg.accent);}
+ note("LDBDangoMusic 0.3.0 config="+path.u8string()+" mode="+(cfg.demo?"DEMO":"BLF/LX")+" port="+std::to_string(cfg.port)+" offsetMs="+std::to_string(cfg.offset)+" displayMode="+cfg.mode);
  stopping=false;worker=std::thread(run);return TRUE;}catch(const std::exception& e){if(logger)logger(LDB_HOST_LOG_ERROR,e.what());return FALSE;}catch(...){return FALSE;}}
 void WINAPI created(IDirect3DDevice9*){clear();reportedErrors=0;drewPixels=false;note("LDBDangoMusic device lifecycle: created/destroyed; textures cleared");}
 void WINAPI swapCreated(IDirect3DSwapChain9*){note("LDBDangoMusic SwapChain created (borrowed)");}
@@ -125,4 +144,4 @@ void WINAPI beforeReset(IDirect3DDevice9*,const D3DPRESENT_PARAMETERS*,BOOL){cle
 void WINAPI afterReset(IDirect3DDevice9*,HRESULT hr,BOOL){reportedErrors=0;checked(hr,5,"Reset");note("LDBDangoMusic Reset completed; textures will rebuild");}
 void WINAPI shutdown(){stopping=true;wake.notify_all();if(worker.joinable())worker.join();clear();}
 }
-extern "C" __declspec(dllexport) BOOL WINAPI LDBHostPluginQuery(uint32_t abi,LDBHostPluginV1* out){if(abi!=1||!out||out->struct_size!=sizeof(*out))return FALSE;*out={sizeof(*out),1,"LDBDangoMusic","0.2.0",load,created,swapCreated,render,beforeReset,afterReset,swapDestroyed,created,shutdown};return TRUE;}
+extern "C" __declspec(dllexport) BOOL WINAPI LDBHostPluginQuery(uint32_t abi,LDBHostPluginV1* out){if(abi!=1||!out||out->struct_size!=sizeof(*out))return FALSE;*out={sizeof(*out),1,"LDBDangoMusic","0.3.0",load,created,swapCreated,render,beforeReset,afterReset,swapDestroyed,created,shutdown};return TRUE;}
