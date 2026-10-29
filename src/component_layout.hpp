@@ -40,6 +40,19 @@ inline bool componentAnchor(const GameCameraFrame& camera,const CameraPose& pose
  Matrix4 inv{};Vec3 point{};if(!inverse(camera.worldToClip,inv)||!transform(inv,{p.x*2-1,1-p.y*2,.5f},point))return false;
  auto ray=normalize(point-pose.eye);if(length(ray)<.9f)return false;anchor=pose.eye+ray*p.distance;return true;
 }
+// An anchor is reusable only while its center is inside the current view.
+inline bool visibleComponentAnchor(const GameCameraFrame& camera,Vec3 anchor){
+ Vec3 ndc{};return transform(camera.worldToClip,anchor,ndc,true)&&std::abs(ndc.x)<=.96f&&std::abs(ndc.y)<=.96f&&ndc.z>=0&&ndc.z<=1;
+}
+struct LyricAnchorSlots {
+ std::array<Vec3,MaxLyricSlots> points{};std::array<bool,MaxLyricSlots> valid{};
+ void reset(){valid.fill(false);}
+ Vec3 select(int slot,bool reuse,const GameCameraFrame& camera,Vec3 fallback){
+ if(!reuse||!valid.at(slot)||!visibleComponentAnchor(camera,points.at(slot)))points.at(slot)=fallback;
+ valid.at(slot)=true;return points.at(slot);
+ }
+ void remember(int slot,Vec3 point){points.at(slot)=point;valid.at(slot)=true;}
+};
 inline Placement screenComponent(const ComponentPosition& p,float width,float height,int fontSize){return {p.x*width,p.y*height,height/1080.f*28/std::max(fontSize,1)*p.size*200/p.distance};}
 inline bool worldComponent(const GameCameraFrame& camera,Vec3 anchor,const ComponentPosition& p,float width,float height,float worldHeight,int fontSize,Placement& place){return projectAnchor(camera,anchor,width,height,worldHeight*p.size,fontSize,place);}
 }

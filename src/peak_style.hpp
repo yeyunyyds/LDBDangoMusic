@@ -25,12 +25,12 @@ inline bool blank(const Glyph& g){return g.first<=32||g.first==0x3000;}
 inline uint32_t seed(const std::string& text){uint32_t hash=2166136261u;for(auto& g:graphemes(text)){const auto& s=g.text;for(size_t i=0;i<s.size();){uint32_t c=uint8_t(s[i++]);unsigned n=0;if(c>=0xf0){c&=7;n=3;}else if(c>=0xe0){c&=15;n=2;}else if(c>=0xc0){c&=31;n=1;}while(n--&&i<s.size())c=(c<<6)|(uint8_t(s[i++])&63);if(c>0xffff){c-=0x10000;hash=(hash^(0xd800+(c>>10)))*16777619u;c=0xdc00+(c&1023);}hash=(hash^c)*16777619u;}}return hash;}
 inline float noise(unsigned index,uint64_t frame,unsigned salt,uint32_t textSeed){uint32_t h=index*73856093u^uint32_t(frame*19349663u)^salt*83492791u^textSeed;h^=h>>13;h*=1540483477u;h^=h>>15;return (h&65535)/32767.5f-1;}
 struct Animation {
- std::vector<Glyph> glyphs;std::vector<int64_t> starts;uint32_t textSeed=0;int64_t lineStart=0;double revealSpan=0;
+ std::vector<Glyph> glyphs;std::vector<int64_t> starts;uint32_t textSeed=0;int64_t lineStart=0;double revealSpan=0;bool hasWordTiming=false;
  Animation(const Line& line,int64_t next):glyphs(graphemes(line.text)),textSeed(seed(line.text)),lineStart(line.start){
  double duration=std::max<int64_t>(next-line.start,400);revealSpan=std::min(std::max(glyphs.size()*55.,250.),duration*.6);
  starts.resize(glyphs.size(),line.start);
  std::vector<std::pair<std::string,int64_t>> timed;for(auto& word:line.words)for(auto& g:graphemes(word.text))if(!blank(g))timed.push_back({g.text,std::max(line.start,word.start)});
- size_t cursor=0;bool aligned=!timed.empty();for(size_t i=0;i<glyphs.size();++i){if(blank(glyphs[i]))continue;if(cursor>=timed.size()||timed[cursor].first!=glyphs[i].text){aligned=false;break;}starts[i]=timed[cursor++].second;}aligned=aligned&&cursor==timed.size();
+ size_t cursor=0;bool aligned=!timed.empty();for(size_t i=0;i<glyphs.size();++i){if(blank(glyphs[i]))continue;if(cursor>=timed.size()||timed[cursor].first!=glyphs[i].text){aligned=false;break;}starts[i]=timed[cursor++].second;}aligned=aligned&&cursor==timed.size();hasWordTiming=aligned;
  if(!aligned){std::vector<int> groups(glyphs.size(),-1);int group=0,cjk=0;bool pending=false;
  for(size_t i=0;i<glyphs.size();++i){auto& g=glyphs[i];if(blank(g)){if(pending){++group;pending=false;cjk=0;}continue;}bool asian=g.first>=0x2e80;if(pending&&((asian&&cjk==0)||(!asian&&cjk>0))){++group;pending=false;cjk=0;}groups[i]=group;pending=true;if(asian&&++cjk>=2){++group;pending=false;cjk=0;}}
  int count=std::max(1,group+(pending?1:0));double span=std::min(std::max(300.,duration)*.75,count*330.);for(size_t i=0;i<glyphs.size();++i)starts[i]=line.start+int64_t(span*std::max(0,groups[i])/count);}
@@ -58,6 +58,24 @@ struct VisibleAnimation {
  return frame;
  }
 };
+// Translation has no independent word timings: map its glyphs monotonically
+// onto the source onsets. Layout always measures the complete text, so revealing
+// another glyph never shifts the already visible text.
+inline Animation translationAnimation(const Animation& source,const std::string& text,int64_t next){
+ Line line;line.start=source.lineStart;line.text=text;Animation result(line,next);result.hasWordTiming=source.hasWordTiming;
+ std::vector<int64_t> onsets;for(size_t i=0;i<source.glyphs.size();++i)if(!blank(source.glyphs[i]))onsets.push_back(source.starts[i]);
+ size_t count=0;for(auto& g:result.glyphs)if(!blank(g))++count;
+ size_t index=0;for(size_t i=0;i<result.glyphs.size();++i)if(!blank(result.glyphs[i])){
+ if(!onsets.empty())result.starts[i]=onsets[count<=1?0:index*(onsets.size()-1)/std::max<size_t>(count-1,1)];++index;}
+ return result;
+}
+inline GlyphFrame revealFrame(VisibleAnimation& motion,const Animation& animation,size_t index,int64_t song,double clock,float speed,bool progressive,bool pop,bool wiggle,float frequency,float amount,bool fallback=false){
+ // Entrance motion and musical visibility are independent switches.
+ bool gradual=progressive&&(animation.hasWordTiming||fallback);
+ auto frame=motion.sample(animation,index,gradual?song:std::max(song,animation.starts.at(index)),clock,speed,pop,wiggle,frequency,amount);
+ if(gradual&&!animation.hasWordTiming&&index<motion.appeared.size()&&motion.appeared[index]>=0)frame.alpha*=float(std::clamp((clock-motion.appeared[index])/.18,0.,1.));
+ return frame;
+}
 struct LayoutGlyph {size_t index;float x,y,width;};
 struct Layout {std::vector<LayoutGlyph> glyphs;std::vector<float> rows;float height=0;};
 template<class Measure> Layout layout(const std::vector<Glyph>& glyphs,Measure measure,float maxWidth,float lineHeight){

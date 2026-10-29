@@ -17,5 +17,26 @@ int main(){
  auto noReplay=motion.sample(animation,1,3600,12.5,1,true,false,8,.8f);check(noReplay.scale==1);
  peak::VisibleAnimation fast(2),slow(2);fast.sample(animation,0,1500,20,2,true,false,8,.8f);slow.sample(animation,0,1500,20,.5f,true,false,8,.8f);
  check(fast.sample(animation,0,1500,20.1,2,true,false,8,.8f).scale==1&&slow.sample(animation,0,1500,20.1,.5f,true,false,8,.8f).scale>1);
+ // Progressive visibility must survive static presets and be independently disabled.
+ peak::VisibleAnimation fixed(2);
+ check(peak::revealFrame(fixed,animation,1,2500,30,1,true,false,false,8,0).alpha==0);
+ check(peak::revealFrame(fixed,animation,1,2500,30,1,false,false,false,8,0).alpha==1);
+ auto translation=peak::translationAnimation(animation,u8"甲乙丙丁",4000);peak::VisibleAnimation translated(4);
+ check(translation.starts.front()==1000&&translation.starts.back()==3000);
+ check(peak::revealFrame(translated,translation,0,1500,30,1,true,false,false,8,0).alpha==1);
+ check(peak::revealFrame(translated,translation,3,1500,30,1,true,false,false,8,0).alpha==0);
+ check(peak::revealFrame(translated,translation,3,3500,32,1,true,false,false,8,0).alpha==1);
+ // Untimed lyrics default to the whole sentence; gradual fallback is opt-in.
+ peak::Animation untimed(Line{1000,"Hello world","",{}},5000);check(!untimed.hasWordTiming&&animation.hasWordTiming);
+ peak::VisibleAnimation full,gradual;size_t last=untimed.glyphs.size()-1;
+ check(peak::revealFrame(full,untimed,last,1000,40,1,true,false,false,8,0).alpha==1);
+ check(peak::revealFrame(gradual,untimed,last,1000,40,1,true,false,false,8,0,true).alpha==0);
+ auto trFallback=peak::translationAnimation(untimed,u8"你好世界",5000);check(!trFallback.hasWordTiming);
+ peak::VisibleAnimation trWhole;check(peak::revealFrame(trWhole,trFallback,3,1000,40,1,true,false,false,8,0).alpha==1);
+ auto onset=untimed.starts[last];auto onsetFrame=peak::revealFrame(gradual,untimed,last,onset,41,1,true,false,false,8,0,true);check(onsetFrame.alpha>0&&onsetFrame.alpha<1);
+ check(peak::revealFrame(gradual,untimed,last,onset+250,41.25,1,true,false,false,8,0,true).alpha==1);
+ auto wrapped=peak::layout(animation.glyphs,[](const std::string&){return 10.f;},10,20);
+ auto longer=peak::layout(animation.glyphs,[](const std::string&){return 10.f;},20,20);
+ check(wrapped.rows.size()==2&&longer.rows.size()==1&&longer.glyphs[0].width==wrapped.glyphs[0].width);
  std::cout<<"Passed: offset/late first-draw pop, visible bounce, independent wall-clock wiggle, future-word gate, no replay and animation speed\n";
 }

@@ -28,6 +28,15 @@ int main(){
  GameCameraFrame f;f.active=1;f.width=1920;f.height=1080;f.tick=1000;f.worldToView={1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1};f.worldToClip={1,0,0,0,0,1,0,0,0,0,1.0001f,-1.0001f,0,0,1,0};CameraPose camera;check(cameraPose(f,camera));
  ComponentLayout defaults;for(int i=0;i<11;++i){const auto& p=component(defaults,i);Vec3 anchor;Placement placed;check(componentAnchor(f,camera,p,anchor)&&worldComponent(f,anchor,p,1920,1080,8,32,placed));check(near(placed.x,p.x*1920)&&near(placed.y,p.y*1080));}
  auto p=defaults.lyrics[0];Vec3 anchor;Placement close,far;check(componentAnchor(f,camera,p,anchor)&&worldComponent(f,anchor,p,1920,1080,8,32,close));p.distance*=2;check(componentAnchor(f,camera,p,anchor)&&worldComponent(f,anchor,p,1920,1080,8,32,far));check(near(far.scale,close.scale*.5f)&&near(far.x,close.x)&&near(far.y,close.y));p.size*=2;check(worldComponent(f,anchor,p,1920,1080,8,32,far)&&near(far.scale,close.scale));
+ // Each numbered slot keeps its visible world anchor across camera movement;
+ // offscreen, mode disable, reset and other slots cannot reuse that point.
+ LyricAnchorSlots slots;Vec3 original{},fallback{};check(componentAnchor(f,camera,defaults.lyrics[0],original));
+ fallback=original+Vec3{20,0,0};auto first=slots.select(0,true,f,original);check(length(first-original)<.001f);
+ auto reused=slots.select(0,true,f,fallback);check(length(reused-original)<.001f);
+ auto moved=f;moved.worldToClip[3]=original.z*.5f;check(visibleComponentAnchor(moved,original));check(length(slots.select(0,true,moved,fallback)-original)<.001f);
+ auto outside=f;outside.worldToClip[3]=original.z*3;check(!visibleComponentAnchor(outside,original));check(length(slots.select(0,true,outside,fallback)-fallback)<.001f);
+ check(length(slots.select(1,true,f,original)-original)<.001f);
+ check(length(slots.select(1,false,f,fallback)-fallback)<.001f);slots.reset();check(length(slots.select(1,true,f,original)-original)<.001f);
  // Slot rotation supports 1..9 independent positions, with bounded outgoing lines.
  for(int count=1;count<=9;++count){LyricLifecycle model;for(int line=0;line<30;++line){model.update("track",line,std::to_string(line),line*.01,1000,400,false,count);check(model.entries.back().slot==line%count&&model.entries.size()<=size_t(count));for(auto& e:model.entries)for(auto& other:model.entries)check(e.id==other.id||e.slot!=other.slot);}model.update("track",29,"29",10,1000,400,false,count);check(model.entries.size()==1&&model.entries[0].index==29);}
  std::cout<<"Passed: 11 component positions, legacy migration/roundtrip/preset preservation, bounds, perspective placement, distance/size, 1..9 slot rotation and expiry\n";

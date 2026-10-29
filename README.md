@@ -1,6 +1,6 @@
 # L4D2DangoMusic
 
-> 当前分支为墙面挂画实验版 `0.8.0-wall1`。提供 F8 准星放置测试，实验开关默认关闭；使用步骤与边界见 [墙面实验指南](docs/wall-experiment-guide.md)。
+> 当前分支为墙面挂画实验版 `0.8.1-wall2`。提供 F8 准星放置测试，实验开关默认关闭；使用步骤与边界见 [墙面实验指南](docs/wall-experiment-guide.md)。
 
 为《求生之路 2》（Left 4 Dead 2）提供音乐歌词显示的 L4N 插件。通过兼容 LX / BLF 的本地音乐 API 获取播放进度和歌词，在游戏中呈现带逐字动画的歌词，并支持世界空间定位、歌名与作者显示以及游戏内调节。
 
@@ -30,7 +30,7 @@
 
 ## 安装
 
-[下载墙面实验包：L4D2DangoMusic 0.8.0-wall1](https://github.com/yeyunyyds/LDBDangoMusic/raw/refs/heads/experiment/wall-mounted-lyrics/releases/L4D2DangoMusic-0.8.0-wall1-l4n.zip)
+[下载墙面实验包：L4D2DangoMusic 0.8.1-wall2](https://github.com/yeyunyyds/LDBDangoMusic/raw/refs/heads/experiment/wall-mounted-lyrics/releases/L4D2DangoMusic-0.8.1-wall2-l4n.zip)
 
 ### 使用安装脚本
 
@@ -145,3 +145,5 @@ python scripts/package.py
 ## 许可
 
 本项目采用 [GPL-3.0](LICENSE) 许可。第三方代码与 SDK 头文件遵循各自的许可及声明，详见 [NOTICE.md](NOTICE.md)。
+
+本版新增：原文与翻译按演唱进度显字（无逐字时间轴默认整句，可选择估算渐显）、单行长度倍率，以及世界歌词换句时沿用视野内原位置。墙面挂画也接入歌词和翻译动画。设置路径和说明见 [歌词设置说明](docs/0.8.1-lyrics-controls.md)。

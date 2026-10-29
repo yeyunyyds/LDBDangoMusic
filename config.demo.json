@@ -107,5 +107,11 @@
       "y": 0.14000000059604645
     }
   },
-  "defaultsVersion": 2
+  "defaultsVersion": 2,
+  "progressiveReveal": true,
+  "reuseVisibleAnchor": true,
+  "lineWidthScale": 1,
+  "fallbackReveal": false,
+  "wallBackdrop": true,
+  "wallDebug": false
 }
