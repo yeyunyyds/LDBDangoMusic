@@ -1,65 +1,52 @@
-"""Package built Windows artifacts, a ready-to-copy demo layout, and matching source."""
+"""Build a minimal install ZIP: bin/ and README.md only."""
+import argparse
 import hashlib
-import json
+import struct
+import subprocess
 from pathlib import Path
 import zipfile
-import struct
 
 ROOT = Path(__file__).resolve().parents[1]
 VERSION = '0.9.1'
-files = {}
-for folder in ('src', 'tests', 'scripts', 'vendor', 'docs', 'presets'):
-    for path in (ROOT / folder).rglob('*'):
-        if path.is_file() and '__pycache__' not in path.parts:
-            files['source/' + path.relative_to(ROOT).as_posix()] = path
-for name in ('README.md', 'NOTICE.md', 'LICENSE', 'config.example.json', 'config.demo.json', 'config.camera-demo.json', 'config.world-demo.json', '.gitignore'):
-    files['source/' + name] = ROOT / name
-for name in ('L4D2DangoMusic.dll', 'l4n_smoke.exe', 'core_test.exe', 'interface_inventory_test.exe', 'source_walls_abi_test.exe', 'wall_scene_test.exe'):
-    path = ROOT / 'build' / name
-    blob=path.read_bytes()
-    if blob[:2] != b'MZ':
-        raise RuntimeError(f'Not a Windows artifact: {name}')
-    pe=struct.unpack_from('<I',blob,0x3c)[0]
-    if struct.unpack_from('<H',blob,pe+4)[0] != 0x14c:
-        raise RuntimeError(f'Pure L4N artifacts must be x86: {name}')
-    files['source/build/' + name] = path
-files['bin/neko/plugins/L4D2DangoMusic.dll'] = ROOT / 'build/L4D2DangoMusic.dll'
-files['bin/neko/plugins/L4D2DangoMusic/config.json'] = ROOT / 'config.example.json'
-for preset in (ROOT / 'presets').glob('*.json'):
-    files['presets/' + preset.name] = preset
-files['README.md'] = ROOT / 'README.md'
-files['docs/0.3.0-visuals.md'] = ROOT / 'docs/0.3.0-visuals.md'
-files['config.demo.json'] = ROOT / 'config.demo.json'
-files['config.camera-demo.json'] = ROOT / 'config.camera-demo.json'
-files['config.world-demo.json'] = ROOT / 'config.world-demo.json'
-files['docs/l4n-world-lyrics.md'] = ROOT / 'docs/l4n-world-lyrics.md'
-files['docs/0.4.2-source-build.md'] = ROOT / 'docs/0.4.2-source-build.md'
-files['docs/0.4.3-callback-chain.md'] = ROOT / 'docs/0.4.3-callback-chain.md'
-files['docs/peak-style.md'] = ROOT / 'docs/peak-style.md'
-files['docs/0.6.0-menu-and-ghosting.md'] = ROOT / 'docs/0.6.0-menu-and-ghosting.md'
-files['docs/0.6.1-stale-lyrics.md'] = ROOT / 'docs/0.6.1-stale-lyrics.md'
-files['docs/0.7.0-layout-editor.md'] = ROOT / 'docs/0.7.0-layout-editor.md'
-files['docs/0.7.1-player-session.md'] = ROOT / 'docs/0.7.1-player-session.md'
-files['docs/0.7.2-motion-and-placement.md'] = ROOT / 'docs/0.7.2-motion-and-placement.md'
-files['docs/0.8.1-lyrics-controls.md'] = ROOT / 'docs/0.8.1-lyrics-controls.md'
-files['docs/wall-experiment-guide.md'] = ROOT / 'docs/wall-experiment-guide.md'
-files['docs/research/trace-abi-evidence.json'] = ROOT / 'docs/research/trace-abi-evidence.json'
-files['config.example.json'] = ROOT / 'config.example.json'
-files['docs/camera-diagnostics.md'] = ROOT / 'docs/camera-diagnostics.md'
-files['LICENSE'] = ROOT / 'LICENSE'
-files['NOTICE.md'] = ROOT / 'NOTICE.md'
-if json.loads((ROOT / 'config.example.json').read_text())['offsetMs'] != 500:
-    raise RuntimeError('Visual package must include 500ms compensation')
-output = ROOT / 'releases' / f'L4D2DangoMusic-{VERSION}-l4n.zip'
-output.parent.mkdir(exist_ok=True)
-manifest = {name: hashlib.sha256(path.read_bytes()).hexdigest() for name, path in files.items()}
-with zipfile.ZipFile(output, 'w', zipfile.ZIP_DEFLATED) as archive:
-    for name, path in sorted(files.items()):
-        archive.write(path, name)
-    archive.writestr('SHA256-MANIFEST.json', json.dumps(manifest, indent=2) + '\n')
-with zipfile.ZipFile(output) as archive:
-    for name, expected in manifest.items():
-        if hashlib.sha256(archive.read(name)).hexdigest() != expected:
-            raise RuntimeError(f'Archive mismatch: {name}')
-output.with_suffix('.zip.sha256').write_text(hashlib.sha256(output.read_bytes()).hexdigest() + '  ' + output.name + '\n')
-print(f'Packaged and verified {len(files)} files: {output.name}')
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--output-dir', type=Path, default=ROOT / 'build/packages')
+    args = parser.parse_args()
+    dll = ROOT / 'build/L4D2DangoMusic.dll'
+    blob = dll.read_bytes()
+    if len(blob) < 64 or blob[:2] != b'MZ':
+        raise RuntimeError('Build the Windows DLL before packaging')
+    pe = struct.unpack_from('<I', blob, 0x3c)[0]
+    if pe + 6 > len(blob) or blob[pe:pe+4] != b'PE\0\0' or struct.unpack_from('<H', blob, pe+4)[0] != 0x14c:
+        raise RuntimeError('The install DLL must be Windows x86')
+    commit = subprocess.check_output(['git', 'rev-parse', '--verify', 'HEAD^{commit}'], cwd=ROOT, text=True).strip()
+    source_url = f'https://github.com/yeyunyyds/LDBDangoMusic/tree/{commit}'
+    readme = (ROOT / 'packaging/README.md').read_text(encoding='utf-8').replace('@VERSION@', VERSION).replace('@SOURCE_URL@', source_url)
+    for title, file in (('项目及参考代码声明', 'NOTICE.md'), ('GPL-3.0 许可全文', 'LICENSE'), ('nlohmann/json MIT 许可', 'vendor/JSON-LICENSE.MIT')):
+        readme += f'\n\n## {title}\n\n' + (ROOT / file).read_text(encoding='utf-8')
+    files = {
+        'bin/neko/plugins/L4D2DangoMusic.dll': blob,
+        'bin/neko/plugins/L4D2DangoMusic/config.json': (ROOT / 'config.example.json').read_bytes(),
+        'README.md': readme.encode('utf-8'),
+    }
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    output = args.output_dir / f'L4D2DangoMusic-{VERSION}-l4n.zip'
+    with zipfile.ZipFile(output, 'w', zipfile.ZIP_DEFLATED) as archive:
+        for name, data in sorted(files.items()):
+            archive.writestr(name, data)
+    with zipfile.ZipFile(output) as archive:
+        if set(archive.namelist()) != set(files):
+            raise RuntimeError('Install ZIP contains unexpected files')
+        for name, data in files.items():
+            if archive.read(name) != data:
+                raise RuntimeError(f'Archive mismatch: {name}')
+    digest = hashlib.sha256(output.read_bytes()).hexdigest()
+    output.with_suffix('.zip.sha256').write_text(digest + '  ' + output.name + '\n', encoding='ascii')
+    print(f'Packaged and verified {len(files)} files: {output}')
+    print(f'SHA256: {digest}')
+
+
+if __name__ == '__main__':
+    main()

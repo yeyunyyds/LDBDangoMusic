@@ -31,37 +31,25 @@
 
 ## 安装
 
-[下载场景歌词版：L4D2DangoMusic 0.9.1](https://github.com/yeyunyyds/LDBDangoMusic/raw/refs/heads/experiment/wall-mounted-lyrics/releases/L4D2DangoMusic-0.9.1-l4n.zip)
+[下载场景歌词版：L4D2DangoMusic 0.9.1](https://github.com/yeyunyyds/LDBDangoMusic/raw/refs/heads/zip/L4D2DangoMusic-0.9.1-l4n.zip)
 
-### 使用安装脚本
+安装压缩包内仅包含 **bin 文件夹和 README.md**，不附带源码、构建工具、测试程序或额外依赖。
 
-1. 退出游戏。
-2. 解压安装包，在包内的 **`source` 文件夹**打开 PowerShell。
-3. 执行以下命令，将 `GameRoot` 改为自己的游戏根目录：
+1. 退出游戏，确认 L4N 已安装并正常工作。
+2. 将压缩包内的 `bin` 文件夹合并到游戏根目录。
+3. 首次安装复制全部文件。升级时替换 DLL，保留已有的 `config.json`，避免覆盖设置。
+4. 完整重启游戏，在 L4N 菜单进入 L4D2DangoMusic。
 
-```powershell
-Set-ExecutionPolicy -Scope Process Bypass
-.\scripts\install.ps1 -GameRoot "D:\Steam\steamapps\common\Left 4 Dead 2"
-```
-
-如果 PowerShell 已位于 `source\scripts` 文件夹，使用：
-
-```powershell
-.\install.ps1 -GameRoot "D:\Steam\steamapps\common\Left 4 Dead 2"
-```
-
-脚本会安装 DLL、保留已有配置，并将检测到的本项目旧副本移至 `bin\neko\plugins-disabled` 下备份。安装完成后，重新启动游戏。
-
-### 手动安装
-
-首次安装时，将安装包内的以下文件复制到游戏根目录下的对应位置：
+安装路径：
 
 ```text
 bin/neko/plugins/L4D2DangoMusic.dll
 bin/neko/plugins/L4D2DangoMusic/config.json
 ```
 
-升级时替换 DLL，保留自己的 `config.json`。插件由 L4N 加载，安装位置为游戏的 `bin/neko/plugins` 目录。
+源码和构建脚本维护在 [`main` 分支](https://github.com/yeyunyyds/LDBDangoMusic/tree/main)，[`zip` 分支](https://github.com/yeyunyyds/LDBDangoMusic/tree/zip) 仅提供安装压缩包。
+
+从源码构建的用户仍可使用 `scripts/install.ps1 -GameRoot "游戏根目录"` 安装；运行目录为源码根目录。安装包用户直接复制 `bin` 即可。
 
 请只保留一份启用的歌词插件。旧的 `LDBDangoMusic.dll` 和改名副本应移出加载目录，否则可能出现两份歌词或菜单分别控制不同副本的情况。
 
@@ -137,6 +125,8 @@ bash scripts/build-mingw.sh
 ```bash
 python scripts/package.py
 ```
+
+最小安装包输出到 `build/packages`。包内只包含 `bin/` 与 `README.md`；许可和对应源码链接写入安装说明。生成后将安装包单独发布到 `zip` 分支。
 
 跨平台回归测试和交叉编译不能替代实际 L4N 游戏环境验证。
 
