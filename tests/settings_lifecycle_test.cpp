@@ -8,6 +8,10 @@ int main(int argc,char**){using namespace dango;
  Config c;c.port=12345;c.offset=350;c.demo=false;c.worldLyrics=true;c.translation=true;
  for(int i=0;i<6;++i){auto preset=applyPreset(c,i);check(preset.port==12345&&preset.offset==350&&preset.translation&&preset.worldLyrics&&preset.presetId==i);auto copy=decodeConfig(encodeConfig(preset));check(copy.textColor==preset.textColor&&copy.port==12345&&copy.lingerMs==1000&&copy.reanchorMs==0);}
  auto defaults=decodeConfig(nlohmann::json::object());check(defaults.progressiveReveal&&defaults.reuseVisibleAnchor&&defaults.lineWidthScale==1&&!defaults.fallbackReveal);
+ c.wallEnabled=true;c.wallAutomatic=false;c.wallLiveLyrics=false;c.wallFallback=false;c.wallSize=2;c.wallCapacity=8;c.wallLingerMs=8000;c.wallFadeMs=2000;c.wallRange=900;c.wallSpacing=220;
+ auto wallCopy=decodeConfig(encodeConfig(c));check(wallCopy.wallEnabled&&!wallCopy.wallAutomatic&&!wallCopy.wallLiveLyrics&&!wallCopy.wallFallback&&wallCopy.wallSize==2&&wallCopy.wallCapacity==8&&wallCopy.wallLingerMs==8000&&wallCopy.wallFadeMs==2000&&wallCopy.wallRange==900&&wallCopy.wallSpacing==220);
+ check(!defaults.wallEnabled&&defaults.wallAutomatic&&defaults.wallLiveLyrics&&defaults.wallFallback);
+ auto boundedWall=decodeConfig({{"wallCapacity",100},{"wallRange",-1},{"wallSize",42},{"wallFadeMs",0}});check(boundedWall.wallCapacity==8&&boundedWall.wallRange==160&&boundedWall.wallSize==2&&boundedWall.wallFadeMs==200);
  c.progressiveReveal=false;c.reuseVisibleAnchor=false;c.lineWidthScale=3;c.fallbackReveal=true;auto restored=decodeConfig(encodeConfig(c));check(!restored.progressiveReveal&&!restored.reuseVisibleAnchor&&restored.lineWidthScale==3&&restored.fallbackReveal);
  check(decodeConfig({{"lineWidthScale",100}}).lineWidthScale==4);
  bool invalid=false;try{parseColor("#BADHEX");}catch(...){invalid=true;}check(invalid);check(colorText(parseColor("#12ABef"))=="#12ABEF");

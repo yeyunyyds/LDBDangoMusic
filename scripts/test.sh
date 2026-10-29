@@ -26,3 +26,5 @@ g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc tests/wal
 ./build/wall_panel_test
 g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc tests/source_trace_test.cpp -o build/source_trace_test
 ./build/source_trace_test
+g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc tests/wall_scene_test.cpp -o build/wall_scene_test
+./build/wall_scene_test

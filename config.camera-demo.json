@@ -113,5 +113,15 @@
   "lineWidthScale": 1,
   "fallbackReveal": false,
   "wallBackdrop": true,
-  "wallDebug": false
+  "wallDebug": false,
+  "wallEnabled": false,
+  "wallAutomatic": true,
+  "wallLiveLyrics": true,
+  "wallFallback": true,
+  "wallSize": 1,
+  "wallCapacity": 6,
+  "wallLingerMs": 4000,
+  "wallFadeMs": 1000,
+  "wallRange": 600,
+  "wallSpacing": 140
 }

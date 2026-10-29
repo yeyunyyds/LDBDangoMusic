@@ -18,3 +18,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Interface inventory tests failed' }
 if ($LASTEXITCODE -ne 0) { throw 'Trace ABI test build failed' }
 & ./build/source_walls_abi_test.exe
 if ($LASTEXITCODE -ne 0) { throw 'Trace ABI test failed' }
+
+& cl.exe /nologo /std:c++17 /EHsc /utf-8 /W4 /Isrc tests/wall_scene_test.cpp /Fobuild/wall_scene_test.obj /Febuild/wall_scene_test.exe
+if ($LASTEXITCODE -ne 0) { throw 'Wall scene test build failed' }
+& ./build/wall_scene_test.exe
+if ($LASTEXITCODE -ne 0) { throw 'Wall scene tests failed' }

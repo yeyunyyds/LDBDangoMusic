@@ -1,0 +1,56 @@
+#include "wall_scene.hpp"
+#include <stdexcept>
+#include <iostream>
+#include <functional>
+using namespace dango;
+void check(bool v,const char* m){if(!v)throw std::runtime_error(m);}
+GameCameraFrame camera(Vec3 eye={},float yaw=0){GameCameraFrame f;f.active=1;f.epoch=7;f.width=1280;f.height=720;
+ Vec3 forward{std::cos(yaw),std::sin(yaw),0},right{std::sin(yaw),-std::cos(yaw),0},up{0,0,1};float r=-wall::dot(right,eye),u=-wall::dot(up,eye),d=-wall::dot(forward,eye);
+ f.worldToView={right.x,right.y,right.z,r,up.x,up.y,up.z,u,forward.x,forward.y,forward.z,d,0,0,0,1};
+ f.worldToClip={right.x,right.y,right.z,r,up.x,up.y,up.z,u,forward.x*1.0001f,forward.y*1.0001f,0,d*1.0001f-1.0001f,forward.x,forward.y,0,d};return f;}
+struct Corridor {
+ mutable unsigned calls=0;bool hole=false,failure=false;
+ bool operator()(Vec3 start,Vec3 end,trace::Result& r)const{
+ ++calls;if(failure)return false;r={};r.start=start;r.end=end;auto delta=end-start;
+ const Vec3 normals[]={{-1,0,0},{0,-1,0},{0,1,0}};const float ds[]={-600,-150,-150};
+ for(int i=0;i<3;++i){float denom=wall::dot(normals[i],delta);if(std::abs(denom)<.0001)continue;float t=(ds[i]-wall::dot(normals[i],start))/denom;
+ if(t<0||t>=r.fraction)continue;auto point=start+delta*t;if(hole&&i>0&&point.x>180&&point.x<260)continue;
+ r.fraction=t;r.end=point;r.plane.normal=normals[i];r.plane.distance=ds[i];r.contents=1;}
+ return true;
+ }
+};
+int main(){
+ wallscene::Options options;options.size=0;options.spacing=80;auto frame=camera();CameraPose pose;check(cameraPose(frame,pose),"camera");
+ Corridor world;wall::Panel left,right;
+ check(wallscene::candidate(frame,pose,0,1,options,{},std::ref(world),left),"left search");check(world.calls<=15,"bounded search");
+ world.calls=0;check(wallscene::candidate(frame,pose,0,2,options,{},std::ref(world),right),"right search");check(left.center.y*right.center.y<0,"alternate corridor sides");
+ check(std::abs(left.normal.y)>.99f&&std::abs(right.normal.y)>.99f,"wall normals");
+ wallscene::Scene scene;wallscene::Ticket ticket{1,1,1000,7,true};scene.observe(ticket,1000,7,options);check(scene.pending(ticket),"first pending");
+ scene.add(left,true,ticket,1000,options);check(scene.items.size()==1&&scene.items[0].token==1&&!scene.pending(ticket),"assign exactly once");
+ check(!wallscene::separated(left,scene.items,80),"duplicate rectangle");check(wallscene::separated(right,scene.items,80),"other wall");
+ ticket.serial=2;ticket.tick=2000;scene.observe(ticket,2000,7,options);check(scene.items[0].retired==2000,"retire at next sentence");scene.add(right,true,ticket,2000,options);
+ check(scene.items[0].token==1&&scene.items[1].token==2,"distinct lyric payloads");check(wallscene::alpha(scene.items[0],6000,options)==1,"extra hold");check(std::abs(wallscene::alpha(scene.items[0],6500,options)-.5f)<.001,"fade");
+ ticket.tick=7000;scene.observe(ticket,7000,7,options);check(scene.items.size()==1&&scene.items[0].token==2,"expiry no resurrection");
+ // Pause and stale requests clear history; old tickets cannot cross a map epoch.
+ ticket.active=false;scene.observe(ticket,7001,7,options);check(scene.items.empty(),"pause clears");ticket.active=true;ticket.tick=8000;scene.observe(ticket,8000,7,options);scene.add(left,true,ticket,8000,options);scene.observe(ticket,9001,7,options);check(scene.items.empty(),"stale producer clears");
+ scene.observe(ticket,8000,8,options);check(!scene.pending(ticket),"map epoch");
+ // Manual anchors survive playback resets; content is rotated and cleared.
+ scene.reset();ticket={2,10,10000,7,true};scene.observe(ticket,10000,7,options);scene.add(left,false,ticket,10000,options);scene.add(right,false,ticket,10000,options);
+ ticket.serial=11;ticket.tick=10050;scene.observe(ticket,10050,7,options);check(scene.assignManual(ticket,10050)&&scene.items[1].token==11&&scene.items[0].token==10,"manual rotate onto next panel");check(!scene.assignManual(ticket,10050),"no duplicate assign");
+ ticket.session=3;ticket.tick=10100;scene.observe(ticket,10100,7,options);check(scene.items.size()==2&&scene.items[0].token==0&&scene.items[1].token==0,"session clears manual payloads");
+ scene.clear(ticket);scene.observe(ticket,10100,7,options);check(!scene.pending(ticket),"clear waits next sentence");
+ options.capacity=2;for(int i=0;i<10;++i){ticket.serial++;scene.observe(ticket,10100,7,options);scene.add(left,true,ticket,10100,options);check(scene.items.size()<=2,"bounded panel count");}
+ // Turning a corner changes the selected wall normal, not a placed panel's axes.
+ auto turnedFrame=camera({600,300,0},1.57079632679f);CameraPose turnedPose;check(cameraPose(turnedFrame,turnedPose),"turned camera");
+ auto rotatedWorld=[&](Vec3 start,Vec3 end,trace::Result& hit){
+ auto local=[](Vec3 p){auto d=p-Vec3{600,300,0};return Vec3{d.y,-d.x,d.z};};
+ trace::Result result;if(!world(local(start),local(end),result))return false;hit=result;hit.start=start;
+ hit.end=Vec3{600,300,0}+Vec3{-result.end.y,result.end.x,result.end.z};hit.plane.normal={-result.plane.normal.y,result.plane.normal.x,result.plane.normal.z};hit.plane.distance=wall::dot(hit.plane.normal,hit.end);return true;};
+ wall::Panel afterTurn;check(wallscene::candidate(turnedFrame,turnedPose,0,3,options,{},rotatedWorld,afterTurn),"search around corridor turn");
+ check(std::abs(afterTurn.normal.x)>.99f&&std::abs(left.normal.y)>.99f,"independent wall orientation after turn");
+ // Search rejects a failed world, and a supported wall is still fixed after moving.
+ Corridor failed;failed.failure=true;wall::Panel p;check(!wallscene::candidate(frame,pose,0,1,options,{},std::ref(failed),p),"failed trace");
+ auto corners=wall::point(left,0,0);auto moved=camera({80,0,0});check(wallscene::onScreen(left,moved,1280,720),"parallax visible");check(length(wall::point(left,0,0)-corners)<.001,"fixed plane");
+ auto away=camera({},3.14159265f);check(!wallscene::onScreen(left,away,1280,720),"offscreen rejection");
+ std::cout<<"Passed: corridor side search/budget, distinct lyric assignment, hold/fade/expiry, pause/stale/map/session clear, manual rotation, capacity/spacing and fixed wall parallax\n";
+}

@@ -75,7 +75,7 @@ bool checked(HRESULT hr,unsigned stage,const char* operation){if(SUCCEEDED(hr))r
 void publish(State s){auto old=std::atomic_load(&snapshot);if(old->connected!=s.connected||old->playing!=s.playing||old->generation!=s.generation||old->message!=s.message)note("Player state connected="+std::to_string(s.connected)+" playing="+std::to_string(s.playing)+" generation="+std::to_string(s.generation)+" position_ms="+std::to_string(s.position)+" timeline_lines="+std::to_string(s.timeline.size())+" message="+s.message);std::atomic_store(&snapshot,std::make_shared<const State>(std::move(s)));}
 struct Internet {HINTERNET h; explicit Internet(HINTERNET v):h(v){if(!h)throw std::runtime_error("WinHTTP handle failed");}~Internet(){WinHttpCloseHandle(h);}Internet(const Internet&)=delete;};
 nlohmann::json get(const wchar_t* path,size_t limit){
- Internet session(WinHttpOpen(L"L4D2DangoMusic/0.8.1-wall2",WINHTTP_ACCESS_TYPE_NO_PROXY,WINHTTP_NO_PROXY_NAME,WINHTTP_NO_PROXY_BYPASS,0));
+ Internet session(WinHttpOpen(L"L4D2DangoMusic/0.9.0",WINHTTP_ACCESS_TYPE_NO_PROXY,WINHTTP_NO_PROXY_NAME,WINHTTP_NO_PROXY_BYPASS,0));
  WinHttpSetTimeouts(session.h,500,500,500,500);
  Internet connection(WinHttpConnect(session.h,L"127.0.0.1",static_cast<INTERNET_PORT>(cfg.port),0));
  Internet request(WinHttpOpenRequest(connection.h,L"GET",path,nullptr,WINHTTP_NO_REFERER,WINHTTP_DEFAULT_ACCEPT_TYPES,0));
@@ -199,45 +199,58 @@ void wallQuad(IDirect3DDevice9* dev,const wall::Panel& panel,const GameCameraFra
 void wallText(IDirect3DDevice9* dev,const wall::Panel& panel,const GameCameraFrame& camera,float width,float height,const std::string& text,float vertical,float maxHeight,DWORD color){
  auto im=image(dev,text);if(!im.texture)return;auto face=panel;face.center=panel.center+panel.normal*.05f+panel.up*(panel.height*vertical);face.width=panel.width*.9f;face.height=face.width*im.height/std::max(im.width,1);if(face.height>panel.height*maxHeight){face.width*=panel.height*maxHeight/face.height;face.height=panel.height*maxHeight;}wallQuad(dev,face,camera,width,height,im,color);
 }
+struct WallSentence {
+ peak::Animation original,translated;peak::VisibleAnimation originalMotion,translatedMotion;std::string title,artist;
+ WallSentence(const Line& line,int64_t next,const State& state):original(line,next),translated(peak::translationAnimation(original,line.translation,next)),title(state.title),artist(state.artist){}
+};
 struct WallTextState {
- std::string key;uint64_t generation=0;int index=-1;std::unique_ptr<peak::Animation> original,translated;peak::VisibleAnimation originalMotion,translatedMotion;
- void reset(){key.clear();index=-1;original.reset();translated.reset();}
+ std::string key;uint64_t generation=0,session=1,serial=0,current=0,started=0;uint32_t epoch=0;int index=-1;
+ std::map<uint64_t,std::unique_ptr<WallSentence>> texts;
+ void reset(){key.clear();index=-1;current=0;texts.clear();++session;source_walls::submit({session,0,uint64_t(now()),epoch,false});}
+ void select(const State& music,const PlaybackDisplayFrame& display,int at,const GameCameraFrame& camera){
+ bool active=display.lyrics&&at>=0&&at<int(music.timeline.size())&&cfg.wallLiveLyrics;
+ if(!active){if(index>=0)reset();source_walls::submit({session,0,uint64_t(now()),camera.epoch,false});return;}
+ if(key!=music.key||generation!=music.generation||epoch!=camera.epoch){reset();key=music.key;generation=music.generation;epoch=camera.epoch;}
+ if(index!=at){index=at;current=++serial;started=uint64_t(now());const auto& line=music.timeline[at];auto next=at+1<int(music.timeline.size())?music.timeline[at+1].start:line.start+5000;texts[current]=std::make_unique<WallSentence>(line,next,music);}
+ source_walls::submit({session,current,uint64_t(now()),camera.epoch,true});
+ }
 } wallTextState;
-void wallGlyphs(IDirect3DDevice9* dev,const wall::Panel& panel,const GameCameraFrame& camera,float width,float height,const peak::Animation& animation,peak::VisibleAnimation& motion,const peak::Layout& layout,float unit,float top,int64_t song,double clock,bool translated){
- for(const auto& glyph:layout.glyphs){auto frame=peak::revealFrame(motion,animation,glyph.index,song,clock,cfg.animationSpeed,cfg.progressiveReveal,!translated&&cfg.pop,!translated&&cfg.wiggle,cfg.wiggleFrequency,cfg.wiggleAmount,cfg.fallbackReveal);if(frame.alpha<=0)continue;
+void wallGlyphs(IDirect3DDevice9* dev,const wall::Panel& panel,const GameCameraFrame& camera,float width,float height,const peak::Animation& animation,peak::VisibleAnimation& motion,const peak::Layout& layout,float unit,float top,int64_t song,double clock,bool translated,float opacity=1,bool retired=false){
+ for(const auto& glyph:layout.glyphs){auto frame=peak::revealFrame(motion,animation,glyph.index,song,clock,cfg.animationSpeed,cfg.progressiveReveal,!translated&&cfg.pop,!translated&&cfg.wiggle,cfg.wiggleFrequency,cfg.wiggleAmount,cfg.fallbackReveal);if(retired)frame.alpha=1;if(frame.alpha<=0)continue;
  auto im=image(dev,animation.glyphs[glyph.index].text);if(!im.texture)continue;auto face=panel;
  face.center=panel.center+panel.normal*.1f+panel.right*((glyph.x+glyph.width*.5f+frame.x)*unit)+panel.up*(top-(glyph.y+cfg.size*.5f+frame.y)*unit);
  face.width=im.width*unit*frame.scale;face.height=im.height*unit*frame.scale;
  float angle=frame.rotation;face.right=panel.right*std::cos(angle)+panel.up*std::sin(angle);face.up=panel.up*std::cos(angle)-panel.right*std::sin(angle);
- DWORD color=(DWORD(std::clamp(cfg.opacity*frame.alpha,0.f,1.f)*255)<<24)|(cfg.textColor&0xffffff);wallQuad(dev,face,camera,width,height,im,color);
+ DWORD color=(DWORD(std::clamp(cfg.opacity*frame.alpha*opacity,0.f,1.f)*255)<<24)|(cfg.textColor&0xffffff);wallQuad(dev,face,camera,width,height,im,color);
  }
 }
-void drawWallExperiment(IDirect3DDevice9* dev,const GameCameraFrame& camera,float width,float height,const State& music,const PlaybackDisplayFrame& display,int at){
- auto state=std::atomic_load(&source_walls::snapshot);
+bool drawWallExperiment(IDirect3DDevice9* dev,const GameCameraFrame& camera,float width,float height,const State& music,const PlaybackDisplayFrame& display,int at){
+ wallTextState.select(music,display,at,camera);auto state=std::atomic_load(&source_walls::snapshot);auto options=std::atomic_load(&source_walls::options);
  if(cfg.wallDebug){auto message=state->tick?state->message:std::string("Waiting for Source callback: ")+source_camera::status();auto banner=image(dev,"WALL | F8: place | "+message+" | panels="+std::to_string(state->panels.size()));draw(dev,banner,16,16,std::min(.6f,width*.95f/std::max(banner.width,1)),1.f,0xffcc88);}
- bool live=source_walls::liveLyrics.load();
- if(!display.lyrics||at<0||at>=int(music.timeline.size()))wallTextState.reset();
- else if(wallTextState.key!=music.key||wallTextState.generation!=music.generation||wallTextState.index!=at){
- wallTextState.key=music.key;wallTextState.generation=music.generation;wallTextState.index=at;const auto& line=music.timeline[at];auto next=at+1<int(music.timeline.size())?music.timeline[at+1].start:line.start+5000;
- wallTextState.original=std::make_unique<peak::Animation>(line,next);wallTextState.translated=std::make_unique<peak::Animation>(peak::translationAnimation(*wallTextState.original,line.translation,next));wallTextState.originalMotion=peak::VisibleAnimation{};wallTextState.translatedMotion=peak::VisibleAnimation{};}
- if(!usableCamera(camera,now())||state->epoch!=camera.epoch||uint64_t(now())<state->tick||uint64_t(now())-state->tick>350||source_walls::clearRequested.load())return;
- for(auto& item:state->panels){if(!item.visible)continue;const auto& panel=item.panel;
- // In live mode pause/disconnect clears all content rather than retaining a stale sentence.
- if(live&&!wallTextState.original)continue;
- if(cfg.wallBackdrop)wallQuad(dev,panel,camera,width,height,Image{},0xb018202c);
- if(cfg.wallDebug)wallText(dev,panel,camera,width,height,"WALL PANEL "+std::to_string(item.id),.4f,.12f,0xff99ccff);
+ bool live=cfg.wallLiveLyrics,currentVisible=false;uint64_t tick=uint64_t(now());
+ if(!usableCamera(camera,tick)||state->epoch!=camera.epoch||tick<state->tick||tick-state->tick>350||source_walls::clearRequested.load())return false;
+ for(auto& item:state->panels){if(!item.visible||tick<item.visibleTick||tick-item.visibleTick>350)continue;const auto& panel=item.panel;
+ WallSentence* sentence=nullptr;float opacity=1;
+ if(live){auto text=wallTextState.texts.find(item.token);if(!display.lyrics||item.session!=wallTextState.session||text==wallTextState.texts.end())continue;sentence=text->second.get();opacity=wallscene::alpha(item,tick,*options);if(opacity<=0)continue;}
+ if(!wallscene::onScreen(panel,camera,width,height))continue;
+ if(live&&item.token==wallTextState.current)currentVisible=true;
+ if(cfg.wallBackdrop)wallQuad(dev,panel,camera,width,height,Image{},(DWORD(176*opacity)<<24)|0x18202c);
+ if(cfg.wallDebug)wallText(dev,panel,camera,width,height,"WALL PANEL "+std::to_string(item.id),.4f,.12f,(DWORD(255*opacity)<<24)|0x99ccff);
  if(!live){wallText(dev,panel,camera,width,height,u8"固定在墙上的歌词挂画",0,.54f,0xff000000u|(cfg.textColor&0xffffff));continue;}
  auto limited=[](const std::string& text){std::string result;auto chars=graphemes(text);for(size_t i=0;i<std::min<size_t>(chars.size(),80);++i)result+=chars[i].text;return result;};
- if(cfg.showTitle)wallText(dev,panel,camera,width,height,limited(music.title),.37f,.12f,0xff000000u|(cfg.textColor&0xffffff));
- if(cfg.showArtist)wallText(dev,panel,camera,width,height,limited(music.artist),.24f,.09f,0xff000000u|(cfg.accent&0xffffff));
+ if(cfg.showTitle)wallText(dev,panel,camera,width,height,limited(sentence->title),.37f,.12f,(DWORD(255*opacity)<<24)|(cfg.textColor&0xffffff));
+ if(cfg.showArtist)wallText(dev,panel,camera,width,height,limited(sentence->artist),.24f,.09f,(DWORD(255*opacity)<<24)|(cfg.accent&0xffffff));
  auto measure=[&](const std::string& text){return image(dev,text).advance;};float maxPixels=cfg.size*18.f*cfg.lineWidthScale;
- auto original=peak::layout(wallTextState.original->glyphs,measure,maxPixels,cfg.size*1.35f);auto translation=peak::layout(wallTextState.translated->glyphs,measure,maxPixels/.72f,cfg.size*1.35f);
+ auto original=peak::layout(sentence->original.glyphs,measure,maxPixels,cfg.size*1.35f);auto translation=peak::layout(sentence->translated.glyphs,measure,maxPixels/.72f,cfg.size*1.35f);
  bool showTranslation=cfg.translation&&!translation.glyphs.empty();float widest=1;for(auto row:original.rows)widest=std::max(widest,row);if(showTranslation)for(auto row:translation.rows)widest=std::max(widest,row*.72f);
  float contentHeight=original.height+(showTranslation?cfg.size*.25f+translation.height*.72f:0);float unit=std::min(panel.width*.9f/widest,panel.height*.62f/std::max(contentHeight,1.f));unit=std::min(unit,panel.height*.27f/std::max(cfg.size,1));
- float top=contentHeight*unit*.5f-panel.height*.08f;auto song=lyricPosition(display.position,cfg.demo?0:cfg.offset);double clock=now()/1000.;
- wallGlyphs(dev,panel,camera,width,height,*wallTextState.original,wallTextState.originalMotion,original,unit,top,song,clock,false);
- if(showTranslation)wallGlyphs(dev,panel,camera,width,height,*wallTextState.translated,wallTextState.translatedMotion,translation,unit*.72f,top-(original.height+cfg.size*.25f)*unit,song,clock,true);
+ float top=contentHeight*unit*.5f-panel.height*.08f;auto song=lyricPosition(display.position,cfg.demo?0:cfg.offset);double clock=now()/1000.;bool retired=item.retired>=0;
+ wallGlyphs(dev,panel,camera,width,height,sentence->original,sentence->originalMotion,original,unit,top,song,clock,false,opacity,retired);
+ if(showTranslation)wallGlyphs(dev,panel,camera,width,height,sentence->translated,sentence->translatedMotion,translation,unit*.72f,top-(original.height+cfg.size*.25f)*unit,song,clock,true,opacity,retired);
  }
+ // Keep payloads only for retained panels and the current pending sentence.
+ for(auto it=wallTextState.texts.begin();it!=wallTextState.texts.end();){bool used=it->first==wallTextState.current||std::any_of(state->panels.begin(),state->panels.end(),[&](const auto& item){return item.session==wallTextState.session&&item.token==it->first;});if(!used)it=wallTextState.texts.erase(it);else ++it;}
+ return currentVisible;
 }
 struct DrawGuard {
  IDirect3DDevice9* dev; IDirect3DStateBlock9* block=nullptr;
@@ -251,14 +264,14 @@ void WINAPI render(IDirect3DDevice9* dev,const PresentInfo* present){
  bool preview=positionPreview.load();bool escapeDown=(GetAsyncKeyState(VK_ESCAPE)&0x8000)!=0;if(preview&&escapeDown&&!escapeHeld){positionPreview=false;preview=false;}escapeHeld=escapeDown;
  auto currentSettings=std::atomic_load(&settings);cfg=*currentSettings;bool wallMode=source_walls::enabled.load();if(!cfg.enabled&&!preview)return;
  if(lastWallMode!=wallMode){wallTextState.reset();lastWallMode=wallMode;peakEntries.clear();lyricLifecycle.reset();anchors.reset();++layoutGeneration;}
- if(lastPositionPreview!=preview){++layoutGeneration;peakEntries.clear();lyricLifecycle.reset();anchors.reset();playbackCursor={};lastPositionPreview=preview;}
+ if(lastPositionPreview!=preview){wallTextState.reset();++layoutGeneration;peakEntries.clear();lyricLifecycle.reset();anchors.reset();playbackCursor={};lastPositionPreview=preview;}
  if(renderedSettings!=currentSettings){wallTextState.reset();clear();peakEntries.clear();peakIndex=-1;lyricLifecycle.reset();anchors.reset();renderedSettings=currentSettings;}
  captureCamera(dev,present);
  const unsigned path=present->is_swapchain_present?1:0;
  if(!presentLogged[path]){presentLogged[path]=true;note(std::string("L4D2DangoMusic first Present path=")+(path?"SwapChain":"Device")+(present->swap_chain?" current-chain=yes":" current-chain=no"));}
  try {if(cache.size()>256)clear();auto state=std::atomic_load(&snapshot);auto display=playbackDisplay.select(*state,now());
  if(display.reset){wallTextState.reset();visibleLyricIndex=-1;++layoutGeneration;peakEntries.clear();lyricLifecycle.reset();anchors.reset();playbackCursor={};}
- auto cursor=preview?ClockSelection{}:playbackCursor.select(state->key,display.position,state->playing);auto position=cursor.position;if(cursor.seek){peakEntries.clear();lyricLifecycle.reset();anchors.reset();}auto at=position<0?-1:indexAt(state->timeline,lyricPosition(position,cfg.demo?0:cfg.offset));
+ auto cursor=preview?ClockSelection{}:playbackCursor.select(state->key,display.position,state->playing);auto position=cursor.position;if(cursor.seek){wallTextState.reset();peakEntries.clear();lyricLifecycle.reset();anchors.reset();}auto at=position<0?-1:indexAt(state->timeline,lyricPosition(position,cfg.demo?0:cfg.offset));
  std::string text=at<0?state->message:state->timeline[at].text;
  DrawGuard guard(dev);auto& target=guard.target;auto& depth=guard.depth;auto& back=guard.back;auto& block=guard.block;
  if(!checked(dev->CreateStateBlock(D3DSBT_ALL,&block),0,"CreateStateBlock"))return;
@@ -275,12 +288,15 @@ void WINAPI render(IDirect3DDevice9* dev,const PresentInfo* present){
  for(auto stage:{D3DTSS_COLOROP,D3DTSS_ALPHAOP})dev->SetTextureStageState(0,stage,D3DTOP_MODULATE);
  dev->SetTextureStageState(0,D3DTSS_COLORARG1,D3DTA_TEXTURE);dev->SetTextureStageState(0,D3DTSS_COLORARG2,D3DTA_DIFFUSE);dev->SetTextureStageState(0,D3DTSS_ALPHAARG1,D3DTA_TEXTURE);dev->SetTextureStageState(0,D3DTSS_ALPHAARG2,D3DTA_DIFFUSE);dev->SetTextureStageState(0,D3DTSS_TEXCOORDINDEX,0);dev->SetTextureStageState(0,D3DTSS_TEXTURETRANSFORMFLAGS,D3DTTFF_DISABLE);dev->SetTextureStageState(1,D3DTSS_COLOROP,D3DTOP_DISABLE);dev->SetTextureStageState(1,D3DTSS_ALPHAOP,D3DTOP_DISABLE);
  dev->SetSamplerState(0,D3DSAMP_MINFILTER,D3DTEXF_LINEAR);dev->SetSamplerState(0,D3DSAMP_MAGFILTER,D3DTEXF_LINEAR);dev->SetSamplerState(0,D3DSAMP_ADDRESSU,D3DTADDRESS_CLAMP);dev->SetSamplerState(0,D3DSAMP_ADDRESSV,D3DTADDRESS_CLAMP);dev->SetSamplerState(0,D3DSAMP_SRGBTEXTURE,FALSE);
- if(cfg.demo&&!preview&&!wallMode){auto banner=image(dev,"L4D2DangoMusic 0.8.1-wall2 DEMO - "+std::string(path?"SwapChain":"Device"));draw(dev,banner,16,16,std::min(1.f,desc.Width*.9f/std::max(banner.width,1)),1.f);}
+ if(cfg.demo&&!preview&&!wallMode){auto banner=image(dev,"L4D2DangoMusic 0.9.0 DEMO - "+std::string(path?"SwapChain":"Device"));draw(dev,banner,16,16,std::min(1.f,desc.Width*.9f/std::max(banner.width,1)),1.f);}
  auto camera=std::atomic_load(&source_camera::snapshot);const auto& gameFrame=*camera;CameraPose pose;
  bool cameraGood=usableCamera(gameFrame,now())&&cameraPose(gameFrame,pose);bool cameraValid=cfg.worldLyrics&&cameraGood;
  if(cfg.worldLyrics&&cfg.debugOverlay&&!preview&&!wallMode){auto status=image(dev,cameraValid?std::string("GAME CAMERA: ACTIVE (experimental)"):std::string("GAME CAMERA: ")+source_camera::status()+" - screen fallback");draw(dev,status,16,cfg.demo?64.f:16.f,std::min(.65f,desc.Width*.9f/std::max(status.width,1)),.8f,cameraValid?0x99ffbb:0xffcc88);}
  if(preview)drawPositionPreview(dev,gameFrame,cameraValid,pose,float(desc.Width),float(desc.Height));
- else if(wallMode)drawWallExperiment(dev,gameFrame,float(desc.Width),float(desc.Height),*state,display,at);
+ else if(wallMode){bool visible=drawWallExperiment(dev,gameFrame,float(desc.Width),float(desc.Height),*state,display,at);
+ if(cfg.wallFallback&&cfg.wallLiveLyrics&&display.lyrics&&!visible&&uint64_t(now())>=wallTextState.started+1000)peakFrame(dev,*state,at,lyricPosition(position,cfg.demo?0:cfg.offset),false,gameFrame,pose,float(desc.Width),float(desc.Height));
+ else{peakEntries.clear();lyricLifecycle.reset();}}
+
  else {
  if(!cameraValid)anchors.reset();else anchors.update(gameFrame,pose,state->key,at);
  if(cameraValid&&cfg.worldTestAnchor){Placement test;if(projectAnchor(gameFrame,anchors.test,float(desc.Width),float(desc.Height),cfg.worldHeight,cfg.size,test)){auto im=image(dev,"WORLD ANCHOR +");styled(dev,im,test.x-im.width*test.scale*.5f,test.y,test.scale,.9f,0x99ffbb);}}
@@ -295,13 +311,13 @@ void WINAPI render(IDirect3DDevice9* dev,const PresentInfo* present){
 }
 bool load(const std::filesystem::path& pluginDirectory){try{directory=pluginDirectory/L"L4D2DangoMusic";auto path=directory/L"config.json";
  if(std::filesystem::exists(path)){std::ifstream f(path);cfg=decodeConfig(nlohmann::json::parse(f));}
- std::atomic_store(&settings,std::make_shared<const Config>(cfg));
+ std::atomic_store(&settings,std::make_shared<const Config>(cfg));source_walls::configure(cfg);
 
- note("L4D2DangoMusic 0.8.1-wall2 config="+path.u8string()+" mode="+(cfg.demo?"DEMO":"BLF/LX")+" port="+std::to_string(cfg.port)+" offsetMs="+std::to_string(cfg.offset)+" displayMode="+cfg.mode);
+ note("L4D2DangoMusic 0.9.0 config="+path.u8string()+" mode="+(cfg.demo?"DEMO":"BLF/LX")+" port="+std::to_string(cfg.port)+" offsetMs="+std::to_string(cfg.offset)+" displayMode="+cfg.mode);
  stopping=false;worker=std::thread(run);return TRUE;}catch(const std::exception& e){if(logger)logger(LDB_HOST_LOG_ERROR,e.what());return FALSE;}catch(...){return FALSE;}}
 void releasePresentationBackup();
-void WINAPI created(IDirect3DDevice9*){++deviceGeneration;releasePresentationBackup();anchors.reset();peakEntries.clear();peakIndex=-1;lyricLifecycle.reset();clear();reportedErrors=0;drewPixels=false;note("L4D2DangoMusic device lifecycle: created/destroyed; textures cleared");}
-void WINAPI beforeReset(IDirect3DDevice9*,const D3DPRESENT_PARAMETERS*,BOOL){releasePresentationBackup();anchors.reset();peakEntries.clear();peakIndex=-1;lyricLifecycle.reset();clear();}
+void WINAPI created(IDirect3DDevice9*){wallTextState.reset();++deviceGeneration;releasePresentationBackup();anchors.reset();peakEntries.clear();peakIndex=-1;lyricLifecycle.reset();clear();reportedErrors=0;drewPixels=false;note("L4D2DangoMusic device lifecycle: created/destroyed; textures cleared");}
+void WINAPI beforeReset(IDirect3DDevice9*,const D3DPRESENT_PARAMETERS*,BOOL){wallTextState.reset();releasePresentationBackup();anchors.reset();peakEntries.clear();peakIndex=-1;lyricLifecycle.reset();clear();}
 void WINAPI afterReset(IDirect3DDevice9*,HRESULT hr,BOOL){++deviceGeneration;reportedErrors=0;checked(hr,5,"Reset");note("L4D2DangoMusic Reset completed; textures will rebuild");}
 void WINAPI shutdown(){source_camera::frameListener=nullptr;source_walls::stop();stopping=true;wake.notify_all();if(worker.joinable())worker.join();releasePresentationBackup();clear();}
 }
@@ -329,7 +345,7 @@ template<class Present> HRESULT paintAndPresent(IDirect3DDevice9* device,IDirect
 }
 struct Patch {void** slot;void* original;void* replacement;};
 std::array<Patch,64> patches{};std::atomic<size_t> patchCount{0};SRWLOCK patchLock=SRWLOCK_INIT;std::filesystem::path pluginDirectory;
-void fileLog(int,const char* message){std::ofstream file(pluginDirectory/L"L4D2DangoMusic.log",std::ios::app);file<<"L4D2DangoMusic 0.8.1-wall2 "<<message<<'\n';}
+void fileLog(int,const char* message){std::ofstream file(pluginDirectory/L"L4D2DangoMusic.log",std::ios::app);file<<"L4D2DangoMusic 0.9.0 "<<message<<'\n';}
 bool patch(void** table,size_t slot,void* replacement){
  if(!TryAcquireSRWLockExclusive(&patchLock))return false;auto count=patchCount.load(std::memory_order_acquire);
  for(size_t i=0;i<count;++i)if(patches[i].slot==table+slot){bool same=patches[i].replacement==replacement;ReleaseSRWLockExclusive(&patchLock);return same;}
@@ -365,13 +381,13 @@ const char* page(const std::string& title,const std::string& rows){menuText="\""
 std::vector<std::string> relatedModules(){std::vector<std::string> paths;HANDLE snapshot=CreateToolhelp32Snapshot(TH32CS_SNAPMODULE|TH32CS_SNAPMODULE32,GetCurrentProcessId());if(snapshot==INVALID_HANDLE_VALUE)return paths;MODULEENTRY32W entry{};entry.dwSize=sizeof(entry);
  if(Module32FirstW(snapshot,&entry))do{if(entry.hModule==ownModule)continue;std::wstring name=entry.szModule;std::transform(name.begin(),name.end(),name.begin(),[](wchar_t c){return c>=L'A'&&c<=L'Z'?c+32:c;});
  if(name.find(L"dango")!=std::wstring::npos||GetProcAddress(entry.hModule,"L4D2DangoMusicShutdown")||GetProcAddress(entry.hModule,"LDBDangoMusicShutdown"))paths.push_back(std::filesystem::path(entry.szExePath).u8string());}while(Module32NextW(snapshot,&entry));CloseHandle(snapshot);return paths;}
-const char* diagnosticMenu(){std::string rows=item(u8"版本：0.8.1-wall2；进程："+std::to_string(GetCurrentProcessId()),24)+item(u8"当前 DLL："+ownPath.u8string(),24);auto others=relatedModules();
+const char* diagnosticMenu(){std::string rows=item(u8"版本：0.9.0；进程："+std::to_string(GetCurrentProcessId()),24)+item(u8"当前 DLL："+ownPath.u8string(),24);auto others=relatedModules();
  note("Runtime audit pid="+std::to_string(GetCurrentProcessId())+" dll="+ownPath.u8string()+" related_modules="+std::to_string(others.size()));
  for(auto& path:others){rows+=item(u8"其他歌词模块："+path,24);note("Other lyric module: "+path);}
  if(others.empty())rows+=item(u8"当前进程未发现其他相关模块（Host 需另查）",24);
  auto music=std::atomic_load(&snapshot);rows+=item(std::string(u8"播放器：")+(music->connected?(music->playing?u8"播放中":u8"暂停/停止"):u8"未连接")+u8"；会话 "+std::to_string(music->generation)+u8"；歌词 "+std::to_string(music->timeline.size()),24);
- return page(u8"L4D2DangoMusic 0.8.1-wall2 · 诊断",rows+item(u8"返回主菜单",0));}
-void changeSettings(const Config& next){std::atomic_store(&settings,std::make_shared<const Config>(next));note("Settings applied enabled="+std::to_string(next.enabled)+" preset="+std::to_string(next.presetId)+" preview="+std::to_string(positionPreview.load()));}
+ return page(u8"L4D2DangoMusic 0.9.0 · 诊断",rows+item(u8"返回主菜单",0));}
+void changeSettings(const Config& next){source_walls::configure(next);std::atomic_store(&settings,std::make_shared<const Config>(next));note("Settings applied enabled="+std::to_string(next.enabled)+" preset="+std::to_string(next.presetId)+" preview="+std::to_string(positionPreview.load()));}
 std::string on(bool v){return v?u8"开":u8"关";}
 const char* channelMenu(const Config& c,bool accent,unsigned channel){uint32_t color=accent?c.accent:c.textColor;unsigned value=(color>>((2-channel)*8))&255;std::string rows;
  const char* names[]={"R","G","B"};const char* labels[]={"-16","-1","+1","+16","0","64","128","192","255"};
@@ -382,7 +398,8 @@ const char* displayMenu(const Config& c){return page(u8"显示与歌曲信息",i
 const char* colorMenu(const Config& c){return page(u8"颜色与柔光",item(u8"正文颜色 "+colorText(c.textColor),11)+item(u8"光晕颜色 "+colorText(c.accent),12)+item(u8"柔光："+on(c.glow),8));}
 const char* animationMenu(const Config& c){return page(u8"动画与停留",item(u8"按演唱进度显字（含翻译）："+on(c.progressiveReveal),28)+item(std::string(u8"无逐字时间轴：")+(c.fallbackReveal?u8"估算渐显":u8"整句显示"),32)+item(u8"显字动画速度",13)+item(u8"退场耗时",14)+item(u8"换句后额外停留",15)+item(u8"抖动："+on(c.wiggle),3)+item(u8"弹跳入场："+on(c.pop),4)+item(u8"恢复默认动画（抖动＋弹跳）",26)+item(u8"动画预览（示例歌词）",27));}
 
-const char* wallMenu(){auto s=std::atomic_load(&source_walls::snapshot);auto message=source_walls::enabled.load()&&!s->tick?std::string("Waiting for Source callback: ")+source_camera::status():s->message;return page(u8"实验：墙面挂画 · F8放置",item(u8"墙面实验："+on(source_walls::enabled.load()),700)+item(u8"3秒后按当前准星放置",701)+item(std::string(u8"内容：")+(source_walls::liveLyrics.load()?u8"当前歌词":u8"固定示例"),702)+item(u8"背景面板："+on(std::atomic_load(&settings)->wallBackdrop),703)+item(u8"清空全部挂画",704)+item(u8"调试标识："+on(std::atomic_load(&settings)->wallDebug),705)+item(u8"下一幅尺寸：小80×28",706)+item(u8"下一幅尺寸：中120×40",707)+item(u8"下一幅尺寸：大180×60",708)+item(u8"状态："+message,30)+item(u8"返回主菜单",0));}
+const char* wallMenu(){auto c=*std::atomic_load(&settings);auto state=std::atomic_load(&source_walls::snapshot);return page(u8"场景挂画歌词",item(u8"场景挂画："+on(c.wallEnabled),700)+item(std::string(u8"放置方式：")+(c.wallAutomatic?u8"自动寻找墙面":u8"手动挂画轮换"),709)+item(std::string(u8"内容：")+(c.wallLiveLyrics?u8"歌词轮换":u8"固定示例"),702)+item(u8"背景面板："+on(c.wallBackdrop),703)+item(u8"无可见挂画时屏幕歌词："+on(c.wallFallback),710)+item(u8"尺寸、数量、搜索与停留",711)+item(u8"手动放置：3秒后按准星",701)+item(u8"清空全部挂画",704)+item(u8"调试标识："+on(c.wallDebug),705)+item(u8"状态："+state->message,30)+item(u8"返回主菜单",0));}
+const char* wallOptionsMenu(){auto c=*std::atomic_load(&settings);const char* sizes[]={u8"小80×28",u8"中120×40",u8"大180×60"};return page(u8"场景挂画参数",item(std::string(u8"新挂画尺寸：")+sizes[c.wallSize]+u8"（循环切换）",712)+item(u8"最多挂画："+std::to_string(c.wallCapacity)+u8"（2/4/6/8）",713)+item(u8"搜索距离："+std::to_string(int(c.wallRange))+u8"（300/600/900）",714)+item(u8"最小间距："+std::to_string(int(c.wallSpacing))+u8"（80/140/220）",715)+item(u8"旧句额外停留："+std::to_string(c.wallLingerMs)+u8"ms（0/2000/4000/8000）",716)+item(u8"淡出时间："+std::to_string(c.wallFadeMs)+u8"ms（500/1000/2000）",717)+item(u8"返回场景挂画",30));}
 std::string componentName(int index){return index==0?u8"歌名":index==1?u8"作者":u8"歌词 "+std::to_string(index-1);}
 std::string positionValue(float value,bool percent=false){char text[40];std::snprintf(text,sizeof(text),percent?"%.0f%%":"%.2f",percent?value*100:value);return text;}
 std::string previewExitRows(){return item(u8"动画预览："+on(positionPreviewMotion.load()),2006)+item(u8"保存设置并结束预览",2098)+item(u8"结束预览，暂不保存",2099);}
@@ -414,7 +431,24 @@ const char* menuAction(void* argument){uintptr_t id=reinterpret_cast<uintptr_t>(
  if(id>=20000&&id<=31304){int code=int(id-20000),index=code/1000,axis=code%1000/100,choice=code%100;if(index>2+MaxLyricSlots||axis>3||choice>4)return nullptr;positionPreview=true;if(index==2+MaxLyricSlots)adjustLyricGroup(c.layout,axis,choice);else adjustPosition(c.layout,index,axis,choice);changeSettings(c);return positionAxisMenu(c,index,axis);}
  positionPreview=false;
  if(id==30)return wallMenu();
- if(id>=700&&id<=708){if(id==700){source_walls::enabled=!source_walls::enabled.load();if(source_walls::enabled.load())source_walls::resetRequested=true;}else if(id==701){if(!source_walls::enabled.exchange(true))source_walls::resetRequested=true;source_walls::placeAt=GetTickCount64()+3000;}else if(id==702)source_walls::liveLyrics=!source_walls::liveLyrics.load();else if(id==703||id==705){if(id==703)c.wallBackdrop=!c.wallBackdrop;else c.wallDebug=!c.wallDebug;changeSettings(c);}else if(id==704)source_walls::clearRequested=true;else if(id>=706)source_walls::sizeChoice=int(id-706);return wallMenu();}
+ if(id==711)return wallOptionsMenu();
+ if(id>=700&&id<=717){
+ if(id==700)c.wallEnabled=!c.wallEnabled;
+ else if(id==701){c.wallEnabled=true;source_walls::placeAt=GetTickCount64()+3000;}
+ else if(id==702)c.wallLiveLyrics=!c.wallLiveLyrics;
+ else if(id==703)c.wallBackdrop=!c.wallBackdrop;
+ else if(id==704){source_walls::clearRequested=true;return wallMenu();}
+ else if(id==705)c.wallDebug=!c.wallDebug;
+ else if(id>=706&&id<=708)c.wallSize=int(id-706);
+ else if(id==709)c.wallAutomatic=!c.wallAutomatic;
+ else if(id==710)c.wallFallback=!c.wallFallback;
+ else if(id==712)c.wallSize=(c.wallSize+1)%3;
+ else if(id==713)c.wallCapacity=c.wallCapacity>=8?2:(c.wallCapacity/2+1)*2;
+ else if(id==714)c.wallRange=c.wallRange<600?600:c.wallRange<900?900:300;
+ else if(id==715)c.wallSpacing=c.wallSpacing<140?140:c.wallSpacing<220?220:80;
+ else if(id==716)c.wallLingerMs=c.wallLingerMs<2000?2000:c.wallLingerMs<4000?4000:c.wallLingerMs<8000?8000:0;
+ else if(id==717)c.wallFadeMs=c.wallFadeMs<1000?1000:c.wallFadeMs<2000?2000:500;
+ changeSettings(c);return id>=712?wallOptionsMenu():wallMenu();}
  if(id==24)return diagnosticMenu();
  if(id==20)return displayMenu(c);
  if(id==21)return colorMenu(c);
@@ -445,15 +479,15 @@ const char* menuAction(void* argument){uintptr_t id=reinterpret_cast<uintptr_t>(
  if(id==8||(id>=300&&id<=317))return colorMenu(c);
  return rootMenu(false);
 }
-const char* rootMenu(bool title){if(title)return "L4D2DangoMusic 0.8.1-wall2";positionPreview=false;auto c=*std::atomic_load(&settings);std::string rows;
+const char* rootMenu(bool title){if(title)return "L4D2DangoMusic 0.9.0";positionPreview=false;auto c=*std::atomic_load(&settings);std::string rows;
  rows+=item(u8"单行长度 "+positionValue(c.lineWidthScale)+"x",31);rows+=item(u8"歌词显示："+on(c.enabled),1)+item(u8"显示与歌曲信息",20)+item(u8"位置与数量（固定预览）",23)+item(std::string(u8"预设：")+presetName(c.presetId),10)+item(u8"颜色与柔光",21)+item(u8"动画、速度与停留",22)+item(u8"同步偏移 "+std::to_string(c.offset)+"ms",16);
- int saved=saveState.load();rows+=item(u8"实验：墙面挂画（F8放置）",30);rows+=item(saved==1?u8"正在保存…":saved==2?u8"保存设置（上次成功）":saved<0?u8"保存设置（上次失败，见日志）":u8"保存设置",18);rows+=item(u8"版本、路径与播放器诊断",24);return page("L4D2DangoMusic 0.8.1-wall2",rows);}
+ int saved=saveState.load();rows+=item(u8"场景挂画歌词（自动 / 手动）",30);rows+=item(saved==1?u8"正在保存…":saved==2?u8"保存设置（上次成功）":saved<0?u8"保存设置（上次失败，见日志）":u8"保存设置",18);rows+=item(u8"版本、路径与播放器诊断",24);return page("L4D2DangoMusic 0.9.0",rows);}
 class LyricsPlugin final:public IL4NPlugin {
  bool started=false,attempted=false,duplicate=false;HANDLE renderOwner=nullptr;
 public:
  const char* GetName()override{return "L4D2DangoMusic";}
- const char* GetVersion()override{return "0.8.1-wall2";}
- const char* RequestHudMenu(bool title)override{start();if(duplicate){if(title)return u8"L4D2DangoMusic 0.8.1-wall2 · 重复副本已阻止";return page(u8"重复副本未启用绘制",item(u8"查看实际 DLL 路径与其他模块",24));}return rootMenu(title);}
+ const char* GetVersion()override{return "0.9.0";}
+ const char* RequestHudMenu(bool title)override{start();if(duplicate){if(title)return u8"L4D2DangoMusic 0.9.0 · 重复副本已阻止";return page(u8"重复副本未启用绘制",item(u8"查看实际 DLL 路径与其他模块",24));}return rootMenu(title);}
  void start(){if(attempted)return;attempted=true;GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,reinterpret_cast<const wchar_t*>(&fileLog),&ownModule);wchar_t path[32768]{};if(!GetModuleFileNameW(ownModule,path,32768))return;ownPath=path;pluginDirectory=ownPath.parent_path();logger=fileLog;
  std::wstring ownerName=L"Local\\L4D2DangoMusic-render-"+std::to_wstring(GetCurrentProcessId());SetLastError(ERROR_SUCCESS);renderOwner=CreateMutexW(nullptr,FALSE,ownerName.c_str());DWORD ownerError=GetLastError();
  if(!renderOwner||ownerError==ERROR_ALREADY_EXISTS){duplicate=true;if(renderOwner)CloseHandle(renderOwner);renderOwner=nullptr;note("Duplicate renderer blocked pid="+std::to_string(GetCurrentProcessId())+" dll="+ownPath.u8string());return;}

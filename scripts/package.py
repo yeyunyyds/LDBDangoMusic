@@ -6,7 +6,7 @@ import zipfile
 import struct
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = '0.8.1-wall2'
+VERSION = '0.9.0'
 files = {}
 for folder in ('src', 'tests', 'scripts', 'vendor', 'docs', 'presets'):
     for path in (ROOT / folder).rglob('*'):
@@ -14,7 +14,7 @@ for folder in ('src', 'tests', 'scripts', 'vendor', 'docs', 'presets'):
             files['source/' + path.relative_to(ROOT).as_posix()] = path
 for name in ('README.md', 'NOTICE.md', 'LICENSE', 'config.example.json', 'config.demo.json', 'config.camera-demo.json', 'config.world-demo.json', '.gitignore'):
     files['source/' + name] = ROOT / name
-for name in ('L4D2DangoMusic.dll', 'l4n_smoke.exe', 'core_test.exe', 'interface_inventory_test.exe', 'source_walls_abi_test.exe'):
+for name in ('L4D2DangoMusic.dll', 'l4n_smoke.exe', 'core_test.exe', 'interface_inventory_test.exe', 'source_walls_abi_test.exe', 'wall_scene_test.exe'):
     path = ROOT / 'build' / name
     blob=path.read_bytes()
     if blob[:2] != b'MZ':

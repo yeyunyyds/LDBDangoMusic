@@ -8,3 +8,5 @@ mkdir -p build
 "$compiler" -std=c++17 -O2 -Ivendor -Isrc tests/core_test.cpp -static -o build/core_test.exe
 "$compiler" -std=c++17 -O2 -Ivendor -Isrc tests/interface_inventory_test.cpp -static -o build/interface_inventory_test.exe
 "$compiler" -std=c++17 -O2 -Ivendor -Isrc tests/source_walls_abi_test.cpp -static -o build/source_walls_abi_test.exe -luser32
+
+"$compiler" -std=c++17 -O2 -Isrc tests/wall_scene_test.cpp -static -o build/wall_scene_test.exe

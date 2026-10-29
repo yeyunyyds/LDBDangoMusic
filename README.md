@@ -1,6 +1,6 @@
 # L4D2DangoMusic
 
-> 当前分支为墙面挂画实验版 `0.8.1-wall2`。提供 F8 准星放置测试，实验开关默认关闭；使用步骤与边界见 [墙面实验指南](docs/wall-experiment-guide.md)。
+> 当前版本 `0.9.0` 支持自动寻找墙面、独立歌词挂画和手动位置轮换。场景挂画默认关闭；使用方法见 [场景挂画指南](docs/wall-experiment-guide.md)。
 
 为《求生之路 2》（Left 4 Dead 2）提供音乐歌词显示的 L4N 插件。通过兼容 LX / BLF 的本地音乐 API 获取播放进度和歌词，在游戏中呈现带逐字动画的歌词，并支持世界空间定位、歌名与作者显示以及游戏内调节。
 
@@ -9,6 +9,7 @@
 ## 功能
 
 - 同步显示 LRC / LX 歌词，支持逐字时间信息及翻译。
+- 场景挂画：自动沿附近墙面放置当前歌词，各句独立停留、淡出，支持手动放置与轮换。
 - 世界空间歌词：歌词随相机移动产生视差，也可使用屏幕显示模式。
 - 支持 1～9 个歌词位置依次轮换，分别调整高度、左右、距离和大小。
 - 歌名、作者独立显示与定位，歌词支持整体位置调节。
@@ -26,11 +27,11 @@
 
 默认连接 `127.0.0.1:23330`。不同播放器版本提供的 API 可能不同，请先确认所用版本支持上述接口。
 
-世界空间模式依赖受支持的 Source 相机接口与游戏构建；无法取得有效相机信息时，插件会回退到屏幕显示。世界空间歌词目前不提供墙体遮挡效果。
+世界空间模式依赖受支持的 Source 相机接口与游戏构建；无法取得有效相机信息时，插件会回退到屏幕显示。普通世界空间歌词不提供墙体遮挡；场景挂画使用世界几何射线做整幅遮挡检查，范围和限制见挂画指南。
 
 ## 安装
 
-[下载墙面实验包：L4D2DangoMusic 0.8.1-wall2](https://github.com/yeyunyyds/LDBDangoMusic/raw/refs/heads/experiment/wall-mounted-lyrics/releases/L4D2DangoMusic-0.8.1-wall2-l4n.zip)
+[下载场景歌词版：L4D2DangoMusic 0.9.0](https://github.com/yeyunyyds/LDBDangoMusic/raw/refs/heads/experiment/wall-mounted-lyrics/releases/L4D2DangoMusic-0.9.0-l4n.zip)
 
 ### 使用安装脚本
 
@@ -75,6 +76,8 @@ bin/neko/plugins/L4D2DangoMusic/config.json
 
 默认使用两个轮换位置，歌词位于屏幕中心稍上方，长句自动回到视野的功能默认关闭。歌名和作者可在显示菜单中分别开启。
 
+开启 **场景挂画歌词** 后，可选择自动寻找墙面，或用 F8 手动放置挂画。挂画参数、旧句停留、背景、屏幕回退及完整设置说明见 [场景挂画指南](docs/wall-experiment-guide.md)。
+
 ### 配置文件
 
 配置路径为 `bin/neko/plugins/L4D2DangoMusic/config.json`。通常使用游戏内菜单即可；手动编辑配置时，请先退出游戏。
@@ -88,6 +91,11 @@ bin/neko/plugins/L4D2DangoMusic/config.json
 | `offsetMs` | 歌词同步偏移，正值提前 | `500` |
 | `layout.lyricCount` | 歌词轮换位置数量 | `2` |
 | `reanchorMs` | 长句回到视野的间隔，`0` 表示关闭 | `0` |
+| `wallEnabled` | 启用场景挂画 | `false` |
+| `wallAutomatic` | 自动寻找墙面；关闭为手动位置轮换 | `true` |
+| `wallCapacity` | 挂画数量上限 | `6` |
+| `wallLingerMs` / `wallFadeMs` | 旧句额外停留 / 淡出时间 | `4000` / `1000` |
+| `wallFallback` | 无可见当前挂画时显示屏幕歌词 | `true` |
 | `showTitle` / `showArtist` | 显示歌名 / 作者 | `false` |
 
 完整配置见 [config.example.json](config.example.json)，视觉预设见 [presets](presets/)。如需独立检查显示效果，可使用游戏内预览，或将 `demo` 设为 `true`。
