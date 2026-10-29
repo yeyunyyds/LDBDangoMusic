@@ -64,7 +64,7 @@ foreach ($location in $locations) {
 }
 Copy-Item $sourceDll $dll -Force
 [IO.File]::WriteAllText($path, ($settings | ConvertTo-Json -Depth 16), [System.Text.UTF8Encoding]::new($false))
-Write-Host 'Installed L4D2DangoMusic 0.9.1; settings preserved. Restart game; use the L4D2DangoMusic 0.9.1 menu.'
+Write-Host 'Installed L4D2DangoMusic 0.9.2; settings preserved. Restart game; use the L4D2DangoMusic 0.9.2 menu.'
 
 Write-Host ('Active DLL: ' + [IO.Path]::GetFullPath($dll))
 Write-Host ('Backups outside plugin search paths: ' + $backupRoot)

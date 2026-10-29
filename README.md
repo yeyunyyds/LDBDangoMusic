@@ -1,6 +1,6 @@
 # L4D2DangoMusic
 
-> 当前版本 `0.9.1` 支持自动寻找墙面、独立歌词挂画和手动位置轮换。场景挂画默认关闭；使用方法见 [场景挂画指南](docs/wall-experiment-guide.md)。
+> 当前版本 `0.9.2` 支持自动寻找墙面、独立歌词挂画和手动位置轮换。场景挂画默认关闭；使用方法见 [场景挂画指南](docs/wall-experiment-guide.md)。
 
 为《求生之路 2》（Left 4 Dead 2）提供音乐歌词显示的 L4N 插件。通过兼容 LX / BLF 的本地音乐 API 获取播放进度和歌词，在游戏中呈现带逐字动画的歌词，并支持世界空间定位、歌名与作者显示以及游戏内调节。
 
@@ -31,7 +31,7 @@
 
 ## 安装
 
-[下载场景歌词版：L4D2DangoMusic 0.9.1](https://github.com/yeyunyyds/LDBDangoMusic/raw/refs/heads/zip/L4D2DangoMusic-0.9.1-l4n.zip)
+[下载场景歌词版：L4D2DangoMusic 0.9.2](https://github.com/yeyunyyds/LDBDangoMusic/raw/refs/heads/zip/L4D2DangoMusic-0.9.2-l4n.zip)
 
 安装压缩包内仅包含 **bin 文件夹和 README.md**，不附带源码、构建工具、测试程序或额外依赖。
 
