@@ -29,6 +29,7 @@
 #include "source_walls.hpp"
 #include "hud_menu_policy.hpp"
 #include "native_hud.hpp"
+#include "menu_pages.hpp"
 static_assert(sizeof(void*)==4,"Pure L4N plugin must be x86");
 struct PresentInfo {bool is_swapchain_present=false;IDirect3DSwapChain9* swap_chain=nullptr;};
 namespace {
@@ -37,13 +38,14 @@ hud::NativeHud nativeHud;
 std::string buildNativeMenu(uintptr_t);
 void activateNativeMenu(uintptr_t);
 void closeNativeMenu();
+void updateHudAppearance(const hud::Appearance&);
 std::string nativeMenuNotice();
 const char* nativeEntryMenu();
 int64_t now(){return static_cast<int64_t>(GetTickCount64());}
 thread_local Config cfg;
 struct MenuNotice {uint64_t tick=0;std::string text;};
 std::shared_ptr<const MenuNotice> menuNotice=std::make_shared<MenuNotice>();
-std::shared_ptr<const Config> settings=std::make_shared<Config>(),pendingSave;
+std::shared_ptr<const Config> settings=std::make_shared<Config>(),pendingSave,savedSettings=std::make_shared<Config>();
 std::mutex settingsMutex;std::atomic<int> saveState{0};thread_local std::shared_ptr<const Config> renderedSettings;
 HMODULE ownModule=nullptr;std::filesystem::path ownPath;
 std::filesystem::path directory;using LogFn=void(*)(int,const char*);LogFn logger=nullptr;
@@ -100,7 +102,7 @@ constexpr auto statusPath=L"/status?filter=status,name,singer,duration,progress,
 void run() noexcept {
  try {cfg=*std::atomic_load(&settings);CameraWriter cameraWriter;PlayerSession player;auto demoStart=now();
  while(!stopping||std::atomic_load(&pendingSave)){
- if(auto requested=std::atomic_exchange(&pendingSave,std::shared_ptr<const Config>{})){try{auto path=directory/L"config.json";nlohmann::json stored=nlohmann::json::object();if(std::filesystem::exists(path)){std::ifstream old(path);stored=nlohmann::json::parse(old);if(!stored.is_object())throw std::runtime_error("Existing config is not an object");}stored.update(encodeConfig(*requested));std::filesystem::create_directories(directory);auto temp=directory/L"config.json.tmp";{std::ofstream file(temp,std::ios::binary|std::ios::trunc);file<<stored.dump(2)<<'\n';file.flush();if(!file)throw std::runtime_error("Config write failed");}if(std::filesystem::exists(path))std::filesystem::copy_file(path,directory/L"config.json.bak",std::filesystem::copy_options::overwrite_existing);if(!MoveFileExW(temp.c_str(),path.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH))throw std::runtime_error("Config replace failed");saveState=2;note("Settings saved");}catch(const std::exception& e){saveState=-1;note(e.what());}}
+ if(auto requested=std::atomic_exchange(&pendingSave,std::shared_ptr<const Config>{})){saveState=1;try{auto path=directory/L"config.json";nlohmann::json stored=nlohmann::json::object();if(std::filesystem::exists(path)){std::ifstream old(path);stored=nlohmann::json::parse(old);if(!stored.is_object())throw std::runtime_error("Existing config is not an object");}stored.update(encodeConfig(*requested));std::filesystem::create_directories(directory);auto temp=directory/L"config.json.tmp";{std::ofstream file(temp,std::ios::binary|std::ios::trunc);file<<stored.dump(2)<<'\n';file.flush();if(!file)throw std::runtime_error("Config write failed");}if(std::filesystem::exists(path))std::filesystem::copy_file(path,directory/L"config.json.bak",std::filesystem::copy_options::overwrite_existing);if(!MoveFileExW(temp.c_str(),path.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH))throw std::runtime_error("Config replace failed");std::atomic_store(&savedSettings,requested);saveState=2;note("Settings saved");}catch(const std::exception& e){saveState=-1;note(e.what());}}
  cameraWriter.drain();try{State s;
  if(cfg.demo){s.connected=s.playing=true;s.title="Offline demonstration";s.key="demo";s.duration=16000;s.position=(now()-demoStart)%16000;s.sampled=now();s.timeline=parse("[00:01.00]<1000,500>你好 <1500,500>求生之路\n[00:05.00]Left and right floating lyrics\n[00:09.00]暂停、换歌与逐字时间轴\n[00:13.00]L4D2DangoMusic");s.message="Offline demo";}
  else {player.poll([](){return status(get(statusPath,65536),now());},[](){return peak::splitTimeline(lyrics(get(L"/lyric-all",2*1024*1024)));},[](){return now();},[](State state){publish(std::move(state));});}
@@ -329,7 +331,7 @@ void WINAPI render(IDirect3DDevice9* dev,const PresentInfo* present){
 }
 bool load(const std::filesystem::path& pluginDirectory){try{directory=pluginDirectory/L"L4D2DangoMusic";auto path=directory/L"config.json";
  if(std::filesystem::exists(path)){std::ifstream f(path);cfg=decodeConfig(nlohmann::json::parse(f));}
- std::atomic_store(&settings,std::make_shared<const Config>(cfg));source_walls::configure(cfg);
+ std::atomic_store(&settings,std::make_shared<const Config>(cfg));std::atomic_store(&savedSettings,std::filesystem::exists(path)?std::make_shared<const Config>(cfg):std::shared_ptr<const Config>{});source_walls::configure(cfg);nativeHud.loadAppearance(cfg.hud);
 
  note("L4D2DangoMusic 0.9.2 config="+path.u8string()+" mode="+(cfg.demo?"DEMO":"BLF/LX")+" port="+std::to_string(cfg.port)+" offsetMs="+std::to_string(cfg.offset)+" displayMode="+cfg.mode);
  stopping=false;worker=std::thread(run);return TRUE;}catch(const std::exception& e){if(logger)logger(LDB_HOST_LOG_ERROR,e.what());return FALSE;}catch(...){return FALSE;}}
@@ -397,6 +399,7 @@ const char* menuAction(void*);
 std::string escaped(std::string s){std::string out;for(char c:s){if(c=='"'||c=='\\')out+='\\';if(c!='\r'&&c!='\n')out+=c;}return out;}
 std::string item(const std::string& label,uintptr_t id){if(label.rfind(u8"返回",0)==0)return {};char callback[32],data[32];std::snprintf(callback,sizeof(callback),"0x%lx",static_cast<unsigned long>(reinterpret_cast<uintptr_t>(&menuAction)));std::snprintf(data,sizeof(data),"0x%lx",static_cast<unsigned long>(id));return "\""+escaped(label)+"\" { \"callback\" \""+callback+"\" \"user_data\" \""+data+"\" }\n";}
 const char* page(const std::string& title,const std::string& rows){menuText="\""+escaped(title)+"\" {\n"+rows+"}\n";return menuText.c_str();}
+const char* menuPage(const hud::Document& doc){std::string rows;for(auto& row:doc.rows)rows+=item(row.label,row.action);return page(doc.title,rows);}
 std::vector<std::string> relatedModules(){std::vector<std::string> paths;HANDLE snapshot=CreateToolhelp32Snapshot(TH32CS_SNAPMODULE|TH32CS_SNAPMODULE32,GetCurrentProcessId());if(snapshot==INVALID_HANDLE_VALUE)return paths;MODULEENTRY32W entry{};entry.dwSize=sizeof(entry);
  if(Module32FirstW(snapshot,&entry))do{if(entry.hModule==ownModule)continue;std::wstring name=entry.szModule;std::transform(name.begin(),name.end(),name.begin(),[](wchar_t c){return c>=L'A'&&c<=L'Z'?c+32:c;});
  if(name.find(L"dango")!=std::wstring::npos||GetProcAddress(entry.hModule,"L4D2DangoMusicShutdown")||GetProcAddress(entry.hModule,"LDBDangoMusicShutdown"))paths.push_back(std::filesystem::path(entry.szExePath).u8string());}while(Module32NextW(snapshot,&entry));CloseHandle(snapshot);return paths;}
@@ -414,11 +417,10 @@ const char* channelMenu(const Config& c,bool accent,unsigned channel){uint32_t c
  return page(std::string(accent?u8"光晕 ":u8"正文 ")+names[channel]+" = "+std::to_string(value)+" "+colorText(color),rows);}
 std::string positionValue(float value,bool percent=false){char text[40];std::snprintf(text,sizeof(text),percent?"%.0f%%":"%.2f",percent?value*100:value);return text;}
 const char* rootMenu(bool title);
-const char* displayMenu(const Config& c){return page(u8"显示与歌曲信息",item(u8"翻译："+on(c.translation),2)+item(u8"世界歌词："+on(c.worldLyrics),7)+item(u8"换句沿用视野内原位置："+on(c.reuseVisibleAnchor),29)+item(u8"复用距离上限："+positionValue(c.reuseDistanceFactor)+u8" × 配置距离",33)+item(u8"靠近时后退（悬浮世界歌词）："+on(c.keepAway),9)+item(u8"远处歌名："+on(c.showTitle),5)+item(u8"远处作者："+on(c.showArtist),6)+item(u8"长句回到视野："+(c.reanchorMs>0?u8"每 "+reanchorSeconds(c.reanchorMs)+u8" 秒":std::string(u8"关闭")),19));}
-const char* colorMenu(const Config& c){return page(u8"颜色与柔光",item(u8"正文颜色 "+colorText(c.textColor),11)+item(u8"光晕颜色 "+colorText(c.accent),12)+item(u8"柔光："+on(c.glow),8));}
-const char* animationMenu(const Config& c){return page(u8"动画与停留",item(u8"有逐字时间轴时按时间显字："+on(c.progressiveReveal),28)+item(std::string(u8"无逐字时间轴：")+(c.fallbackReveal?u8"估算渐显":u8"整句显示"),32)+item(u8"显字动画速度",13)+item(u8"退场耗时",14)+item(u8"换句后额外停留",15)+item(u8"抖动："+on(c.wiggle),3)+item(u8"弹跳入场："+on(c.pop),4)+item(u8"恢复默认动画（抖动＋弹跳）",26)+item(u8"动画预览（示例歌词）",27));}
-
-const char* wallMenu(){auto c=*std::atomic_load(&settings);auto state=std::atomic_load(&source_walls::snapshot);return page(u8"场景挂画歌词",item(u8"场景挂画："+on(c.wallEnabled),700)+item(std::string(u8"放置方式：")+(c.wallAutomatic?u8"自动寻找墙面":u8"手动挂画轮换"),709)+item(std::string(u8"内容：")+(c.wallLiveLyrics?u8"歌词轮换":u8"固定示例"),702)+item(u8"背景面板："+on(c.wallBackdrop),703)+item(u8"新句无墙面时固定世界歌词："+on(c.wallFallback),710)+item(u8"尺寸、数量、搜索与停留",711)+item(u8"手动放置：3秒后按准星",701)+item(u8"清空全部挂画",704)+item(u8"调试标识："+on(c.wallDebug),705)+item(u8"状态："+state->message,0)+item(u8"返回主菜单",0));}
+const char* displayMenu(const Config& c){return menuPage(menus::display(c));}
+const char* colorMenu(const Config& c){return menuPage(menus::colors(c));}
+const char* animationMenu(const Config& c){return menuPage(menus::animation(c));}
+const char* wallMenu(){auto c=*std::atomic_load(&settings);auto state=std::atomic_load(&source_walls::snapshot);return menuPage(menus::wall(c,state->message));}
 const char* wallOptionsMenu(){auto c=*std::atomic_load(&settings);const char* sizes[]={u8"小80×28",u8"中120×40",u8"大180×60"};return page(u8"场景挂画参数",item(std::string(u8"新挂画尺寸：")+sizes[c.wallSize]+u8"（循环切换）",712)+item(u8"最多挂画："+std::to_string(c.wallCapacity)+u8"（2/4/6/8）",713)+item(u8"搜索距离："+std::to_string(int(c.wallRange))+u8"（300/600/900）",714)+item(u8"最小间距："+std::to_string(int(c.wallSpacing))+u8"（80/140/220）",715)+item(u8"旧句额外停留："+std::to_string(c.wallLingerMs)+u8"ms（0/2000/4000/8000）",716)+item(u8"淡出时间："+std::to_string(c.wallFadeMs)+u8"ms（500/1000/2000）",717)+item(u8"返回场景挂画",30));}
 std::string componentName(int index){return index==0?u8"歌名":index==1?u8"作者":u8"歌词 "+std::to_string(index-1);}
 std::string previewExitRows(){return item(u8"动画预览："+on(positionPreviewMotion.load()),2006)+item(u8"保存设置并结束预览",2098)+item(u8"结束预览，暂不保存",2099);}
@@ -432,10 +434,10 @@ const char* positionAxisMenu(const Config& c,int index,int axis){bool group=inde
  const char* choices[][5]={{u8"向左 5%",u8"向左 1%",u8"向右 1%",u8"向右 5%",u8"恢复默认左右"},{u8"向上 5%",u8"向上 1%",u8"向下 1%",u8"向下 5%",u8"恢复默认高度"},{u8"拉近 50",u8"拉近 10",u8"推远 10",u8"推远 50",u8"恢复默认距离"},{"-0.25x","-0.05x","+0.05x","+0.25x",u8"恢复默认大小"}};
  std::string rows;for(int choice=0;choice<5;++choice)rows+=item(choices[axis][choice],20000+index*1000+axis*100+choice);
  std::string value=positionValue(positionAxis(p,axis),axis<2);if(group){float lo=positionAxis(p,axis),hi=lo;for(int i=1;i<c.layout.lyricCount;++i){auto other=c.layout.lyrics[i];lo=std::min(lo,positionAxis(other,axis));hi=std::max(hi,positionAxis(other,axis));}value=positionValue(lo,axis<2)+" ~ "+positionValue(hi,axis<2);}
- return page((group?std::string(u8"全部歌词"):componentName(index))+" · "+names[axis]+" = "+value,rows+item(group?u8"返回歌词列表":u8"返回此组件",group?2001:2100+index)+previewExitRows());}
+ return page((group?std::string(u8"全部歌词"):componentName(index))+" · "+names[axis]+": ["+value+"]",rows+item(group?u8"返回歌词列表":u8"返回此组件",group?2001:2100+index)+previewExitRows());}
 const char* menuActionImpl(void* argument){uintptr_t id=reinterpret_cast<uintptr_t>(argument);std::lock_guard<std::mutex> lock(settingsMutex);auto c=*std::atomic_load(&settings);
  if(id==0||id==2099){positionPreview=false;return rootMenu(false);}
- if(id==2098){std::atomic_store(&pendingSave,std::make_shared<const Config>(c));saveState=1;positionPreview=false;return page(u8"保存设置 · 已恢复当前歌词",item(u8"已提交后台保存，返回查看结果",0));}
+ if(id==2098){saveState=1;std::atomic_store(&pendingSave,std::make_shared<const Config>(c));positionPreview=false;return page(u8"保存设置 · 已恢复当前歌词",item(u8"已提交后台保存，返回查看结果",0));}
  if(id==27){positionPreview=true;positionPreviewMotion=true;return positionHome(c);}
  if(id==23||id==2000){positionPreview=true;return positionHome(c);}
  if(id==2006){positionPreview=true;positionPreviewMotion=!positionPreviewMotion.load();return positionHome(c);}
@@ -472,23 +474,29 @@ const char* menuActionImpl(void* argument){uintptr_t id=reinterpret_cast<uintptr
  if(id==20)return displayMenu(c);
  if(id==21)return colorMenu(c);
  if(id==22)return animationMenu(c);
+ if(id==35)return menuPage(menus::more());
+ if(id==36)return menuPage(menus::world(c));
+ if(id==37)return menuPage(menus::metadata(c));
+ if(id==38)return menuPage(menus::timing(c));
+ if(id==39)return menuPage(menus::wallAppearance(c));
  if(id==33)return page(u8"复用距离上限 · "+positionValue(c.reuseDistanceFactor)+u8" × 各歌词配置距离",item("1x",620)+item("1.5x",621)+item("2x",622)+item(u8"3x（默认）",623)+item("4x",624)+item("5x",625)+item("10x",626));
  if(id==31)return page(u8"单行长度（不改变字号和距离） · "+positionValue(c.lineWidthScale)+"x",item("0.75x",600)+item(u8"1x（默认）",601)+item("1.5x",602)+item("2x",603)+item("3x",604)+item("4x",605)+item(u8"返回主菜单",0));
  if(id==19)return page(u8"长句回到当前视野 · "+reanchorSeconds(c.reanchorMs)+u8" 秒",item(u8"关闭",580)+item(u8"每 3 秒",581)+item(u8"每 5 秒",582)+item(u8"每 10 秒",583)+item(u8"自定义秒数（当前 "+reanchorSeconds(c.reanchorMs)+u8" 秒）",34));
  if(id==34)return page(u8"自定义回归间隔 · "+reanchorSeconds(c.reanchorMs)+u8" 秒",item(u8"-10 秒",584)+item(u8"-1 秒",585)+item(u8"-0.1 秒",586)+item(u8"+0.1 秒",587)+item(u8"+1 秒",588)+item(u8"+10 秒",589)+item(u8"重设为 3 秒",590)+item(u8"关闭回归",591)+item(u8"范围 0.1～300 秒；0 为关闭",0));
- if(id==10){std::string rows;for(int i=0;i<6;++i)rows+=item(presetName(i),100+i);return page(std::string(u8"歌词预设 · ")+presetName(c.presetId),rows);}
- if(id==11||id==12){bool accent=id==12;std::string rows;const char* names[]={u8"暖白",u8"纯白",u8"樱花粉",u8"冰蓝",u8"金色",u8"薄荷绿",u8"淡紫",u8"橘红"};for(int i=0;i<8;++i)rows+=item(names[i],(accent?310:300)+i);for(int i=0;i<3;++i)rows+=item(std::string(u8"自定义 ")+"RGB"[i],(accent?410:400)+i);return page(std::string(accent?u8"光晕颜色 ":u8"正文颜色 ")+colorText(accent?c.accent:c.textColor),rows);}
+ if(id==10){std::string rows;for(int i=0;i<6;++i)rows+=item(presetName(i),100+i);return page(std::string(u8"歌词预设 · ")+presetName(colorPresetId(c)),rows);}
+ if(id==11||id==12)return menuPage(menus::palette(c,id==12));
+ if(id==40||id==41)return menuPage(menus::channels(c,id==41));
  if(id>=400&&id<=402)return channelMenu(c,false,unsigned(id-400));if(id>=410&&id<=412)return channelMenu(c,true,unsigned(id-410));
  if(id==13)return page(u8"显字动画速度 · "+positionValue(c.animationSpeed)+u8"x（不改变歌曲进度）",item("0.5x",500)+item("0.75x",501)+item("1x",502)+item("1.5x",503)+item("2x",504));
  if(id==14)return page(u8"退场耗时 · "+std::to_string(c.transition)+" ms",item("200 ms",520)+item("400 ms",521)+item("700 ms",522)+item("1000 ms",523)+item("1500 ms",524));
  if(id==15)return page(u8"换句后额外停留 · "+std::to_string(c.lingerMs)+" ms",item("0 ms",540)+item("500 ms",541)+item("1000 ms",542)+item("1500 ms",543)+item("2000 ms",544));
- if(id==16)return page(u8"同步偏移 · "+std::to_string(c.offset)+u8" ms（正值提前）",item("-100 ms",560)+item("-50 ms",561)+item("+50 ms",562)+item("+100 ms",563)+item(u8"重设为 500ms",564));
- if(id==18){std::atomic_store(&pendingSave,std::make_shared<const Config>(c));saveState=1;return page(u8"保存设置",item(u8"已提交后台保存，返回主菜单查看结果",0));}
- if(id>=100&&id<=105)c=applyPreset(c,int(id-100));
+ if(id==16)return page(menus::value(u8"同步偏移",std::to_string(c.offset)+"ms")+u8"（正值提前）",item("-100 ms",560)+item("-50 ms",561)+item("+50 ms",562)+item("+100 ms",563)+item(u8"重设为 500ms",564));
+ if(id==18){saveState=1;std::atomic_store(&pendingSave,std::make_shared<const Config>(c));return page(u8"保存设置",item(u8"已提交后台保存，返回主菜单查看结果",0));}
+ if(id>=100&&id<=105)c=applyColorPreset(c,int(id-100));
  else if(id>=300&&id<=317&&(id<=307||id>=310)){uint32_t colors[]={0xf7e1d7,0xffffff,0xff99cc,0x70d6ff,0xffcc66,0x99ffcc,0xc5a3ff,0xff8855};if(id>=310)c.accent=colors[id-310];else c.textColor=colors[id-300];c.presetId=-1;}
  else if(id>=10000&&id<11209){bool accent=id>=11000;unsigned encoded=unsigned(id-(accent?11000:10000)),channel=encoded/100,choice=encoded%100;if(channel>2||choice>8)return nullptr;auto& color=accent?c.accent:c.textColor;unsigned shift=(2-channel)*8;int value=int((color>>shift)&255);const int deltas[]={-16,-1,1,16};const int fixed[]={0,64,128,192,255};value=choice<4?std::clamp(value+deltas[choice],0,255):fixed[choice-4];color=(color&~(255u<<shift))|(uint32_t(value)<<shift);c.presetId=-1;changeSettings(c);return channelMenu(c,accent,channel);}
- else if(id>=500&&id<=504){float values[]={.5f,.75f,1,1.5f,2};c.animationSpeed=values[id-500];c.presetId=-1;}
- else if(id>=520&&id<=524){int values[]={200,400,700,1000,1500};c.transition=values[id-520];c.presetId=-1;}
+ else if(id>=500&&id<=504){float values[]={.5f,.75f,1,1.5f,2};c.animationSpeed=values[id-500];}
+ else if(id>=520&&id<=524){int values[]={200,400,700,1000,1500};c.transition=values[id-520];}
  else if(id>=540&&id<=544){int values[]={0,500,1000,1500,2000};c.lingerMs=values[id-540];}
  else if(id>=620&&id<=626){const float values[]={1,1.5f,2,3,4,5,10};c.reuseDistanceFactor=values[id-620];}
  else if(id>=600&&id<=605){float values[]={.75f,1,1.5f,2,3,4};c.lineWidthScale=values[id-600];}
@@ -497,7 +505,7 @@ const char* menuActionImpl(void* argument){uintptr_t id=reinterpret_cast<uintptr
  else if(id==591)c.reanchorMs=0;
  else if(id>=580&&id<=583){int values[]={0,3000,5000,10000};c.reanchorMs=values[id-580];}
  else if(id>=560&&id<=564){int values[]={-100,-50,50,100};c.offset=id==564?500:std::clamp(c.offset+values[id-560],-10000,10000);}
- else switch(id){case 32:c.fallbackReveal=!c.fallbackReveal;break;case 28:c.progressiveReveal=!c.progressiveReveal;break;case 29:c.reuseVisibleAnchor=!c.reuseVisibleAnchor;break;case 26:c.pop=c.wiggle=true;c.wiggleFrequency=8;c.wiggleAmount=.8f;c.animationSpeed=1;c.presetId=-1;break;case 1:c.enabled=!c.enabled;break;case 2:c.translation=!c.translation;break;case 3:c.wiggle=!c.wiggle;c.presetId=-1;break;case 4:c.pop=!c.pop;c.presetId=-1;break;case 5:c.showTitle=!c.showTitle;break;case 6:c.showArtist=!c.showArtist;break;case 7:c.worldLyrics=!c.worldLyrics;break;case 8:c.glow=!c.glow;c.presetId=-1;break;case 9:c.keepAway=!c.keepAway;break;default:return nullptr;}
+ else switch(id){case 32:c.fallbackReveal=!c.fallbackReveal;break;case 28:c.progressiveReveal=!c.progressiveReveal;break;case 29:c.reuseVisibleAnchor=!c.reuseVisibleAnchor;break;case 26:c.pop=c.wiggle=true;c.wiggleFrequency=8;c.wiggleAmount=.8f;c.animationSpeed=1;break;case 1:c.enabled=!c.enabled;break;case 2:c.translation=!c.translation;break;case 3:c.wiggle=!c.wiggle;break;case 4:c.pop=!c.pop;break;case 5:c.showTitle=!c.showTitle;break;case 6:c.showArtist=!c.showArtist;break;case 7:c.worldLyrics=!c.worldLyrics;break;case 8:c.glow=!c.glow;c.presetId=-1;break;case 9:c.keepAway=!c.keepAway;break;default:return nullptr;}
  changeSettings(c);
  if(id==2||id==5||id==6||id==7||id==9||id==29|| (id>=580&&id<=583))return displayMenu(c);
  if(id==3||id==4||id==26||id==28||id==32||(id>=500&&id<=544))return animationMenu(c);
@@ -536,19 +544,19 @@ std::string buildNativeMenu(uintptr_t id){
 }
 void activateNativeMenu(uintptr_t id){menuAction(reinterpret_cast<void*>(id));}
 void closeNativeMenu(){positionPreview=false;}
+void updateHudAppearance(const hud::Appearance& appearance){std::lock_guard<std::mutex> lock(settingsMutex);auto c=*std::atomic_load(&settings);c.hud=appearance;changeSettings(c);}
 std::string nativeMenuNotice(){auto notice=std::atomic_load(&menuNotice);auto tick=uint64_t(now());return tick>=notice->tick&&tick-notice->tick<2000?notice->text:std::string{};}
 const char* openNativeMenu(void*){nativeHud.open();return nullptr;}
 const char* nativeEntryMenu(){static std::string entry;char callback[32];std::snprintf(callback,sizeof(callback),"0x%lx",static_cast<unsigned long>(reinterpret_cast<uintptr_t>(&openNativeMenu)));entry="\"L4D2DangoMusic\" { \"打开歌词控制面板\" { \"callback\" \""+std::string(callback)+"\" \"user_data\" \"0x0\" } }";return entry.c_str();}
-const char* rootMenu(bool title){if(title)return "L4D2DangoMusic 0.9.2";positionPreview=false;auto c=*std::atomic_load(&settings);std::string rows;
- rows+=item(u8"单行长度 "+positionValue(c.lineWidthScale)+"x",31);rows+=item(u8"歌词显示："+on(c.enabled),1)+item(u8"显示与歌曲信息",20)+item(u8"位置与数量（固定预览）",23)+item(std::string(u8"预设：")+presetName(c.presetId),10)+item(u8"颜色与柔光",21)+item(u8"动画、速度与停留",22)+item(u8"同步偏移 "+std::to_string(c.offset)+"ms",16);
- int saved=saveState.load();rows+=item(u8"场景挂画歌词（自动 / 手动）",30);rows+=item(saved==1?u8"正在保存…":saved==2?u8"保存设置（上次成功）":saved<0?u8"保存设置（上次失败，见日志）":u8"保存设置",18);rows+=item(u8"版本、路径与播放器诊断",24);return page("L4D2DangoMusic 0.9.2",rows);}
+const char* rootMenu(bool title){if(title)return "L4D2DangoMusic 0.9.2";positionPreview=false;auto c=*std::atomic_load(&settings);auto saved=std::atomic_load(&savedSettings);auto state=saveState.load();bool saving=state==1||bool(std::atomic_load(&pendingSave));return menuPage(menus::root(c,menus::saveLabel(c,saved?*saved:Config{},saving,state<0,bool(saved))));}
+
 class LyricsPlugin final:public IL4NPlugin {
  bool started=false,attempted=false,duplicate=false;HANDLE renderOwner=nullptr;
 public:
  const char* GetName()override{return "L4D2DangoMusic";}
  const char* GetVersion()override{return "0.9.2";}
  const char* RequestHudMenu(bool title)override{start();if(duplicate){if(title)return u8"L4D2DangoMusic 0.9.2 · 重复副本已阻止";return page(u8"重复副本未启用绘制",item(u8"查看实际 DLL 路径与其他模块",24));}if(title)return "L4D2DangoMusic 0.9.2";nativeHud.open();return nativeEntryMenu();}
- void start(){if(attempted)return;attempted=true;GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,reinterpret_cast<const wchar_t*>(&fileLog),&ownModule);wchar_t path[32768]{};if(!GetModuleFileNameW(ownModule,path,32768))return;ownPath=path;pluginDirectory=ownPath.parent_path();logger=fileLog;nativeHud.configure(buildNativeMenu,activateNativeMenu,closeNativeMenu,nativeMenuNotice,note);
+ void start(){if(attempted)return;attempted=true;GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,reinterpret_cast<const wchar_t*>(&fileLog),&ownModule);wchar_t path[32768]{};if(!GetModuleFileNameW(ownModule,path,32768))return;ownPath=path;pluginDirectory=ownPath.parent_path();logger=fileLog;nativeHud.configure(buildNativeMenu,activateNativeMenu,closeNativeMenu,nativeMenuNotice,note,updateHudAppearance);
  std::wstring ownerName=L"Local\\L4D2DangoMusic-render-"+std::to_wstring(GetCurrentProcessId());SetLastError(ERROR_SUCCESS);renderOwner=CreateMutexW(nullptr,FALSE,ownerName.c_str());DWORD ownerError=GetLastError();
  if(!renderOwner||ownerError==ERROR_ALREADY_EXISTS){duplicate=true;if(renderOwner)CloseHandle(renderOwner);renderOwner=nullptr;note("Duplicate renderer blocked pid="+std::to_string(GetCurrentProcessId())+" dll="+ownPath.u8string());return;}
  note("Runtime pid="+std::to_string(GetCurrentProcessId())+" dll="+ownPath.u8string());for(auto& other:relatedModules())note("Other lyric module: "+other);

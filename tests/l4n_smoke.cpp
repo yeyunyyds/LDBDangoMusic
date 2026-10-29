@@ -40,14 +40,14 @@ int main(){
  present();require(hudPixels>10000,"HUD panel pixels missing with unavailable creation parameters / foreign window thread");require(VirtualProtect(deviceTable+9,sizeof(void*),PAGE_READWRITE,&creationProtection)!=FALSE,"Creation query restore");deviceTable[9]=originalCreation;VirtualProtect(deviceTable+9,sizeof(void*),creationProtection,&ignored);Sleep(200);present();
  // Every change stays on its current page. Save verifies real native-keyboard
  // routing rather than only inspecting a regenerated KeyValues string.
- press('3');for(int i=0;i<11;++i){open(nullptr);press('1');}press('0');press(VK_OEM_PLUS);press('1');
+ press('2');for(int i=0;i<11;++i){open(nullptr);press('1');}press('0');press('7');
  auto configPath=root/L"build/L4D2DangoMusic/config.json";auto saved=[&](auto predicate){for(int i=0;i<60;++i){Sleep(50);std::ifstream f(configPath);if(f)try{if(predicate(nlohmann::json::parse(f)))return;}catch(...){}}require(false,"Native menu settings were not saved");};
  saved([](const auto& c){return c.value("translation",false);});
  // Reopen, custom reanchor: +1 and +0.1 seconds, then save from the root.
- press(VK_ESCAPE);menu(plugin,false);present();present();press('3');press('8');press('5');press('5');press('4');press('0');press('0');press('0');press(VK_OEM_PLUS);press('1');saved([](const auto& c){return c.value("reanchorMs",0)==1100;});
- press(VK_ESCAPE);menu(plugin,false);present();present();press('4');press('1');press('2');press('4');press('7');saved([](const auto& c){return std::abs(c.at("layout").at("lyrics")[0].at("distance").template get<float>()-250)<.01f;});
+ press(VK_ESCAPE);menu(plugin,false);present();present();press('2');press('5');press('4');press('5');press('5');press('4');press('0');press('0');press('0');press('0');press('7');saved([](const auto& c){return c.value("reanchorMs",0)==1100;});
+ press(VK_ESCAPE);menu(plugin,false);present();present();press('3');press('1');press('2');press('4');press('7');saved([](const auto& c){return std::abs(c.at("layout").at("lyrics")[0].at("distance").template get<float>()-250)<.01f;});
  // HUD continues working when the lyric switch itself is off.
- press('2');present();require(hudPixels>10000,"Disabling lyrics also hid the menu");press('2');press(VK_ESCAPE);
+ press('1');present();require(hudPixels>10000,"Disabling lyrics also hid the menu");press('1');press('8');press('1');press('1');press('0');press('0');press('7');saved([](const auto& c){return c.at("hudAppearance").value("preset",0)==1;});press(VK_ESCAPE);
  D3DVIEWPORT9 vp{2,3,100,80,0,1};device->SetViewport(&vp);device->SetRenderState(D3DRS_ALPHABLENDENABLE,FALSE);present();DWORD blend=TRUE;device->GetRenderState(D3DRS_ALPHABLENDENABLE,&blend);require(blend==FALSE,"Blend state leaked");D3DVIEWPORT9 after{};device->GetViewport(&after);require(!std::memcmp(&vp,&after,sizeof(vp)),"Viewport leaked");
  IDirect3DSurface9* cpu=nullptr;require(SUCCEEDED(device->CreateOffscreenPlainSurface(1280,720,D3DFMT_X8R8G8B8,D3DPOOL_SYSTEMMEM,&cpu,nullptr)),"Read surface");require(SUCCEEDED(device->GetRenderTargetData(back,cpu)),"Read target");D3DLOCKED_RECT lock{};require(SUCCEEDED(cpu->LockRect(&lock,nullptr,D3DLOCK_READONLY)),"Read lock");bool stale=false;for(int y=0;y<720;++y){auto row=reinterpret_cast<DWORD*>(static_cast<char*>(lock.pBits)+y*lock.Pitch);for(int x=0;x<1280;++x)stale|=(row[x]&0xffffff)!=0;}cpu->UnlockRect();require(!stale,"HUD/lyric pixels remained in pristine scene");cpu->Release();back->Release();chain->Release();
  // Duplicate-name protection still covers native menu and render hooks.

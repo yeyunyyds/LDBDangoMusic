@@ -7,6 +7,7 @@
 #include <string>
 #include "native_menu_model.hpp"
 #include "hud_menu_policy.hpp"
+#include "hud_appearance.hpp"
 #include "imgui/imgui.h"
 #include "imgui/backends/imgui_impl_dx9.h"
 
@@ -20,7 +21,8 @@ class NativeHud {
  using Close=void(*)();
  using Notice=std::string(*)();
  using Log=void(*)(const std::string&);
- Builder build=nullptr;Action act=nullptr;Close closed=nullptr;Notice notice=nullptr;Log log=nullptr;
+ using AppearanceWrite=void(*)(const Appearance&);
+ Builder build=nullptr;Action act=nullptr;Close closed=nullptr;Notice notice=nullptr;Log log=nullptr;AppearanceWrite appearanceWrite=nullptr;
  std::atomic<bool> opened{false},restart{false},f10{false};
  ImGuiContext* context=nullptr;IDirect3DDevice9* device=nullptr;HWND window=nullptr;bool backend=false,subclass=false,hotkeyHeld=false;
  KeyGate gate;MenuStack stack;enum class Page {Settings,Appearance,Position};std::atomic<Page> page{Page::Settings};
@@ -74,16 +76,18 @@ class NativeHud {
  if(selected==2){if(edge[12])fontPixels=std::max(16.f,fontPixels-1);if(edge[13])fontPixels=std::min(32.f,fontPixels+1);}
  if(edge[4]){f10=!f10.load();hotkeyHeld=down(VK_F10);}if(edge[5])page=Page::Position;
  row(1,std::string(u8"背景预设：")+names[preset]);row(2,u8"背景不透明度："+std::to_string(int(opacity*100))+"%"+(selected==1?"  [- / =]":""));
- row(3,u8"字体大小："+std::to_string(int(fontPixels))+" px"+(selected==2?"  [- / =]":""));row(4,std::string("F10: ")+(f10?u8"开":u8"关"));row(5,u8"调整菜单位置");text(u8"外观仅对本次游戏会话生效",{.58f,.60f,.60f,1});
+ row(3,u8"字体大小："+std::to_string(int(fontPixels))+" px"+(selected==2?"  [- / =]":""));row(4,std::string("F10: ")+(f10?u8"开":u8"关"));row(5,u8"调整菜单位置");text(u8"外观修改后请返回主菜单保存设置",{.58f,.60f,.60f,1});
  }
 public:
- void configure(Builder b,Action a,Close c,Notice n,Log l){build=b;act=a;closed=c;notice=n;log=l;}
+ void configure(Builder b,Action a,Close c,Notice n,Log l,AppearanceWrite w){build=b;act=a;closed=c;notice=n;log=l;appearanceWrite=w;}
+ Appearance appearanceValue()const{Appearance a;a.preset=preset;a.step=step;a.opacity=opacity;a.font=fontPixels;a.x=x;a.y=y;a.f10=f10;return a;}
+ void loadAppearance(const Appearance& a){preset=a.preset;applyPreset();opacity=a.opacity;fontPixels=a.font;x=a.x;y=a.y;step=a.step;f10=a.f10;}
  bool isOpen()const{return opened.load();}
  void open(){if(!opened.exchange(true)){restart=true;if(log)log("Native HUD open requested");}}
  void pollHotkey(IDirect3DDevice9* d){if(!f10)return;bool held=down(VK_F10);HWND target=window;if(!target){D3DDEVICE_CREATION_PARAMETERS c{};if(SUCCEEDED(d->GetCreationParameters(&c)))target=c.hFocusWindow;}
  auto foreground=GetForegroundWindow();bool focused=target&&(foreground==target||foreground==GetAncestor(target,GA_ROOT));if(focused&&held&&!hotkeyHeld){if(isOpen())close();else open();}hotkeyHeld=held;}
  void frame(IDirect3DDevice9* d,float width,float height){
- if(!isOpen()||!build||!act)return;if(GetTickCount64()<retryAfter)return;if(!attach(d)){retryAfter=GetTickCount64()+1000;return;}retryAfter=0;ContextScope scope(context);
+ if(!isOpen()||!build||!act)return;if(GetTickCount64()<retryAfter)return;if(!attach(d)){retryAfter=GetTickCount64()+1000;return;}retryAfter=0;ContextScope scope(context);auto originalAppearance=appearanceValue();
  if(restart.exchange(false)){stack.reset();page=Page::Settings;gate.reset();arrows.fill(false);}
  if(!localWindow(window))window=findWindow(d);auto foreground=GetForegroundWindow();bool focused=localWindow(foreground)&&(!window||foreground==window||foreground==GetAncestor(window,GA_ROOT));
  auto edge=gate.update(keys(),focused);if(edge[10]||edge[11]){close();return;}
@@ -95,7 +99,7 @@ public:
  uintptr_t action=0;bool openAppearance=false;
  if(ImGui::Begin("L4D2DangoMusic Native HUD",nullptr,ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoSavedSettings|ImGuiWindowFlags_NoScrollbar|ImGuiWindowFlags_AlwaysAutoResize)){
  ImGui::SetWindowFontScale(fontPixels/24.f);
- if(page==Page::Settings){auto doc=document(build(stack.current().page));if(stack.current().page==0)doc.rows.push_back({u8"菜单外观",9000});stack.clamp(doc.rows.size());
+ if(page==Page::Settings){auto doc=document(build(stack.current().page));stack.clamp(doc.rows.size());
  if(edge[12])stack.previous();if(edge[13])stack.next(doc.rows.size());
  text(doc.title,{1,.84f,.22f,1});ImGui::Separator();size_t first=stack.current().sheet*MenuStack::PageSize;
  for(size_t i=first;i<doc.rows.size()&&i<first+MenuStack::PageSize;++i){auto& item=doc.rows[i];unsigned n=unsigned(i-first+1);row(n,item.label,item.action!=0);if(edge[n]&&item.action)action=item.action;}
@@ -106,6 +110,7 @@ public:
  if(notice){auto message=notice();if(!message.empty()){ImGui::Separator();text(message,{1,.84f,.22f,1});}}
  ImGui::Separator();text(stack.frames.size()==1&&page==Page::Settings?u8"[0] 关闭    [/ / Esc] 关闭":u8"[0] 返回    [/ / Esc] 关闭",{1,.84f,.22f,1});
  }ImGui::End();ImGui::PopStyleColor();ImGui::Render();auto data=ImGui::GetDrawData();ImGui_ImplDX9_RenderDrawData(data);if(!submitted&&data&&data->TotalVtxCount){submitted=true;if(log)log("Native HUD first frame submitted vertices="+std::to_string(data->TotalVtxCount));}
+ if(appearanceWrite&&originalAppearance!=appearanceValue())appearanceWrite(appearanceValue());
  if(openAppearance){page=Page::Appearance;return;}if(action){act(action);if(action==2098||action==2099)stack.reset();else if(opensChild(action))stack.enter(action);}
  }
  void beforeReset(){fontReady=false;submitted=false;if(context&&backend){ContextScope scope(context);ImGui_ImplDX9_InvalidateDeviceObjects();}}
