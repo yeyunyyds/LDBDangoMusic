@@ -1,5 +1,7 @@
 # L4D2DangoMusic
 
+> 本分支是 `experiment/entity-attachments`：研究实体、骨骼、手持物与车辆表面的挂载接口。已提供值快照/局部坐标接口原型和测试，Source 实机采集后端尚未接入。详情见 [场景挂载接口](docs/scene-attachments.md)。正常使用请下载 main/zip 对应安装包。
+
 > 当前版本 `0.9.1` 支持自动寻找墙面、独立歌词挂画和手动位置轮换。场景挂画默认关闭；使用方法见 [场景挂画指南](docs/wall-experiment-guide.md)。
 
 为《求生之路 2》（Left 4 Dead 2）提供音乐歌词显示的 L4N 插件。通过兼容 LX / BLF 的本地音乐 API 获取播放进度和歌词，在游戏中呈现带逐字动画的歌词，并支持世界空间定位、歌名与作者显示以及游戏内调节。
