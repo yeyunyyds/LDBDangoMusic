@@ -1,0 +1,16 @@
+{
+  "sha256": "8a6d468059394bf4cfce32f11dcba12ef45de88da1373084d5a2916d0bf7ba86",
+  "evidence": [
+    "TraceRay entry",
+    "TraceRay ret 16",
+    "ClearTrace 84 bytes",
+    "Result fraction +44",
+    "Result startsolid +55",
+    "Result surface +60",
+    "Ray isRay +68",
+    "Ray isSwept +69",
+    "Filter method index 1"
+  ],
+  "static_abi_verified": true,
+  "runtime_dispatch_verified": false
+}

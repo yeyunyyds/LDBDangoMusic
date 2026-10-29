@@ -14,3 +14,7 @@ if ($LASTEXITCODE -ne 0) { throw 'L4N smoke build failed' }
 if ($LASTEXITCODE -ne 0) { throw 'Interface inventory test build failed' }
 & ./build/interface_inventory_test.exe
 if ($LASTEXITCODE -ne 0) { throw 'Interface inventory tests failed' }
+& cl.exe /nologo /std:c++17 /EHsc /utf-8 /W4 /Isrc /Ivendor tests/source_walls_abi_test.cpp /Fobuild/source_walls_abi_test.obj /Febuild/source_walls_abi_test.exe /link user32.lib
+if ($LASTEXITCODE -ne 0) { throw 'Trace ABI test build failed' }
+& ./build/source_walls_abi_test.exe
+if ($LASTEXITCODE -ne 0) { throw 'Trace ABI test failed' }

@@ -8,7 +8,7 @@
 
 实现这一效果不需要先提取完整地图。首选是 Source 的碰撞射线，取得墙面命中点与法线；完整几何提取属于另一项更大的工作，可作为后续支持自动布置的补充。
 
-本分支目前提供静态接口调查、固定平面投影原型及回归测试，**尚未接入游戏 TraceRay、D3D9 文字绘制或墙面遮挡**。没有发布可安装的贴墙歌词 DLL。
+本分支已推进到手动放置实验包：接入有构建校验的射线调用、固定文字平面绘制和保守遮挡采样。使用方式与当前未实机验证的边界见 [实验指南](../wall-experiment-guide.md)。以下记录原始调查与后续自动布局路线。
 
 ## 为什么现有世界歌词还不是挂画
 
@@ -30,7 +30,7 @@
 | 虚表 RVA | `0x387474` |
 | 公开 SDK 中 TraceRay 候选槽 | `5`，对应本 DLL 该槽函数 RVA `0x179760` |
 
-接口注册、工厂返回对象和虚表条目已静态定位；函数签名、参数布局和实际派发没有完成运行验证。不能仅因接口名相同就调用公开 SDK 中的槽位，已有相机适配也表明游戏构建可能与公开 SDK 存在差异。
+接口注册、工厂返回对象和虚表条目已静态定位；函数签名、参数布局已有静态指令证据及编译期契约；实际引擎派发尚未完成运行验证。不能仅因接口名相同就调用公开 SDK 中的槽位，已有相机适配也表明游戏构建可能与公开 SDK 存在差异。
 
 完整定位结果见 [engine-trace-discovery.json](engine-trace-discovery.json)，包含 `runtime_dispatch_verified=false`。
 复核工具：
@@ -40,7 +40,7 @@ python scripts/discover_engine_trace.py /path/to/engine.dll
 ```
 
 公开资料参考 [HL2SDK l4d2 的 IEngineTrace](https://github.com/alliedmodders/hl2sdk/blob/l4d2/public/engine/IEngineTrace.h)、`public/cmodel.h`、`public/gametrace.h` 和 `public/trace.h`。
-SDK 的 Ray_t 使用对齐向量，trace_t 包含平面、表面和实体字段；这些布局与过滤器的 MSVC x86 ABI 都需核对。本分支没有把未验证的结构或调用加入现有插件。
+SDK 的 Ray_t 使用对齐向量，trace_t 包含平面、表面和实体字段；这些布局与过滤器的 MSVC x86 ABI 都需核对。调用目前被独立实验开关隔离，只有当前已静态核对的构建能够绑定；Windows模拟ABI测试和实际游戏验证分开进行。
 
 ## 获取场景信息的三条路线
 

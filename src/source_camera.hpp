@@ -21,6 +21,7 @@ template<class Factory> std::string inventory(Factory factory,const char* prefix
 
 inline std::shared_ptr<const GameCameraFrame> snapshot=std::make_shared<GameCameraFrame>();
 inline void (*logger)(const std::string&)=nullptr;
+inline std::atomic<void(*)(const GameCameraFrame&)> frameListener{nullptr};
 inline void log(const std::string& s){if(logger)logger(s);}
 inline bool readable(const void* p,size_t n){MEMORY_BASIC_INFORMATION i{};return p&&VirtualQuery(p,&i,sizeof(i))&&i.State==MEM_COMMIT&&!(i.Protect&(PAGE_GUARD|PAGE_NOACCESS))&&reinterpret_cast<uintptr_t>(p)+n<=reinterpret_cast<uintptr_t>(i.BaseAddress)+i.RegionSize;}
 inline bool owns(const void* p,HMODULE m){HMODULE owner=nullptr;return p&&GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,reinterpret_cast<const wchar_t*>(p),&owner)&&owner==m;}
@@ -35,7 +36,7 @@ inline void capture(bool active){
  const auto& clip=reinterpret_cast<Matrix>(vt[WorldClipSlot])(engine);const auto& view=reinterpret_cast<Matrix>(vt[WorldViewSlot])(engine);
  if(readable(&clip,64)&&readable(&view,64)){std::memcpy(f.worldToClip.data(),&clip,64);std::memcpy(f.worldToView.data(),&view,64);CameraPose pose;state=cameraPose(f,pose)?5:4;if(state==5)f.active=1;}else state=3;}}
  captureState=state;unsigned bit=1u<<state;if(!(seenCaptureStates.fetch_or(bit)&bit))log(std::string("Source capture: ")+captureStatus(state));
- std::atomic_store(&snapshot,std::make_shared<const GameCameraFrame>(f));
+ std::atomic_store(&snapshot,std::make_shared<const GameCameraFrame>(f));if(auto listener=frameListener.load(std::memory_order_acquire))listener(f);
 }
 inline void __fastcall renderHook(void* self,void*,void* rect){static thread_local int depth=0;++depth;originalRender(self,rect);if(depth==1)capture(true);--depth;}
 inline void __fastcall shutdownHook(void* self,void*){++epoch;capture(false);originalShutdown(self);}

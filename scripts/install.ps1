@@ -1,6 +1,6 @@
 param([Parameter(Mandatory=$true)][string]$GameRoot,[ValidateRange(-10000,10000)][int]$OffsetMs)
 $ErrorActionPreference = 'Stop'
-if (Get-Process -Name left4dead2 -ErrorAction SilentlyContinue) { throw 'Exit Left 4 Dead 2 and Host before installing.' }
+if (Get-Process -Name left4dead2 -ErrorAction SilentlyContinue) { throw 'Exit Left 4 Dead 2 before installing; also close any legacy lyrics Host if used.' }
 $repo = Split-Path $PSScriptRoot -Parent
 $sourceDll = Join-Path $repo 'build/L4D2DangoMusic.dll'
 if (!(Test-Path $sourceDll)) { throw 'Build the x86 DLL or run from the ZIP source directory.' }
@@ -64,7 +64,7 @@ foreach ($location in $locations) {
 }
 Copy-Item $sourceDll $dll -Force
 [IO.File]::WriteAllText($path, ($settings | ConvertTo-Json -Depth 16), [System.Text.UTF8Encoding]::new($false))
-Write-Host 'Installed L4D2DangoMusic 0.7.2; settings preserved. Restart game and Host; use the L4D2DangoMusic 0.7.2 menu.'
+Write-Host 'Installed L4D2DangoMusic 0.8.0-wall1; settings preserved. Restart game; use the L4D2DangoMusic 0.8.0-wall1 menu.'
 
 Write-Host ('Active DLL: ' + [IO.Path]::GetFullPath($dll))
 Write-Host ('Backups outside plugin search paths: ' + $backupRoot)
