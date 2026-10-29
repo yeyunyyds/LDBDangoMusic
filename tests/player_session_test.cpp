@@ -39,5 +39,21 @@ int main(){
  switching.poll([&](){return track(tick,2000,true,"second");},readLyrics,clock,emit);check(published.title=="second"&&!published.timeline.empty());
  // Verification loses connection: propagate to the caller, which publishes disconnect.
  PlayerSession lost;reads=0;bool threw=false;try{lost.poll([&](){if(++reads>1)throw std::runtime_error("connection closed");return track(tick);},readLyrics,clock,emit);}catch(...){threw=true;published=lost.disconnect(tick);}check(threw&&!published.connected&&lost.timeline.empty());
+ // Natural next-track transition: metadata switches while the lyric API still
+ // returns A. Do not cache A permanently under B; recover without pause/resume.
+ PlayerSession autoplay;State autoOut;int64_t autoTick=1000;State autoStatus=track(autoTick,39000,true,"A");Timeline autoLyrics=parse("[00:00]A words");int autoFetches=0;
+ auto pollAuto=[&](){autoplay.poll([&](){return autoStatus;},[&](){++autoFetches;return autoLyrics;},[&](){return autoTick;},[&](State s){autoOut=std::move(s);});};
+ pollAuto();check(autoOut.timeline[0].text=="A words");
+ autoTick=2000;autoStatus=track(autoTick,40000,true,"A");pollAuto();check(autoFetches==1); // don't reload at end
+ autoTick=2150;autoStatus=track(autoTick,0,true,"B");pollAuto();check(autoOut.title=="B"&&autoOut.timeline.empty());
+ autoTick=3150;autoStatus=track(autoTick,1000,true,"B");autoLyrics=parse("[00:00]B words");pollAuto();check(autoOut.timeline[0].text=="B words"&&autoOut.playing);
+ auto stableGeneration=autoOut.generation;
+ autoTick=3650;autoStatus=track(autoTick,1500,true,"B");pollAuto();check(autoOut.generation==stableGeneration); // verification doesn't reset animations
+ // A nonempty loading placeholder is corrected by warm-up refresh.
+ autoTick=4000;autoStatus=track(autoTick,0,true,"C");autoLyrics=parse("[00:00]Loading lyrics");pollAuto();check(autoOut.timeline[0].text=="Loading lyrics");
+ stableGeneration=autoOut.generation;autoTick=4500;autoStatus=track(autoTick,500,true,"C");autoLyrics=parse("[00:00]C real lyrics");pollAuto();check(autoOut.timeline[0].text=="C real lyrics"&&autoOut.generation>stableGeneration);
+ // Lyrics that become ready late remain repairable by periodic refresh.
+ autoplay.refreshStep=6;autoplay.scheduleRefresh(autoTick);check(autoplay.refreshAt==autoTick+30000);
+ autoTick+=30000;autoStatus=track(autoTick,30500,true,"C");autoLyrics=parse("[00:00]C final lyrics");pollAuto();check(autoOut.timeline[0].text=="C final lyrics");
  std::cout<<"Passed: pause clears/reanchor suppression, same-song resume/restart reload, missed transitions, seeks, end/staleness, retry and in-flight track/disconnect verification\n";
 }

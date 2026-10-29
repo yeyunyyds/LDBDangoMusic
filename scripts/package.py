@@ -6,7 +6,7 @@ import zipfile
 import struct
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = '0.9.0'
+VERSION = '0.9.1'
 files = {}
 for folder in ('src', 'tests', 'scripts', 'vendor', 'docs', 'presets'):
     for path in (ROOT / folder).rglob('*'):

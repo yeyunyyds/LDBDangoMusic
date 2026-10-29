@@ -40,6 +40,13 @@ int main(){
  ticket.session=3;ticket.tick=10100;scene.observe(ticket,10100,7,options);check(scene.items.size()==2&&scene.items[0].token==0&&scene.items[1].token==0,"session clears manual payloads");
  scene.clear(ticket);scene.observe(ticket,10100,7,options);check(!scene.pending(ticket),"clear waits next sentence");
  options.capacity=2;for(int i=0;i<10;++i){ticket.serial++;scene.observe(ticket,10100,7,options);scene.add(left,true,ticket,10100,options);check(scene.items.size()<=2,"bounded panel count");}
+ // Sentence display routes are sticky: leaving view never changes an
+ // already assigned wall sentence, even well past the fallback timeout.
+ wallscene::SentenceRoute route;route.choose(true,1500,1000,true);route.choose(false,9000,1000,true);check(route.attached&&!route.fallback,"assigned sentence stays wall-bound");
+ wallscene::SentenceRoute nextRoute;nextRoute.choose(false,1999,1000,true);check(!nextRoute.fallback,"wait for wall search");nextRoute.choose(false,2000,1000,true);check(nextRoute.fallback,"new sentence chooses world fallback");nextRoute.choose(true,2100,1000,true);check(nextRoute.fallback&&!nextRoute.attached,"late wall does not move current sentence");
+ scene.reset();ticket={4,30,20000,7,true};scene.observe(ticket,20000,7,options);scene.add(left,true,ticket,20000,options);
+ ticket.serial=31;ticket.tick=21000;scene.observe(ticket,21000,7,options);scene.add(right,true,ticket,21000,options); // late placement raced fallback
+ ticket.place=false;scene.observe(ticket,21000,7,options);check(scene.items.size()==1&&scene.items[0].token==30&&scene.items[0].retired==21000,"fallback retains outgoing wall");check(!scene.pending(ticket),"fallback cancels search for current sentence");check(wallscene::alpha(scene.items[0],22000,options)==1,"outgoing wall holds naturally");
  // Turning a corner changes the selected wall normal, not a placed panel's axes.
  auto turnedFrame=camera({600,300,0},1.57079632679f);CameraPose turnedPose;check(cameraPose(turnedFrame,turnedPose),"turned camera");
  auto rotatedWorld=[&](Vec3 start,Vec3 end,trace::Result& hit){

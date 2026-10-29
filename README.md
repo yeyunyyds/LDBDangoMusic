@@ -1,6 +1,6 @@
 # L4D2DangoMusic
 
-> 当前版本 `0.9.0` 支持自动寻找墙面、独立歌词挂画和手动位置轮换。场景挂画默认关闭；使用方法见 [场景挂画指南](docs/wall-experiment-guide.md)。
+> 当前版本 `0.9.1` 支持自动寻找墙面、独立歌词挂画和手动位置轮换。场景挂画默认关闭；使用方法见 [场景挂画指南](docs/wall-experiment-guide.md)。
 
 为《求生之路 2》（Left 4 Dead 2）提供音乐歌词显示的 L4N 插件。通过兼容 LX / BLF 的本地音乐 API 获取播放进度和歌词，在游戏中呈现带逐字动画的歌词，并支持世界空间定位、歌名与作者显示以及游戏内调节。
 
@@ -31,7 +31,7 @@
 
 ## 安装
 
-[下载场景歌词版：L4D2DangoMusic 0.9.0](https://github.com/yeyunyyds/LDBDangoMusic/raw/refs/heads/experiment/wall-mounted-lyrics/releases/L4D2DangoMusic-0.9.0-l4n.zip)
+[下载场景歌词版：L4D2DangoMusic 0.9.1](https://github.com/yeyunyyds/LDBDangoMusic/raw/refs/heads/experiment/wall-mounted-lyrics/releases/L4D2DangoMusic-0.9.1-l4n.zip)
 
 ### 使用安装脚本
 
@@ -76,7 +76,9 @@ bin/neko/plugins/L4D2DangoMusic/config.json
 
 默认使用两个轮换位置，歌词位于屏幕中心稍上方，长句自动回到视野的功能默认关闭。歌名和作者可在显示菜单中分别开启。
 
-开启 **场景挂画歌词** 后，可选择自动寻找墙面，或用 F8 手动放置挂画。挂画参数、旧句停留、背景、屏幕回退及完整设置说明见 [场景挂画指南](docs/wall-experiment-guide.md)。
+菜单操作实时生效，开关和调参不增加返回层数，使用 L4N 原生 `-` 返回。操作结果会短暂提示，重新进入页面可刷新数值。
+
+开启 **场景挂画歌词** 后，可选择自动寻找墙面，或用 F8 手动放置挂画。挂画参数、旧句停留、背景、固定世界歌词回退及完整设置说明见 [场景挂画指南](docs/wall-experiment-guide.md)。
 
 ### 配置文件
 
@@ -95,7 +97,7 @@ bin/neko/plugins/L4D2DangoMusic/config.json
 | `wallAutomatic` | 自动寻找墙面；关闭为手动位置轮换 | `true` |
 | `wallCapacity` | 挂画数量上限 | `6` |
 | `wallLingerMs` / `wallFadeMs` | 旧句额外停留 / 淡出时间 | `4000` / `1000` |
-| `wallFallback` | 无可见当前挂画时显示屏幕歌词 | `true` |
+| `wallFallback` | 新句找不到墙面时使用固定世界歌词 | `true` |
 | `showTitle` / `showArtist` | 显示歌名 / 作者 | `false` |
 
 完整配置见 [config.example.json](config.example.json)，视觉预设见 [presets](presets/)。如需独立检查显示效果，可使用游戏内预览，或将 `demo` 设为 `true`。

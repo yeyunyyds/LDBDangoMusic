@@ -6,8 +6,15 @@ struct Options {
  bool automatic=true,live=true;int size=1,capacity=6,lingerMs=4000,fadeMs=1000;
  float range=600,spacing=140;
 };
-struct Ticket {uint64_t session=0,serial=0,tick=0;uint32_t epoch=0;bool active=false;};
+struct Ticket {uint64_t session=0,serial=0,tick=0;uint32_t epoch=0;bool active=false,place=true;};
 struct Item {wall::Panel panel;unsigned id=0;bool visible=false,automatic=false;uint64_t token=0,session=0,born=0,visibleTick=0;int64_t retired=-1;};
+struct SentenceRoute {
+ bool attached=false,fallback=false;
+ void choose(bool assigned,uint64_t now,uint64_t started,bool enabled){
+ if(fallback)return;if(assigned)attached=true;
+ if(!attached&&enabled&&now>=started&&now-started>=1000)fallback=true;
+ }
+};
 inline bool fresh(const Ticket& t,uint64_t now,uint32_t epoch){return t.active&&t.serial&&t.epoch==epoch&&now>=t.tick&&now-t.tick<=1000;}
 inline float alpha(const Item& item,uint64_t now,const Options& o){
  if(!item.token)return 0;if(item.retired<0)return 1;
@@ -37,12 +44,17 @@ struct Scene {
  items.erase(std::remove_if(items.begin(),items.end(),[](const Item& i){return i.automatic;}),items.end());
  for(auto& i:items){i.token=0;i.retired=-1;}observed=handled=0;session=t.session;}
  active=valid;
+ // A no-wall decision is final for this sentence. Discard a placement that
+ // raced the renderer's deadline without removing outgoing sentence panels.
+ if(valid&&!t.place){
+ items.erase(std::remove_if(items.begin(),items.end(),[&](const Item& i){return i.automatic&&i.token==t.serial;}),items.end());
+ for(auto& i:items)if(i.token==t.serial){i.token=0;i.retired=-1;}handled=t.serial;}
  if(valid&&observed!=t.serial){for(auto& i:items)if(i.token&&i.retired<0)i.retired=int64_t(now);observed=t.serial;}
  for(auto& i:items)if(i.token&&i.retired>=0&&alpha(i,now,o)<=0&&!i.automatic){i.token=0;i.retired=-1;}
  items.erase(std::remove_if(items.begin(),items.end(),[&](const Item& i){return i.automatic&&i.retired>=0&&alpha(i,now,o)<=0;}),items.end());
  while(items.size()>size_t(o.capacity))items.erase(items.begin());
  }
- bool pending(const Ticket& t)const{return active&&handled!=t.serial;}
+ bool pending(const Ticket& t)const{return active&&t.place&&handled!=t.serial;}
  void assign(Item& item,const Ticket& t,uint64_t now){item.token=t.serial;item.session=t.session;item.born=now;item.retired=-1;handled=t.serial;}
  void add(const wall::Panel& panel,bool automatic,const Ticket& t,uint64_t now,const Options& o){
  while(items.size()>=size_t(std::max(1,o.capacity)))items.erase(items.begin());
