@@ -30,3 +30,6 @@ g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc tests/wal
 ./build/wall_scene_test
 g++ -std=c++17 -Wall -Wextra -Werror -Isrc tests/hud_menu_policy_test.cpp -o build/hud_menu_policy_test
 ./build/hud_menu_policy_test
+
+g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc tests/native_menu_test.cpp -o build/native_menu_test
+./build/native_menu_test

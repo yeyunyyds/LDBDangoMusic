@@ -12,6 +12,7 @@ VERSION = '0.9.2'
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--variant', choices=['native-hud'], help='Name a preview package separately from stable installs')
     parser.add_argument('--output-dir', type=Path, default=ROOT / 'build/packages')
     args = parser.parse_args()
     dll = ROOT / 'build/L4D2DangoMusic.dll'
@@ -24,7 +25,7 @@ def main():
     commit = subprocess.check_output(['git', 'rev-parse', '--verify', 'HEAD^{commit}'], cwd=ROOT, text=True).strip()
     source_url = f'https://github.com/yeyunyyds/LDBDangoMusic/tree/{commit}'
     readme = (ROOT / 'packaging/README.md').read_text(encoding='utf-8').replace('@VERSION@', VERSION).replace('@SOURCE_URL@', source_url)
-    for title, file in (('项目及参考代码声明', 'NOTICE.md'), ('GPL-3.0 许可全文', 'LICENSE'), ('nlohmann/json MIT 许可', 'vendor/JSON-LICENSE.MIT')):
+    for title, file in (('项目及参考代码声明', 'NOTICE.md'), ('GPL-3.0 许可全文', 'LICENSE'), ('nlohmann/json MIT 许可', 'vendor/JSON-LICENSE.MIT'), ('Bridge 原生菜单 MIT 许可', 'vendor/BRIDGE-LICENSE.MIT'), ('Dear ImGui MIT 许可', 'vendor/imgui/LICENSE.txt')):
         readme += f'\n\n## {title}\n\n' + (ROOT / file).read_text(encoding='utf-8')
     files = {
         'bin/neko/plugins/L4D2DangoMusic.dll': blob,
@@ -32,7 +33,8 @@ def main():
         'README.md': readme.encode('utf-8'),
     }
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    output = args.output_dir / f'L4D2DangoMusic-{VERSION}-l4n.zip'
+    variant = args.variant or 'l4n'
+    output = args.output_dir / f'L4D2DangoMusic-{VERSION}-{variant}.zip'
     with zipfile.ZipFile(output, 'w', zipfile.ZIP_DEFLATED) as archive:
         for name, data in sorted(files.items()):
             archive.writestr(name, data)

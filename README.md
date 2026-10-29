@@ -1,6 +1,6 @@
 # L4D2DangoMusic
 
-> 当前版本 `0.9.2` 支持自动寻找墙面、独立歌词挂画和手动位置轮换。场景挂画默认关闭；使用方法见 [场景挂画指南](docs/wall-experiment-guide.md)。
+> 此分支提供基于 `0.9.2` 的原生 HUD 菜单预览。稳定版仍为 [v0.9.2](https://github.com/yeyunyyds/LDBDangoMusic/releases/tag/v0.9.2)。场景挂画默认关闭；使用方法见 [场景挂画指南](docs/wall-experiment-guide.md)。
 
 为《求生之路 2》（Left 4 Dead 2）提供音乐歌词显示的 L4N 插件。通过兼容 LX / BLF 的本地音乐 API 获取播放进度和歌词，在游戏中呈现带逐字动画的歌词，并支持世界空间定位、歌名与作者显示以及游戏内调节。
 
@@ -31,7 +31,7 @@
 
 ## 安装
 
-[下载场景歌词版：L4D2DangoMusic 0.9.2](https://github.com/yeyunyyds/LDBDangoMusic/raw/refs/heads/zip/L4D2DangoMusic-0.9.2-l4n.zip)
+[下载原生菜单预览包](https://github.com/yeyunyyds/LDBDangoMusic/raw/refs/heads/zip/L4D2DangoMusic-0.9.2-native-hud.zip) · [稳定版 v0.9.2](https://github.com/yeyunyyds/LDBDangoMusic/releases/tag/v0.9.2)
 
 安装压缩包内仅包含 **bin 文件夹和 README.md**，不附带源码、构建工具、测试程序或额外依赖。
 
@@ -47,7 +47,7 @@ bin/neko/plugins/L4D2DangoMusic.dll
 bin/neko/plugins/L4D2DangoMusic/config.json
 ```
 
-源码和构建脚本维护在 [`main` 分支](https://github.com/yeyunyyds/LDBDangoMusic/tree/main)，[`zip` 分支](https://github.com/yeyunyyds/LDBDangoMusic/tree/zip) 仅提供安装压缩包。
+源码和构建脚本维护在 [`main` 分支](https://github.com/yeyunyyds/LDBDangoMusic/tree/main)，[`zip` 分支](https://github.com/yeyunyyds/LDBDangoMusic/tree/zip) 仅提供安装压缩包。本预览改动位于 [`feature/native-hud-menu`](https://github.com/yeyunyyds/LDBDangoMusic/tree/feature/native-hud-menu)。
 
 从源码构建的用户仍可使用 `scripts/install.ps1 -GameRoot "游戏根目录"` 安装；运行目录为源码根目录。安装包用户直接复制 `bin` 即可。
 
@@ -64,7 +64,14 @@ bin/neko/plugins/L4D2DangoMusic/config.json
 
 默认使用两个轮换位置，歌词位于屏幕中心稍上方，长句自动回到视野的功能默认关闭。换句复用世界位置时，旧锚点必须仍在视野内，且到相机的距离小于该歌词位置配置距离的 3 倍；超出时按预设重新放置。可在“显示与歌曲信息 → 复用距离上限”选择 1、1.5、2、3（默认）、4、5 或 10 倍。歌名和作者可在显示菜单中分别开启。
 
-菜单操作实时生效，开关和调参不增加返回层数，使用 L4N 原生 `-` 返回。操作结果会短暂提示，重新进入页面可刷新数值。
+菜单由插件原生 HUD 绘制，L4N 仅提供入口。设置即时生效，当前值逐帧刷新，返回父页也显示最新状态，不会因开关或调参数叠加层级。
+
+- `1..9`：选择当前页项目；`-` / `=`：上页 / 下页。
+- `0`：返回一级，根页关闭；`Esc` 或 `/`：关闭并退出位置预览。
+- 主菜单的“菜单外观”提供深黑、烟灰、石墨、高透明四套背景；选中透明度或字号后用 `-` / `=` 调节，位置页用方向键移动。
+- 默认从 L4N 进入，F10 默认关闭，可在外观页启用。外观仅保留本次会话，歌词设置仍通过“保存设置”持久化。
+
+仅在菜单打开且游戏窗口获得焦点时读取菜单按键，入口按键释放后才接收下一次操作；不捕获鼠标或 WASD。
 
 开启 **场景挂画歌词** 后，可选择自动寻找墙面，或用 F8 手动放置挂画。挂画参数、旧句停留、背景、固定世界歌词回退及完整设置说明见 [场景挂画指南](docs/wall-experiment-guide.md)。
 
