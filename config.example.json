@@ -123,5 +123,6 @@
   "wallLingerMs": 4000,
   "wallFadeMs": 1000,
   "wallRange": 600,
-  "wallSpacing": 140
+  "wallSpacing": 140,
+  "reuseDistanceFactor": 3
 }

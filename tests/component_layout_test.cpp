@@ -31,12 +31,23 @@ int main(){
  // Each numbered slot keeps its visible world anchor across camera movement;
  // offscreen, mode disable, reset and other slots cannot reuse that point.
  LyricAnchorSlots slots;Vec3 original{},fallback{};check(componentAnchor(f,camera,defaults.lyrics[0],original));
- fallback=original+Vec3{20,0,0};auto first=slots.select(0,true,f,original);check(length(first-original)<.001f);
- auto reused=slots.select(0,true,f,fallback);check(length(reused-original)<.001f);
- auto moved=f;moved.worldToClip[3]=original.z*.5f;check(visibleComponentAnchor(moved,original));check(length(slots.select(0,true,moved,fallback)-original)<.001f);
- auto outside=f;outside.worldToClip[3]=original.z*3;check(!visibleComponentAnchor(outside,original));check(length(slots.select(0,true,outside,fallback)-fallback)<.001f);
- check(length(slots.select(1,true,f,original)-original)<.001f);
- check(length(slots.select(1,false,f,fallback)-fallback)<.001f);slots.reset();check(length(slots.select(1,true,f,original)-original)<.001f);
+ fallback=original+Vec3{20,0,0};auto first=slots.select(0,true,f,original,camera.eye,200,3);check(length(first-original)<.001f);
+ auto reused=slots.select(0,true,f,fallback,camera.eye,200,3);check(length(reused-original)<.001f);
+ auto moved=f;moved.worldToClip[3]=original.z*.5f;check(visibleComponentAnchor(moved,original));check(length(slots.select(0,true,moved,fallback,camera.eye,200,3)-original)<.001f);
+ auto outside=f;outside.worldToClip[3]=original.z*3;check(!visibleComponentAnchor(outside,original));check(length(slots.select(0,true,outside,fallback,camera.eye,200,3)-fallback)<.001f);
+ check(length(slots.select(1,true,f,original,camera.eye,200,3)-original)<.001f);
+ check(length(slots.select(1,false,f,fallback,camera.eye,200,3)-fallback)<.001f);slots.reset();check(length(slots.select(1,true,f,original,camera.eye,200,3)-original)<.001f);
+ // A visible point can still be too far away. Use the current eye, each
+ // numbered position's distance A and a strict B < factor*A limit.
+ Vec3 ray=normalize(original-camera.eye),nearPoint=camera.eye+ray*200,farPoint=camera.eye+ray*900;
+ check(visibleComponentAnchor(f,farPoint));slots.remember(0,farPoint);
+ check(length(slots.select(0,true,f,nearPoint,camera.eye,200,3)-nearPoint)<.001f);
+ auto inside=camera.eye+ray*599;slots.remember(0,inside);check(length(slots.select(0,true,f,nearPoint,camera.eye,200,3)-inside)<.001f);
+ auto boundary=camera.eye+Vec3{0,0,600};slots.remember(0,boundary);check(length(slots.select(0,true,f,nearPoint,camera.eye,200,3)-nearPoint)<.001f);
+ slots.remember(0,farPoint);check(length(slots.select(0,true,f,nearPoint,camera.eye,200,5)-farPoint)<.001f);
+ // Smaller per-slot A must reject a point allowed by a more distant slot.
+ slots.remember(1,inside);check(length(slots.select(1,true,f,nearPoint,camera.eye,100,3)-nearPoint)<.001f);
+ slots.remember(0,inside);auto fartherEye=camera.eye-ray*200;check(length(slots.select(0,true,f,nearPoint,fartherEye,200,3)-nearPoint)<.001f);
  // Slot rotation supports 1..9 independent positions, with bounded outgoing lines.
  for(int count=1;count<=9;++count){LyricLifecycle model;for(int line=0;line<30;++line){model.update("track",line,std::to_string(line),line*.01,1000,400,false,count);check(model.entries.back().slot==line%count&&model.entries.size()<=size_t(count));for(auto& e:model.entries)for(auto& other:model.entries)check(e.id==other.id||e.slot!=other.slot);}model.update("track",29,"29",10,1000,400,false,count);check(model.entries.size()==1&&model.entries[0].index==29);}
  std::cout<<"Passed: 11 component positions, legacy migration/roundtrip/preset preservation, bounds, perspective placement, distance/size, 1..9 slot rotation and expiry\n";

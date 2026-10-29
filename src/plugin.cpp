@@ -54,7 +54,7 @@ struct WorldAnchors {
  void update(const GameCameraFrame& frame,const CameraPose& pose,const std::string& song,int at){
  if(!ready||epoch!=frame.epoch||key!=song||length(pose.eye-lastEye)>1024){reset();ready=true;epoch=frame.epoch;key=song;test=anchorAt(pose,cfg.worldDistance,0,18);}
  lastEye=pose.eye;
- if(at>=0&&currentIndex!=at){previous=current;previousIndex=currentIndex;int slot=at%cfg.layout.lyricCount;Vec3 fallback{};if(componentAnchor(frame,pose,cfg.layout.lyrics[size_t(slot)],fallback))current=slots.select(slot,cfg.reuseVisibleAnchor,frame,fallback);currentIndex=at;}
+ if(at>=0&&currentIndex!=at){previous=current;previousIndex=currentIndex;int slot=at%cfg.layout.lyricCount;Vec3 fallback{};if(componentAnchor(frame,pose,cfg.layout.lyrics[size_t(slot)],fallback))current=slots.select(slot,cfg.reuseVisibleAnchor,frame,fallback,pose.eye,cfg.layout.lyrics[size_t(slot)].distance,cfg.reuseDistanceFactor);currentIndex=at;}
  }
 };
 WorldAnchors anchors;
@@ -401,15 +401,15 @@ const char* channelMenu(const Config& c,bool accent,unsigned channel){uint32_t c
  const char* names[]={"R","G","B"};const char* labels[]={"-16","-1","+1","+16","0","64","128","192","255"};
  for(unsigned i=0;i<9;++i)rows+=item(labels[i],10000+(accent?1000:0)+channel*100+i);
  return page(std::string(accent?u8"光晕 ":u8"正文 ")+names[channel]+" = "+std::to_string(value)+" "+colorText(color),rows);}
+std::string positionValue(float value,bool percent=false){char text[40];std::snprintf(text,sizeof(text),percent?"%.0f%%":"%.2f",percent?value*100:value);return text;}
 const char* rootMenu(bool title);
-const char* displayMenu(const Config& c){return page(u8"显示与歌曲信息",item(u8"翻译："+on(c.translation),2)+item(u8"世界歌词："+on(c.worldLyrics),7)+item(u8"换句沿用视野内原位置："+on(c.reuseVisibleAnchor),29)+item(u8"靠近时后退："+on(c.keepAway),9)+item(u8"远处歌名："+on(c.showTitle),5)+item(u8"远处作者："+on(c.showArtist),6)+item(u8"长句回到视野："+(c.reanchorMs>0?u8"每 "+std::to_string(c.reanchorMs/1000)+u8" 秒":std::string(u8"关闭")),19));}
+const char* displayMenu(const Config& c){return page(u8"显示与歌曲信息",item(u8"翻译："+on(c.translation),2)+item(u8"世界歌词："+on(c.worldLyrics),7)+item(u8"换句沿用视野内原位置："+on(c.reuseVisibleAnchor),29)+item(u8"复用距离上限："+positionValue(c.reuseDistanceFactor)+u8" × 配置距离",33)+item(u8"靠近时后退："+on(c.keepAway),9)+item(u8"远处歌名："+on(c.showTitle),5)+item(u8"远处作者："+on(c.showArtist),6)+item(u8"长句回到视野："+(c.reanchorMs>0?u8"每 "+std::to_string(c.reanchorMs/1000)+u8" 秒":std::string(u8"关闭")),19));}
 const char* colorMenu(const Config& c){return page(u8"颜色与柔光",item(u8"正文颜色 "+colorText(c.textColor),11)+item(u8"光晕颜色 "+colorText(c.accent),12)+item(u8"柔光："+on(c.glow),8));}
 const char* animationMenu(const Config& c){return page(u8"动画与停留",item(u8"按演唱进度显字（含翻译）："+on(c.progressiveReveal),28)+item(std::string(u8"无逐字时间轴：")+(c.fallbackReveal?u8"估算渐显":u8"整句显示"),32)+item(u8"显字动画速度",13)+item(u8"退场耗时",14)+item(u8"换句后额外停留",15)+item(u8"抖动："+on(c.wiggle),3)+item(u8"弹跳入场："+on(c.pop),4)+item(u8"恢复默认动画（抖动＋弹跳）",26)+item(u8"动画预览（示例歌词）",27));}
 
 const char* wallMenu(){auto c=*std::atomic_load(&settings);auto state=std::atomic_load(&source_walls::snapshot);return page(u8"场景挂画歌词",item(u8"场景挂画："+on(c.wallEnabled),700)+item(std::string(u8"放置方式：")+(c.wallAutomatic?u8"自动寻找墙面":u8"手动挂画轮换"),709)+item(std::string(u8"内容：")+(c.wallLiveLyrics?u8"歌词轮换":u8"固定示例"),702)+item(u8"背景面板："+on(c.wallBackdrop),703)+item(u8"新句无墙面时固定世界歌词："+on(c.wallFallback),710)+item(u8"尺寸、数量、搜索与停留",711)+item(u8"手动放置：3秒后按准星",701)+item(u8"清空全部挂画",704)+item(u8"调试标识："+on(c.wallDebug),705)+item(u8"状态："+state->message,0)+item(u8"返回主菜单",0));}
 const char* wallOptionsMenu(){auto c=*std::atomic_load(&settings);const char* sizes[]={u8"小80×28",u8"中120×40",u8"大180×60"};return page(u8"场景挂画参数",item(std::string(u8"新挂画尺寸：")+sizes[c.wallSize]+u8"（循环切换）",712)+item(u8"最多挂画："+std::to_string(c.wallCapacity)+u8"（2/4/6/8）",713)+item(u8"搜索距离："+std::to_string(int(c.wallRange))+u8"（300/600/900）",714)+item(u8"最小间距："+std::to_string(int(c.wallSpacing))+u8"（80/140/220）",715)+item(u8"旧句额外停留："+std::to_string(c.wallLingerMs)+u8"ms（0/2000/4000/8000）",716)+item(u8"淡出时间："+std::to_string(c.wallFadeMs)+u8"ms（500/1000/2000）",717)+item(u8"返回场景挂画",30));}
 std::string componentName(int index){return index==0?u8"歌名":index==1?u8"作者":u8"歌词 "+std::to_string(index-1);}
-std::string positionValue(float value,bool percent=false){char text[40];std::snprintf(text,sizeof(text),percent?"%.0f%%":"%.2f",percent?value*100:value);return text;}
 std::string previewExitRows(){return item(u8"动画预览："+on(positionPreviewMotion.load()),2006)+item(u8"保存设置并结束预览",2098)+item(u8"结束预览，暂不保存",2099);}
 const char* positionHome(const Config& c){return page(u8"位置调节 · 固定预览",item(u8"歌词位置与数量（"+std::to_string(c.layout.lyricCount)+u8" 个位置）",2001)+item(u8"歌名：高度、远近与大小",2100)+item(u8"作者：高度、远近与大小",2101)+item(u8"全部组件位置重置",2004)+previewExitRows());}
 const char* positionGroup(const Config& c,bool lyrics){std::string rows;
@@ -461,6 +461,7 @@ const char* menuActionImpl(void* argument){uintptr_t id=reinterpret_cast<uintptr
  if(id==20)return displayMenu(c);
  if(id==21)return colorMenu(c);
  if(id==22)return animationMenu(c);
+ if(id==33)return page(u8"复用距离上限 · "+positionValue(c.reuseDistanceFactor)+u8" × 各歌词配置距离",item("1x",620)+item("1.5x",621)+item("2x",622)+item(u8"3x（默认）",623)+item("4x",624)+item("5x",625)+item("10x",626));
  if(id==31)return page(u8"单行长度（不改变字号和距离） · "+positionValue(c.lineWidthScale)+"x",item("0.75x",600)+item(u8"1x（默认）",601)+item("1.5x",602)+item("2x",603)+item("3x",604)+item("4x",605)+item(u8"返回主菜单",0));
  if(id==19)return page(u8"长句回到当前视野",item(u8"关闭",580)+item(u8"每 3 秒",581)+item(u8"每 5 秒",582)+item(u8"每 10 秒",583));
  if(id==10){std::string rows;for(int i=0;i<6;++i)rows+=item(presetName(i),100+i);return page(u8"歌词预设",rows);}
@@ -477,6 +478,7 @@ const char* menuActionImpl(void* argument){uintptr_t id=reinterpret_cast<uintptr
  else if(id>=500&&id<=504){float values[]={.5f,.75f,1,1.5f,2};c.animationSpeed=values[id-500];c.presetId=-1;}
  else if(id>=520&&id<=524){int values[]={200,400,700,1000,1500};c.transition=values[id-520];c.presetId=-1;}
  else if(id>=540&&id<=544){int values[]={0,500,1000,1500,2000};c.lingerMs=values[id-540];}
+ else if(id>=620&&id<=626){const float values[]={1,1.5f,2,3,4,5,10};c.reuseDistanceFactor=values[id-620];}
  else if(id>=600&&id<=605){float values[]={.75f,1,1.5f,2,3,4};c.lineWidthScale=values[id-600];}
  else if(id>=580&&id<=583){int values[]={0,3000,5000,10000};c.reanchorMs=values[id-580];}
  else if(id>=560&&id<=564){int values[]={-100,-50,50,100};c.offset=id==564?500:std::clamp(c.offset+values[id-560],-10000,10000);}
@@ -500,6 +502,7 @@ const char* menuAction(void* argument){
  if(id>=520&&id<=524)text=u8"退场耗时："+std::to_string(c.transition)+"ms";
  if(id>=540&&id<=544)text=u8"换句额外停留："+std::to_string(c.lingerMs)+"ms";
  if(id==712){const char* sizes[]={u8"小80×28",u8"中120×40",u8"大180×60"};text=std::string(u8"新挂画尺寸：")+sizes[c.wallSize];}
+ if(id>=620&&id<=626)text=u8"复用距离上限："+positionValue(c.reuseDistanceFactor)+u8" × 各歌词配置距离";
  if(id>=600&&id<=605)text=u8"单行长度："+positionValue(c.lineWidthScale)+"x";
  if(id>=560&&id<=564)text=u8"同步偏移："+std::to_string(c.offset)+"ms";
  if(id==713)text=u8"最多挂画："+std::to_string(c.wallCapacity);

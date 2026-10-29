@@ -47,8 +47,10 @@ inline bool visibleComponentAnchor(const GameCameraFrame& camera,Vec3 anchor){
 struct LyricAnchorSlots {
  std::array<Vec3,MaxLyricSlots> points{};std::array<bool,MaxLyricSlots> valid{};
  void reset(){valid.fill(false);}
- Vec3 select(int slot,bool reuse,const GameCameraFrame& camera,Vec3 fallback){
- if(!reuse||!valid.at(slot)||!visibleComponentAnchor(camera,points.at(slot)))points.at(slot)=fallback;
+ Vec3 select(int slot,bool reuse,const GameCameraFrame& camera,Vec3 fallback,Vec3 eye,float baseDistance,float maxFactor){
+ float distance=length(points.at(slot)-eye),limit=baseDistance*maxFactor;
+ bool inRange=std::isfinite(distance)&&std::isfinite(limit)&&limit>0&&distance<limit;
+ if(!reuse||!valid.at(slot)||!inRange||!visibleComponentAnchor(camera,points.at(slot)))points.at(slot)=fallback;
  valid.at(slot)=true;return points.at(slot);
  }
  void remember(int slot,Vec3 point){points.at(slot)=point;valid.at(slot)=true;}
