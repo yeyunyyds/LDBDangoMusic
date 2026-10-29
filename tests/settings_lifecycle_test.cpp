@@ -18,6 +18,9 @@ int main(int argc,char**){using namespace dango;
  bool invalid=false;try{parseColor("#BADHEX");}catch(...){invalid=true;}check(invalid);check(colorText(parseColor("#12ABef"))=="#12ABEF");
  check(!needsReanchor(2.999,0,3000)&&needsReanchor(3,0,3000)&&!needsReanchor(4,0,0));
 
+ check(adjustReanchor(0,3)==100&&adjustReanchor(100,2)==0&&adjustReanchor(299900,5)==300000);
+ check(reanchorSeconds(0)=="0"&&reanchorSeconds(100)=="0.1"&&reanchorSeconds(1875)=="1.875"&&reanchorSeconds(300000)=="300");
+ c.reanchorMs=123400;auto custom=decodeConfig(encodeConfig(c));check(custom.reanchorMs==123400&&decodeConfig({{"reanchorMs",999999}}).reanchorMs==300000);
  auto hold=exitFrame(999,1000,400);check(hold.alpha==1&&!hold.done);auto fade=exitFrame(1200,1000,400);check(std::abs(fade.alpha-.5f)<.001&&!fade.done);check(exitFrame(1400,1000,400).done);
  std::cout<<"Passed: six presets preserve connection/sync, config roundtrip, RGB validation, one-second linger\n";
 }

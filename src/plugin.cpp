@@ -149,17 +149,18 @@ void peakFrame(IDirect3DDevice9* dev,const State& state,int at,int64_t song,bool
  if(existing!=peakEntries.end()){(*existing)->retired=lease.retired;continue;}
  auto& line=state.timeline[lease.index];auto next=lease.index+1<int(state.timeline.size())?state.timeline[lease.index+1].start:line.start+5000;
  auto entry=std::make_unique<PeakEntry>(line,next,lease.index,clock,world?anchors.current:Vec3{},camera.epoch);entry->leaseId=lease.id;entry->retired=lease.retired;entry->slot=lease.slot;
+ if(world&&cfg.keepAway){entry->anchor=peak::keepDistance(entry->anchor,pose,cfg.layout.lyrics[lease.slot].distance);if(lease.retired<0){anchors.slots.remember(lease.slot,entry->anchor);anchors.current=entry->anchor;}}
  const auto& position=cfg.layout.lyrics[lease.slot];auto initial=screenComponent(position,width,height,cfg.size);if(world)worldComponent(camera,entry->anchor,position,width,height,cfg.worldHeight,cfg.size,initial);float maxPixels=width*cfg.width*cfg.lineWidthScale/std::max(initial.scale,.02f);
  entry->layout=peak::layout(entry->animation.glyphs,[&](const std::string& glyph){return image(dev,glyph).advance;},maxPixels,cfg.size*1.35f);entry->translationLayout=peak::layout(entry->translated.glyphs,[&](const std::string& glyph){return image(dev,glyph).advance;},maxPixels/.72f,cfg.size*1.35f);peakEntries.push_back(std::move(entry));}
  visibleLyricIndex=at;
  for(size_t i=0;i<peakEntries.size();){auto& entry=*peakEntries[i];ExitFrame life;if(entry.retired>=0)life=exitFrame((clock-entry.retired)*1000,cfg.lingerMs,cfg.transition);
  if(life.done){peakEntries.erase(peakEntries.begin()+i);continue;}++i;
  const auto& position=cfg.layout.lyrics[entry.slot];Placement place=screenComponent(position,width,height,cfg.size);
- if(world){if(entry.retired<0&&needsReanchor(clock,entry.lastPlaced,cfg.reanchorMs)){componentAnchor(camera,pose,position,entry.anchor);anchors.slots.remember(entry.slot,entry.anchor);entry.lastPlaced=clock;}
- auto displayAnchor=cfg.keepAway?peak::keepDistance(entry.anchor,pose,position.distance):entry.anchor;if(!worldComponent(camera,displayAnchor,position,width,height,cfg.worldHeight,cfg.size,place))continue;}
+ if(world){if(entry.retired<0&&needsReanchor(clock,entry.lastPlaced,cfg.reanchorMs)){componentAnchor(camera,pose,position,entry.anchor);anchors.slots.remember(entry.slot,entry.anchor);anchors.current=entry.anchor;entry.lastPlaced=clock;}
+ if(cfg.keepAway){entry.anchor=peak::keepDistance(entry.anchor,pose,position.distance);if(entry.retired<0){anchors.slots.remember(entry.slot,entry.anchor);anchors.current=entry.anchor;}}if(!worldComponent(camera,entry.anchor,position,width,height,cfg.worldHeight,cfg.size,place))continue;}
  float scale=place.scale,center=place.x,top=place.y-entry.layout.height*scale*.5f;
  top-=life.lift*(world?20.f*scale*cfg.size/cfg.worldHeight:height*.025f);
- for(auto& glyph:entry.layout.glyphs){auto frame=peak::revealFrame(entry.motion,entry.animation,glyph.index,song,clock,cfg.animationSpeed,cfg.progressiveReveal,cfg.pop,cfg.wiggle,cfg.wiggleFrequency,cfg.wiggleAmount,cfg.fallbackReveal);if(entry.retired>=0)frame.alpha=1;if(frame.alpha<=0)continue;
+ for(auto& glyph:entry.layout.glyphs){auto frame=peak::revealFrame(entry.motion,entry.animation,glyph.index,song,clock,cfg.animationSpeed,cfg.progressiveReveal,cfg.pop,cfg.wiggle,cfg.wiggleFrequency,cfg.wiggleAmount,cfg.fallbackReveal);if(frame.alpha<=0)continue;
  auto im=image(dev,entry.animation.glyphs[glyph.index].text);float size=scale*frame.scale;float x=center+(glyph.x+glyph.width*.5f)*scale+frame.x*height/1080.f-im.width*size*.5f;float y=top+(glyph.y+cfg.size*.5f)*scale+frame.y*height/1080.f-im.height*size*.5f;
  styled(dev,im,x,y,size,life.alpha*frame.alpha*cfg.opacity,cfg.textColor,frame.rotation);}
  if(cfg.translation&&entry.retired<0&&!entry.line.translation.empty()){float ts=scale*.72f;
@@ -188,6 +189,7 @@ void drawSongInfo(IDirect3DDevice9* dev,const State& state,const GameCameraFrame
  static std::string song;static Vec3 titleAnchor,artistAnchor;static uint32_t epoch=0;static int64_t placed=0;static std::shared_ptr<const Config> lastSettings;static uint64_t generation=0;
  if(!cfg.showTitle&&!cfg.showArtist){song.clear();return;}if(state.key.empty())return;
  if(song!=state.key||epoch!=camera.epoch||!placed||lastSettings!=renderedSettings||generation!=layoutGeneration||(cfg.reanchorMs>0&&now()-placed>=cfg.reanchorMs)){song=state.key;epoch=camera.epoch;componentAnchor(camera,pose,cfg.layout.title,titleAnchor);componentAnchor(camera,pose,cfg.layout.artist,artistAnchor);placed=now();lastSettings=renderedSettings;generation=layoutGeneration;}
+ if(valid&&cfg.keepAway){titleAnchor=peak::keepDistance(titleAnchor,pose,cfg.layout.title.distance);artistAnchor=peak::keepDistance(artistAnchor,pose,cfg.layout.artist.distance);}
  auto limited=[](const std::string& text){std::string out;auto chars=graphemes(text);for(size_t i=0;i<std::min<size_t>(80,chars.size());++i)out+=chars[i].text;return out;};
  if(cfg.showTitle)drawPositionedText(dev,limited(state.title),cfg.layout.title,camera,valid,pose,width,height,cfg.textColor,.7f,&titleAnchor);
  if(cfg.showArtist)drawPositionedText(dev,limited(state.artist),cfg.layout.artist,camera,valid,pose,width,height,cfg.accent,.7f,&artistAnchor);
@@ -218,8 +220,8 @@ struct WallTextState {
  source_walls::submit({session,current,uint64_t(now()),camera.epoch,true,!route.fallback});
  }
 } wallTextState;
-void wallGlyphs(IDirect3DDevice9* dev,const wall::Panel& panel,const GameCameraFrame& camera,float width,float height,const peak::Animation& animation,peak::VisibleAnimation& motion,const peak::Layout& layout,float unit,float top,int64_t song,double clock,bool translated,float opacity=1,bool retired=false){
- for(const auto& glyph:layout.glyphs){auto frame=peak::revealFrame(motion,animation,glyph.index,song,clock,cfg.animationSpeed,cfg.progressiveReveal,!translated&&cfg.pop,!translated&&cfg.wiggle,cfg.wiggleFrequency,cfg.wiggleAmount,cfg.fallbackReveal);if(retired)frame.alpha=1;if(frame.alpha<=0)continue;
+void wallGlyphs(IDirect3DDevice9* dev,const wall::Panel& panel,const GameCameraFrame& camera,float width,float height,const peak::Animation& animation,peak::VisibleAnimation& motion,const peak::Layout& layout,float unit,float top,int64_t song,double clock,bool translated,float opacity=1){
+ for(const auto& glyph:layout.glyphs){auto frame=peak::revealFrame(motion,animation,glyph.index,song,clock,cfg.animationSpeed,cfg.progressiveReveal,!translated&&cfg.pop,!translated&&cfg.wiggle,cfg.wiggleFrequency,cfg.wiggleAmount,cfg.fallbackReveal);if(frame.alpha<=0)continue;
  auto im=image(dev,animation.glyphs[glyph.index].text);if(!im.texture)continue;auto face=panel;
  face.center=panel.center+panel.normal*.1f+panel.right*((glyph.x+glyph.width*.5f+frame.x)*unit)+panel.up*(top-(glyph.y+cfg.size*.5f+frame.y)*unit);
  face.width=im.width*unit*frame.scale;face.height=im.height*unit*frame.scale;
@@ -250,9 +252,9 @@ bool drawWallExperiment(IDirect3DDevice9* dev,const GameCameraFrame& camera,floa
  auto original=peak::layout(sentence->original.glyphs,measure,maxPixels,cfg.size*1.35f);auto translation=peak::layout(sentence->translated.glyphs,measure,maxPixels/.72f,cfg.size*1.35f);
  bool showTranslation=cfg.translation&&!translation.glyphs.empty();float widest=1;for(auto row:original.rows)widest=std::max(widest,row);if(showTranslation)for(auto row:translation.rows)widest=std::max(widest,row*.72f);
  float contentHeight=original.height+(showTranslation?cfg.size*.25f+translation.height*.72f:0);float unit=std::min(panel.width*.9f/widest,panel.height*.62f/std::max(contentHeight,1.f));unit=std::min(unit,panel.height*.27f/std::max(cfg.size,1));
- float top=contentHeight*unit*.5f-panel.height*.08f;auto song=lyricPosition(display.position,cfg.demo?0:cfg.offset);double clock=now()/1000.;bool retired=item.retired>=0;
- wallGlyphs(dev,panel,camera,width,height,sentence->original,sentence->originalMotion,original,unit,top,song,clock,false,opacity,retired);
- if(showTranslation)wallGlyphs(dev,panel,camera,width,height,sentence->translated,sentence->translatedMotion,translation,unit*.72f,top-(original.height+cfg.size*.25f)*unit,song,clock,true,opacity,retired);
+ float top=contentHeight*unit*.5f-panel.height*.08f;auto song=lyricPosition(display.position,cfg.demo?0:cfg.offset);double clock=now()/1000.;
+ wallGlyphs(dev,panel,camera,width,height,sentence->original,sentence->originalMotion,original,unit,top,song,clock,false,opacity);
+ if(showTranslation)wallGlyphs(dev,panel,camera,width,height,sentence->translated,sentence->translatedMotion,translation,unit*.72f,top-(original.height+cfg.size*.25f)*unit,song,clock,true,opacity);
  }
  // Keep payloads only for retained panels and the current pending sentence.
  for(auto it=wallTextState.texts.begin();it!=wallTextState.texts.end();){bool used=it->first==wallTextState.current||std::any_of(state->panels.begin(),state->panels.end(),[&](const auto& item){return item.session==wallTextState.session&&item.token==it->first;});if(!used)it=wallTextState.texts.erase(it);else ++it;}
@@ -403,9 +405,9 @@ const char* channelMenu(const Config& c,bool accent,unsigned channel){uint32_t c
  return page(std::string(accent?u8"光晕 ":u8"正文 ")+names[channel]+" = "+std::to_string(value)+" "+colorText(color),rows);}
 std::string positionValue(float value,bool percent=false){char text[40];std::snprintf(text,sizeof(text),percent?"%.0f%%":"%.2f",percent?value*100:value);return text;}
 const char* rootMenu(bool title);
-const char* displayMenu(const Config& c){return page(u8"显示与歌曲信息",item(u8"翻译："+on(c.translation),2)+item(u8"世界歌词："+on(c.worldLyrics),7)+item(u8"换句沿用视野内原位置："+on(c.reuseVisibleAnchor),29)+item(u8"复用距离上限："+positionValue(c.reuseDistanceFactor)+u8" × 配置距离",33)+item(u8"靠近时后退："+on(c.keepAway),9)+item(u8"远处歌名："+on(c.showTitle),5)+item(u8"远处作者："+on(c.showArtist),6)+item(u8"长句回到视野："+(c.reanchorMs>0?u8"每 "+std::to_string(c.reanchorMs/1000)+u8" 秒":std::string(u8"关闭")),19));}
+const char* displayMenu(const Config& c){return page(u8"显示与歌曲信息",item(u8"翻译："+on(c.translation),2)+item(u8"世界歌词："+on(c.worldLyrics),7)+item(u8"换句沿用视野内原位置："+on(c.reuseVisibleAnchor),29)+item(u8"复用距离上限："+positionValue(c.reuseDistanceFactor)+u8" × 配置距离",33)+item(u8"靠近时后退（悬浮世界歌词）："+on(c.keepAway),9)+item(u8"远处歌名："+on(c.showTitle),5)+item(u8"远处作者："+on(c.showArtist),6)+item(u8"长句回到视野："+(c.reanchorMs>0?u8"每 "+reanchorSeconds(c.reanchorMs)+u8" 秒":std::string(u8"关闭")),19));}
 const char* colorMenu(const Config& c){return page(u8"颜色与柔光",item(u8"正文颜色 "+colorText(c.textColor),11)+item(u8"光晕颜色 "+colorText(c.accent),12)+item(u8"柔光："+on(c.glow),8));}
-const char* animationMenu(const Config& c){return page(u8"动画与停留",item(u8"按演唱进度显字（含翻译）："+on(c.progressiveReveal),28)+item(std::string(u8"无逐字时间轴：")+(c.fallbackReveal?u8"估算渐显":u8"整句显示"),32)+item(u8"显字动画速度",13)+item(u8"退场耗时",14)+item(u8"换句后额外停留",15)+item(u8"抖动："+on(c.wiggle),3)+item(u8"弹跳入场："+on(c.pop),4)+item(u8"恢复默认动画（抖动＋弹跳）",26)+item(u8"动画预览（示例歌词）",27));}
+const char* animationMenu(const Config& c){return page(u8"动画与停留",item(u8"有逐字时间轴时按时间显字："+on(c.progressiveReveal),28)+item(std::string(u8"无逐字时间轴：")+(c.fallbackReveal?u8"估算渐显":u8"整句显示"),32)+item(u8"显字动画速度",13)+item(u8"退场耗时",14)+item(u8"换句后额外停留",15)+item(u8"抖动："+on(c.wiggle),3)+item(u8"弹跳入场："+on(c.pop),4)+item(u8"恢复默认动画（抖动＋弹跳）",26)+item(u8"动画预览（示例歌词）",27));}
 
 const char* wallMenu(){auto c=*std::atomic_load(&settings);auto state=std::atomic_load(&source_walls::snapshot);return page(u8"场景挂画歌词",item(u8"场景挂画："+on(c.wallEnabled),700)+item(std::string(u8"放置方式：")+(c.wallAutomatic?u8"自动寻找墙面":u8"手动挂画轮换"),709)+item(std::string(u8"内容：")+(c.wallLiveLyrics?u8"歌词轮换":u8"固定示例"),702)+item(u8"背景面板："+on(c.wallBackdrop),703)+item(u8"新句无墙面时固定世界歌词："+on(c.wallFallback),710)+item(u8"尺寸、数量、搜索与停留",711)+item(u8"手动放置：3秒后按准星",701)+item(u8"清空全部挂画",704)+item(u8"调试标识："+on(c.wallDebug),705)+item(u8"状态："+state->message,0)+item(u8"返回主菜单",0));}
 const char* wallOptionsMenu(){auto c=*std::atomic_load(&settings);const char* sizes[]={u8"小80×28",u8"中120×40",u8"大180×60"};return page(u8"场景挂画参数",item(std::string(u8"新挂画尺寸：")+sizes[c.wallSize]+u8"（循环切换）",712)+item(u8"最多挂画："+std::to_string(c.wallCapacity)+u8"（2/4/6/8）",713)+item(u8"搜索距离："+std::to_string(int(c.wallRange))+u8"（300/600/900）",714)+item(u8"最小间距："+std::to_string(int(c.wallSpacing))+u8"（80/140/220）",715)+item(u8"旧句额外停留："+std::to_string(c.wallLingerMs)+u8"ms（0/2000/4000/8000）",716)+item(u8"淡出时间："+std::to_string(c.wallFadeMs)+u8"ms（500/1000/2000）",717)+item(u8"返回场景挂画",30));}
@@ -463,7 +465,8 @@ const char* menuActionImpl(void* argument){uintptr_t id=reinterpret_cast<uintptr
  if(id==22)return animationMenu(c);
  if(id==33)return page(u8"复用距离上限 · "+positionValue(c.reuseDistanceFactor)+u8" × 各歌词配置距离",item("1x",620)+item("1.5x",621)+item("2x",622)+item(u8"3x（默认）",623)+item("4x",624)+item("5x",625)+item("10x",626));
  if(id==31)return page(u8"单行长度（不改变字号和距离） · "+positionValue(c.lineWidthScale)+"x",item("0.75x",600)+item(u8"1x（默认）",601)+item("1.5x",602)+item("2x",603)+item("3x",604)+item("4x",605)+item(u8"返回主菜单",0));
- if(id==19)return page(u8"长句回到当前视野",item(u8"关闭",580)+item(u8"每 3 秒",581)+item(u8"每 5 秒",582)+item(u8"每 10 秒",583));
+ if(id==19)return page(u8"长句回到当前视野",item(u8"关闭",580)+item(u8"每 3 秒",581)+item(u8"每 5 秒",582)+item(u8"每 10 秒",583)+item(u8"自定义秒数（当前 "+reanchorSeconds(c.reanchorMs)+u8" 秒）",34));
+ if(id==34)return page(u8"自定义回归间隔 · "+reanchorSeconds(c.reanchorMs)+u8" 秒",item(u8"-10 秒",584)+item(u8"-1 秒",585)+item(u8"-0.1 秒",586)+item(u8"+0.1 秒",587)+item(u8"+1 秒",588)+item(u8"+10 秒",589)+item(u8"重设为 3 秒",590)+item(u8"关闭回归",591)+item(u8"范围 0.1～300 秒；0 为关闭",0));
  if(id==10){std::string rows;for(int i=0;i<6;++i)rows+=item(presetName(i),100+i);return page(u8"歌词预设",rows);}
  if(id==11||id==12){bool accent=id==12;std::string rows;const char* names[]={u8"暖白",u8"纯白",u8"樱花粉",u8"冰蓝",u8"金色",u8"薄荷绿",u8"淡紫",u8"橘红"};for(int i=0;i<8;++i)rows+=item(names[i],(accent?310:300)+i);for(int i=0;i<3;++i)rows+=item(std::string(u8"自定义 ")+"RGB"[i],(accent?410:400)+i);return page(std::string(accent?u8"光晕颜色 ":u8"正文颜色 ")+colorText(accent?c.accent:c.textColor),rows);}
  if(id>=400&&id<=402)return channelMenu(c,false,unsigned(id-400));if(id>=410&&id<=412)return channelMenu(c,true,unsigned(id-410));
@@ -480,6 +483,9 @@ const char* menuActionImpl(void* argument){uintptr_t id=reinterpret_cast<uintptr
  else if(id>=540&&id<=544){int values[]={0,500,1000,1500,2000};c.lingerMs=values[id-540];}
  else if(id>=620&&id<=626){const float values[]={1,1.5f,2,3,4,5,10};c.reuseDistanceFactor=values[id-620];}
  else if(id>=600&&id<=605){float values[]={.75f,1,1.5f,2,3,4};c.lineWidthScale=values[id-600];}
+ else if(id>=584&&id<=589)c.reanchorMs=adjustReanchor(c.reanchorMs,int(id-584));
+ else if(id==590)c.reanchorMs=3000;
+ else if(id==591)c.reanchorMs=0;
  else if(id>=580&&id<=583){int values[]={0,3000,5000,10000};c.reanchorMs=values[id-580];}
  else if(id>=560&&id<=564){int values[]={-100,-50,50,100};c.offset=id==564?500:std::clamp(c.offset+values[id-560],-10000,10000);}
  else switch(id){case 32:c.fallbackReveal=!c.fallbackReveal;break;case 28:c.progressiveReveal=!c.progressiveReveal;break;case 29:c.reuseVisibleAnchor=!c.reuseVisibleAnchor;break;case 26:c.pop=c.wiggle=true;c.wiggleFrequency=8;c.wiggleAmount=.8f;c.animationSpeed=1;c.presetId=-1;break;case 1:c.enabled=!c.enabled;break;case 2:c.translation=!c.translation;break;case 3:c.wiggle=!c.wiggle;c.presetId=-1;break;case 4:c.pop=!c.pop;c.presetId=-1;break;case 5:c.showTitle=!c.showTitle;break;case 6:c.showArtist=!c.showArtist;break;case 7:c.worldLyrics=!c.worldLyrics;break;case 8:c.glow=!c.glow;c.presetId=-1;break;case 9:c.keepAway=!c.keepAway;break;default:return nullptr;}
@@ -493,7 +499,7 @@ const char* menuAction(void* argument){
  auto id=reinterpret_cast<uintptr_t>(argument);auto result=menuActionImpl(argument);
  if(!hud::opensChild(id)&&id){auto c=*std::atomic_load(&settings);std::string text=u8"设置已实时应用";
  auto status=[&](const char* label,bool value){text=std::string(label)+(value?u8"：已开启":u8"：已关闭");};
- switch(id){case 1:status(u8"歌词显示",c.enabled);break;case 2:status(u8"翻译",c.translation);break;case 3:status(u8"抖动",c.wiggle);break;case 4:status(u8"弹跳",c.pop);break;case 5:status(u8"歌名",c.showTitle);break;case 6:status(u8"作者",c.showArtist);break;case 7:status(u8"世界歌词",c.worldLyrics);break;case 8:status(u8"柔光",c.glow);break;case 9:status(u8"靠近后退",c.keepAway);break;case 28:status(u8"按演唱进度显字",c.progressiveReveal);break;case 29:status(u8"沿用可见锚点",c.reuseVisibleAnchor);break;case 32:text=c.fallbackReveal?u8"无逐字时间轴：估算渐显":u8"无逐字时间轴：整句显示";break;case 18:case 2098:text=u8"已提交保存设置";break;case 2099:text=u8"已结束位置预览";break;case 700:status(u8"场景挂画",c.wallEnabled);break;case 702:text=c.wallLiveLyrics?u8"挂画内容：歌词轮换":u8"挂画内容：固定示例";break;case 703:status(u8"挂画背景",c.wallBackdrop);break;case 705:status(u8"挂画调试标识",c.wallDebug);break;case 709:text=c.wallAutomatic?u8"自动寻找墙面":u8"手动挂画轮换";break;case 710:status(u8"新句无墙面时固定世界歌词",c.wallFallback);break;case 704:text=u8"已请求清空挂画，下一句重新寻找墙面";break;default:break;}
+ switch(id){case 1:status(u8"歌词显示",c.enabled);break;case 2:status(u8"翻译",c.translation);break;case 3:status(u8"抖动",c.wiggle);break;case 4:status(u8"弹跳",c.pop);break;case 5:status(u8"歌名",c.showTitle);break;case 6:status(u8"作者",c.showArtist);break;case 7:status(u8"世界歌词",c.worldLyrics);break;case 8:status(u8"柔光",c.glow);break;case 9:status(u8"靠近后退（悬浮世界歌词）",c.keepAway);break;case 28:status(u8"按演唱进度显字",c.progressiveReveal);break;case 29:status(u8"沿用可见锚点",c.reuseVisibleAnchor);break;case 32:text=c.fallbackReveal?u8"无逐字时间轴：估算渐显":u8"无逐字时间轴：整句显示";break;case 18:case 2098:text=u8"已提交保存设置";break;case 2099:text=u8"已结束位置预览";break;case 700:status(u8"场景挂画",c.wallEnabled);break;case 702:text=c.wallLiveLyrics?u8"挂画内容：歌词轮换":u8"挂画内容：固定示例";break;case 703:status(u8"挂画背景",c.wallBackdrop);break;case 705:status(u8"挂画调试标识",c.wallDebug);break;case 709:text=c.wallAutomatic?u8"自动寻找墙面":u8"手动挂画轮换";break;case 710:status(u8"新句无墙面时固定世界歌词",c.wallFallback);break;case 704:text=u8"已请求清空挂画，下一句重新寻找墙面";break;default:break;}
  if(id>=100&&id<=105)text=std::string(u8"预设：")+presetName(c.presetId);
  if(id>=10000&&id<11209)text=std::string(id>=11000?u8"光晕颜色：":u8"正文颜色：")+colorText(id>=11000?c.accent:c.textColor);
  if(id>=2201&&id<=2209)text=u8"歌词位置数量："+std::to_string(c.layout.lyricCount);
@@ -504,6 +510,7 @@ const char* menuAction(void* argument){
  if(id==712){const char* sizes[]={u8"小80×28",u8"中120×40",u8"大180×60"};text=std::string(u8"新挂画尺寸：")+sizes[c.wallSize];}
  if(id>=620&&id<=626)text=u8"复用距离上限："+positionValue(c.reuseDistanceFactor)+u8" × 各歌词配置距离";
  if(id>=600&&id<=605)text=u8"单行长度："+positionValue(c.lineWidthScale)+"x";
+ if(id>=580&&id<=591)text=c.reanchorMs>0?u8"长句回归间隔："+reanchorSeconds(c.reanchorMs)+u8" 秒":u8"长句回归：已关闭";
  if(id>=560&&id<=564)text=u8"同步偏移："+std::to_string(c.offset)+"ms";
  if(id==713)text=u8"最多挂画："+std::to_string(c.wallCapacity);
  if(id==714)text=u8"搜索距离："+std::to_string(int(c.wallRange));
