@@ -36,3 +36,7 @@ g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc tests/nat
 
 g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc -Ivendor tests/menu_pages_test.cpp -o build/menu_pages_test
 ./build/menu_pages_test
+
+python3 scripts/generate_menu_glyphs.py --check
+g++ -std=c++17 -O2 -Isrc -Ivendor -Ivendor/imgui tests/menu_font_test.cpp vendor/imgui/imgui.cpp vendor/imgui/imgui_draw.cpp vendor/imgui/imgui_tables.cpp vendor/imgui/imgui_widgets.cpp -o build/menu_font_test
+./build/menu_font_test

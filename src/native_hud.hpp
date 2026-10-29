@@ -8,6 +8,7 @@
 #include "native_menu_model.hpp"
 #include "hud_menu_policy.hpp"
 #include "hud_appearance.hpp"
+#include "menu_font.hpp"
 #include "imgui/imgui.h"
 #include "imgui/backends/imgui_impl_dx9.h"
 
@@ -24,7 +25,7 @@ class NativeHud {
  using AppearanceWrite=void(*)(const Appearance&);
  Builder build=nullptr;Action act=nullptr;Close closed=nullptr;Notice notice=nullptr;Log log=nullptr;AppearanceWrite appearanceWrite=nullptr;
  std::atomic<bool> opened{false},restart{false},f10{false};
- ImGuiContext* context=nullptr;IDirect3DDevice9* device=nullptr;HWND window=nullptr;bool backend=false,subclass=false,hotkeyHeld=false;
+ ImGuiContext* context=nullptr;ImVector<ImWchar> fontRanges;IDirect3DDevice9* device=nullptr;HWND window=nullptr;bool backend=false,subclass=false,hotkeyHeld=false;
  KeyGate gate;MenuStack stack;enum class Page {Settings,Appearance,Position};std::atomic<Page> page{Page::Settings};
  unsigned preset=0,selected=0,step=8;float opacity=.48f,fontPixels=22,x=8,y=14;std::array<bool,4> arrows{};uint64_t retryAfter=0;bool submitted=false,fontReady=false;
  ImVec4 background{.015f,.018f,.020f,1};
@@ -53,8 +54,8 @@ class NativeHud {
  void applyPreset(){if(preset==0){background={.015f,.018f,.020f,1};opacity=.48f;}if(preset==1){background={.10f,.105f,.11f,1};opacity=.42f;}if(preset==2){background={.055f,.065f,.075f,1};opacity=.66f;}if(preset==3){background={.01f,.012f,.014f,1};opacity=.28f;}}
  static void text(const std::string& s,ImVec4 color={.94f,.94f,.91f,1}){ImGui::PushStyleColor(ImGuiCol_Text,color);ImGui::TextWrapped("%s",s.c_str());ImGui::PopStyleColor();}
  static void row(unsigned n,const std::string& s,bool enabled=true){text((enabled?"["+std::to_string(n)+"]  ":"     ")+s,enabled?ImVec4(.94f,.94f,.91f,1):ImVec4(.58f,.60f,.60f,1));ImGui::Dummy({1,3});}
- void font(){auto& io=ImGui::GetIO();char windows[MAX_PATH]{};if(GetWindowsDirectoryA(windows,MAX_PATH))for(auto name:{"msyh.ttc","msyhbd.ttc","simhei.ttf"}){
- auto path=std::string(windows)+"\\Fonts\\"+name;if(GetFileAttributesA(path.c_str())!=INVALID_FILE_ATTRIBUTES&&io.Fonts->AddFontFromFileTTF(path.c_str(),24,nullptr,io.Fonts->GetGlyphRangesChineseSimplifiedCommon()))return;}
+ void font(){auto& io=ImGui::GetIO();menuFontRanges(*io.Fonts,fontRanges);char windows[MAX_PATH]{};if(GetWindowsDirectoryA(windows,MAX_PATH))for(auto name:{"msyh.ttc","msyhbd.ttc","simhei.ttf"}){
+ auto path=std::string(windows)+"\\Fonts\\"+name;if(GetFileAttributesA(path.c_str())!=INVALID_FILE_ATTRIBUTES&&io.Fonts->AddFontFromFileTTF(path.c_str(),24,nullptr,fontRanges.Data))return;}
  io.Fonts->AddFontDefault();if(log)log("Native HUD Chinese font unavailable; using fallback");}
  bool attach(IDirect3DDevice9* d){
  if(device==d&&context)return true;release();HWND candidate=findWindow(d);
