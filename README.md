@@ -1,6 +1,6 @@
 # L4D2DangoMusic
 
-> 此分支提供基于 `0.9.2` 的原生 HUD 菜单预览。稳定版仍为 [v0.9.2](https://github.com/yeyunyyds/LDBDangoMusic/releases/tag/v0.9.2)。场景挂画默认关闭；使用方法见 [场景挂画指南](docs/wall-experiment-guide.md)。
+> 当前稳定版 [v0.9.3](https://github.com/yeyunyyds/LDBDangoMusic/releases/tag/v0.9.3) 提供原生 HUD 菜单、世界歌词和场景挂画。场景挂画及挂画背景默认关闭；使用方法见 [场景挂画指南](docs/wall-experiment-guide.md)。
 
 为《求生之路 2》（Left 4 Dead 2）提供音乐歌词显示的 L4N 插件。通过兼容 LX / BLF 的本地音乐 API 获取播放进度和歌词，在游戏中呈现带逐字动画的歌词，并支持世界空间定位、歌名与作者显示以及游戏内调节。
 
@@ -31,7 +31,7 @@
 
 ## 安装
 
-[下载原生菜单预览包](https://github.com/yeyunyyds/LDBDangoMusic/raw/refs/heads/zip/L4D2DangoMusic-0.9.2-native-hud.zip) · [稳定版 v0.9.2](https://github.com/yeyunyyds/LDBDangoMusic/releases/tag/v0.9.2)
+[下载 L4D2DangoMusic v0.9.3](https://github.com/yeyunyyds/LDBDangoMusic/releases/download/v0.9.3/L4D2DangoMusic-0.9.3-l4n.zip) · [Release 说明](https://github.com/yeyunyyds/LDBDangoMusic/releases/tag/v0.9.3)
 
 安装压缩包内仅包含 **bin 文件夹和 README.md**，不附带源码、构建工具、测试程序或额外依赖。
 
@@ -47,7 +47,7 @@ bin/neko/plugins/L4D2DangoMusic.dll
 bin/neko/plugins/L4D2DangoMusic/config.json
 ```
 
-源码和构建脚本维护在 [`main` 分支](https://github.com/yeyunyyds/LDBDangoMusic/tree/main)，[`zip` 分支](https://github.com/yeyunyyds/LDBDangoMusic/tree/zip) 仅提供安装压缩包。本预览改动位于 [`feature/native-hud-menu`](https://github.com/yeyunyyds/LDBDangoMusic/tree/feature/native-hud-menu)。
+源码和构建脚本维护在 [`main` 分支](https://github.com/yeyunyyds/LDBDangoMusic/tree/main)，[`zip` 分支](https://github.com/yeyunyyds/LDBDangoMusic/tree/zip) 仅提供安装压缩包。
 
 从源码构建的用户仍可使用 `scripts/install.ps1 -GameRoot "游戏根目录"` 安装；运行目录为源码根目录。安装包用户直接复制 `bin` 即可。
 
@@ -75,7 +75,7 @@ bin/neko/plugins/L4D2DangoMusic/config.json
 
 仅在菜单打开且游戏窗口获得焦点时读取菜单按键，入口按键释放后才接收下一次操作；不捕获鼠标或 WASD。
 
-开启 **场景挂画歌词** 后，可选择自动寻找墙面，或用 F8 手动放置挂画。挂画参数、旧句停留、背景、固定世界歌词回退及完整设置说明见 [场景挂画指南](docs/wall-experiment-guide.md)。
+挂画背景默认关闭，可在“场景挂画 → 挂画外观与维护 → 背景面板”开启；升级时保留已有配置中的选择。开启 **场景挂画歌词** 后，可选择自动寻找墙面，或用 F8 手动放置挂画。挂画参数、旧句停留、背景、固定世界歌词回退及完整设置说明见 [场景挂画指南](docs/wall-experiment-guide.md)。
 
 “靠近时后退”作用于悬浮世界歌词、悬浮歌名和作者；进入该组件配置距离的 60% 以内时持续推远。固定墙面挂画保持贴墙。无逐字时间轴的“估算渐显”独立生效，短句、无空格长词也会分字渐显；统一词条起点等于整句起点、没有进一步细分的数据也按无细分时间处理。
 

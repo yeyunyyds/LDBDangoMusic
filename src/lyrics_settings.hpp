@@ -12,7 +12,7 @@ struct Config {
  int port=23330,size=32;bool enabled=true,worldLyrics=false,worldTestAnchor=false;
  float worldDistance=200,worldSide=75,worldHeight=8;bool cameraDiagnostics=false,demo=true,translation=false,alternate=true;
  ComponentLayout layout;hud::Appearance hud;
- bool progressiveReveal=true,reuseVisibleAnchor=true,fallbackReveal=false,wallBackdrop=true,wallDebug=false;float lineWidthScale=1,reuseDistanceFactor=3;
+ bool progressiveReveal=true,reuseVisibleAnchor=true,fallbackReveal=false,wallBackdrop=false,wallDebug=false;float lineWidthScale=1,reuseDistanceFactor=3;
  bool wallEnabled=false,wallAutomatic=true,wallLiveLyrics=true,wallFallback=true;int wallSize=1,wallCapacity=6,wallLingerMs=4000,wallFadeMs=1000;float wallRange=600,wallSpacing=140;
  float y=.44f;int offset=500;bool outline=false,glow=true,pop=true,wiggle=true,keepAway=true;
  float wiggleFrequency=8,wiggleAmount=.8f,spread=30;bool debugOverlay=false;float glowRadius=.5f,glowStrength=.3f,opacity=1.f,width=.32f;
@@ -26,7 +26,7 @@ inline Config decodeConfig(const nlohmann::json& j){
 #define BOOL_FIELD(name,field,defaultValue) c.field=j.value(name,defaultValue)
  BOOL_FIELD("enabled",enabled,true);BOOL_FIELD("worldLyrics",worldLyrics,false);BOOL_FIELD("worldTestAnchor",worldTestAnchor,false);BOOL_FIELD("cameraDiagnostics",cameraDiagnostics,false);BOOL_FIELD("demo",demo,true);BOOL_FIELD("translation",translation,false);BOOL_FIELD("alternate",alternate,true);BOOL_FIELD("outline",outline,false);BOOL_FIELD("glow",glow,true);BOOL_FIELD("pop",pop,true);BOOL_FIELD("wiggle",wiggle,true);BOOL_FIELD("keepAway",keepAway,true);BOOL_FIELD("debugOverlay",debugOverlay,false);BOOL_FIELD("showTitle",showTitle,false);BOOL_FIELD("showArtist",showArtist,false);
  BOOL_FIELD("progressiveReveal",progressiveReveal,true);BOOL_FIELD("reuseVisibleAnchor",reuseVisibleAnchor,true);
- BOOL_FIELD("fallbackReveal",fallbackReveal,false);BOOL_FIELD("wallBackdrop",wallBackdrop,true);BOOL_FIELD("wallDebug",wallDebug,false);
+ BOOL_FIELD("fallbackReveal",fallbackReveal,false);BOOL_FIELD("wallBackdrop",wallBackdrop,false);BOOL_FIELD("wallDebug",wallDebug,false);
  BOOL_FIELD("wallEnabled",wallEnabled,false);BOOL_FIELD("wallAutomatic",wallAutomatic,true);BOOL_FIELD("wallLiveLyrics",wallLiveLyrics,true);
  BOOL_FIELD("wallFallback",wallFallback,true);
 #undef BOOL_FIELD
