@@ -163,7 +163,7 @@ void peakFrame(IDirect3DDevice9* dev,const State& state,int at,int64_t song,bool
  for(auto& glyph:entry.layout.glyphs){auto frame=peak::revealFrame(entry.motion,entry.animation,glyph.index,song,clock,cfg.animationSpeed,cfg.progressiveReveal,cfg.pop,cfg.wiggle,cfg.wiggleFrequency,cfg.wiggleAmount,cfg.fallbackReveal);if(frame.alpha<=0)continue;
  auto im=image(dev,entry.animation.glyphs[glyph.index].text);float size=scale*frame.scale;float x=center+(glyph.x+glyph.width*.5f)*scale+frame.x*height/1080.f-im.width*size*.5f;float y=top+(glyph.y+cfg.size*.5f)*scale+frame.y*height/1080.f-im.height*size*.5f;
  styled(dev,im,x,y,size,life.alpha*frame.alpha*cfg.opacity,cfg.textColor,frame.rotation);}
- if(cfg.translation&&entry.retired<0&&!entry.line.translation.empty()){float ts=scale*.72f;
+ if(cfg.translation&&!entry.line.translation.empty()){float ts=scale*.72f;
  for(auto& glyph:entry.translationLayout.glyphs){auto frame=peak::revealFrame(entry.translationMotion,entry.translated,glyph.index,song,clock,cfg.animationSpeed,cfg.progressiveReveal,false,false,8,0,cfg.fallbackReveal);if(frame.alpha<=0)continue;
  auto tr=image(dev,entry.translated.glyphs[glyph.index].text);styled(dev,tr,center+(glyph.x+glyph.width*.5f)*ts-tr.width*ts*.5f,top+entry.layout.height*scale+8+glyph.y*ts,ts,life.alpha*frame.alpha*cfg.opacity,cfg.textColor);}}
  }
