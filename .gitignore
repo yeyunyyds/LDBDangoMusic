@@ -1,5 +1,0 @@
-/build/
-*.obj
-*.lib
-*.exp
-__pycache__/

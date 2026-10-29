@@ -1,4 +1,0 @@
-LIBRARY L4D2DangoMusic
-EXPORTS
-    GetL4NPluginInstance
-    L4D2DangoMusicShutdown
