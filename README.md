@@ -1,6 +1,6 @@
 # L4D2DangoMusic
 
-> 本分支是 `experiment/entity-attachments`：研究实体、骨骼、手持物与车辆表面的挂载接口。已提供值快照/局部坐标接口原型和测试，Source 实机采集后端尚未接入。详情见 [场景挂载接口](docs/scene-attachments.md)。正常使用请下载 main/zip 对应安装包。
+> 本分支是 `experiment/entity-attachments`：研究实体、骨骼、手持物与车辆表面的挂载接口。已提供值快照/局部坐标接口原型，并接入默认关闭的只读网络实体诊断采集；新增采集尚未实机验证，骨骼/渲染姿态挂载尚未接通。详情见 [场景挂载接口](docs/scene-attachments.md)。诊断试用见 [实体采集诊断指南](docs/entity-inventory-test.md)，正常使用请下载 main/zip 对应安装包。
 
 > 当前版本 `0.9.1` 支持自动寻找墙面、独立歌词挂画和手动位置轮换。场景挂画默认关闭；使用方法见 [场景挂画指南](docs/wall-experiment-guide.md)。
 

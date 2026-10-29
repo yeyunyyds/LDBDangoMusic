@@ -10,3 +10,4 @@ mkdir -p build
 "$compiler" -std=c++17 -O2 -Ivendor -Isrc tests/source_walls_abi_test.cpp -static -o build/source_walls_abi_test.exe -luser32
 
 "$compiler" -std=c++17 -O2 -Isrc tests/wall_scene_test.cpp -static -o build/wall_scene_test.exe
+"$compiler" -std=c++17 -O2 -Ivendor -Isrc tests/source_entity_backend_test.cpp -static -o build/source_entity_backend_test.exe -luser32

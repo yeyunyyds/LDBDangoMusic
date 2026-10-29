@@ -32,3 +32,5 @@ g++ -std=c++17 -Wall -Wextra -Werror -Isrc tests/hud_menu_policy_test.cpp -o bui
 ./build/hud_menu_policy_test
 g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc tests/scene_attachment_test.cpp -o build/scene_attachment_test
 ./build/scene_attachment_test
+g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc tests/source_entity_contract_test.cpp -o build/source_entity_contract_test
+./build/source_entity_contract_test

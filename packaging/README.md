@@ -1,4 +1,6 @@
-# L4D2DangoMusic @VERSION@
+# L4D2DangoMusic @VERSION@ · 实体诊断实验
+
+此包来自 `experiment/entity-attachments`，用于只读实体采集验证，尚未完成实机验收，不是稳定版新增挂载功能。安装后进入 L4N → L4D2DangoMusic → 实验：实体接口只读诊断，开启定时采集，测试 20～30 秒后关闭。结果位于 `bin/neko/plugins/L4D2DangoMusic/entities.jsonl`，主日志为 `bin/neko/plugins/L4D2DangoMusic.log`。网络坐标可能相对父实体，不等于世界坐标，也不是骨骼或插值后的渲染姿态；本包不会自动跟随队友或投掷物绘制歌词。
 
 《求生之路 2》原生 L4N 歌词插件。支持 LX / BLF 本地 API、翻译、逐字动画、固定世界歌词和场景挂画歌词。
 

@@ -1,0 +1,39 @@
+{
+  "static_profile_verified": true,
+  "runtime_dispatch_verified": false,
+  "entity_interface": "VClientEntityList003",
+  "entity_object_rva": "0x74a574",
+  "entity_vtable_rva": "0x564b60",
+  "interface_subobject_offset": "0x10014",
+  "entry_base_from_interface": "-0x10010",
+  "entry_size": 16,
+  "entry_bits": 12,
+  "serial_bits": 20,
+  "networkable_cache_offset": "0x28",
+  "cache_stride": 8,
+  "networked_limit": 2048,
+  "model_interface": "VModelInfoClient004",
+  "checks": {
+    "HighestCode": {
+      "rva": "0xb8db0",
+      "bytes": "8b4124c3"
+    },
+    "HandleCode": {
+      "rva": "0xbb4c0",
+      "bytes": "558bec8b550883faff74218bc225ff0f00002d01100000c1e004"
+    },
+    "ModelCode": {
+      "rva": "0x1b0420",
+      "bytes": "558bec8b450850e87428edff8bc8e8fd18eeff5dc20400"
+    },
+    "NameCode": {
+      "rva": "0x1afba0",
+      "bytes": "558bec8b450885c07509"
+    }
+  },
+  "notes": [
+    "No entity virtuals are dispatched: tiny class/data-base/dormancy getters are decoded or reported unknown.",
+    "RecvTable/RecvProp interpretation is bounded and shape-checked at runtime; offsets are network properties, not render poses.",
+    "Only the profiled model-info GetModel/GetModelName calls are dispatched; real game validation is pending."
+  ]
+}

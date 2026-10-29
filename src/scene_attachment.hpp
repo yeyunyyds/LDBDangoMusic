@@ -1,6 +1,7 @@
 #pragma once
 // Experimental value-only scene API. No Source pointers escape the producer.
-// The Source entity/static-prop/bone acquisition backend is not implemented yet.
+// The raw network inventory collector is separate; a validated render-pose
+// producer is not connected to this API yet.
 #include "world_camera.hpp"
 #include <atomic>
 #include <memory>

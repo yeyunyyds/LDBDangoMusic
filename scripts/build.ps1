@@ -23,3 +23,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Trace ABI test failed' }
 if ($LASTEXITCODE -ne 0) { throw 'Wall scene test build failed' }
 & ./build/wall_scene_test.exe
 if ($LASTEXITCODE -ne 0) { throw 'Wall scene tests failed' }
+& cl.exe /nologo /std:c++17 /EHsc /utf-8 /W4 /O2 /Isrc /Ivendor tests/source_entity_backend_test.cpp /Fobuild/source_entity_backend_test.obj /Febuild/source_entity_backend_test.exe /link user32.lib
+if ($LASTEXITCODE -ne 0) { throw 'Entity diagnostic producer test build failed' }
+& ./build/source_entity_backend_test.exe
+if ($LASTEXITCODE -ne 0) { throw 'Entity diagnostic producer mock failed' }
