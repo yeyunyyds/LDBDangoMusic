@@ -355,7 +355,7 @@ template<class Present> HRESULT paintAndPresent(IDirect3DDevice9* device,IDirect
 }
 struct Patch {void** slot;void* original;void* replacement;};
 std::array<Patch,64> patches{};std::atomic<size_t> patchCount{0};SRWLOCK patchLock=SRWLOCK_INIT;std::filesystem::path pluginDirectory;
-void fileLog(int,const char* message){std::ofstream file(pluginDirectory/L"L4D2DangoMusic.log",std::ios::app);file<<"L4D2DangoMusic 0.9.1 "<<message<<'\n';}
+void fileLog(int,const char* message){std::error_code error;auto dataDirectory=pluginDirectory/L"L4D2DangoMusic";std::filesystem::create_directories(dataDirectory,error);if(error)return;std::ofstream file(dataDirectory/L"L4D2DangoMusic.log",std::ios::app);file<<"L4D2DangoMusic 0.9.1 "<<message<<'\n';}
 bool patch(void** table,size_t slot,void* replacement){
  if(!TryAcquireSRWLockExclusive(&patchLock))return false;auto count=patchCount.load(std::memory_order_acquire);
  for(size_t i=0;i<count;++i)if(patches[i].slot==table+slot){bool same=patches[i].replacement==replacement;ReleaseSRWLockExclusive(&patchLock);return same;}

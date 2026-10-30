@@ -15,8 +15,10 @@
 
 ```text
 bin/neko/plugins/L4D2DangoMusic/entities.jsonl
-bin/neko/plugins/L4D2DangoMusic.log
+bin/neko/plugins/L4D2DangoMusic/L4D2DangoMusic.log
 ```
+
+主日志与实体数据现在统一存放在同一个插件数据目录，后续反馈可一起收集。旧目录中已有的日志保留为历史记录，不会删除或自动混入新文件。
 
 JSONL 是每行一帧的诊断数据，连续开启会不断追加；测试结束请关闭采集。恢复稳定版时退出游戏后换回备份 DLL 即可。
 

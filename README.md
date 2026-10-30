@@ -100,7 +100,7 @@ bin/neko/plugins/L4D2DangoMusic/config.json
 - **出现双份歌词**：检查 L4N 插件目录，移出旧副本后完整重启游戏。若曾安装旧版 Host 歌词插件，也需停用该副本并重启对应 Host。
 - **动画不明显**：部分预设会关闭动画，可选择“恢复默认动画”，再进入“动画预览”检查。
 
-菜单中的 **版本、路径与播放器诊断** 可查看实际加载的 DLL 路径和播放状态。日志位于 `bin/neko/plugins/L4D2DangoMusic.log`；反馈问题时，请附上日志、插件版本和复现步骤。
+菜单中的 **版本、路径与播放器诊断** 可查看实际加载的 DLL 路径和播放状态。日志位于 `bin/neko/plugins/L4D2DangoMusic/L4D2DangoMusic.log`；反馈问题时，请附上日志、插件版本和复现步骤。
 
 ## 从源码构建
 
