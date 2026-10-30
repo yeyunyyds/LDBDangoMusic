@@ -25,6 +25,13 @@ int main(){
  current=base;current.hud.font=28;current.hud.opacity=.75f;current.hud.f10=true;
  check(menus::saveLabel(current,base,false,false)==u8"保存设置: [未保存]");
  auto copy=decodeConfig(encodeConfig(current));check(copy.hud==current.hud);
+ // Default menu height follows screen center; legacy custom coordinates stay manual.
+ check(base.hud.centerY&&decodeConfig(nlohmann::json::object()).hud.centerY);
+ check(decodeConfig({{"hudAppearance",{{"y",14}}}}).hud.centerY);
+ auto custom=decodeConfig({{"hudAppearance",{{"y",220}}}});check(!custom.hud.centerY&&custom.hud.y==220);
+ auto manualTop=decodeConfig({{"hudAppearance",{{"y",14},{"centerY",false}}}});check(!manualTop.hud.centerY);
+ check(decodeConfig(encodeConfig(custom)).hud==custom.hud&&decodeConfig(encodeConfig(manualTop)).hud==manualTop.hud);
+ auto centered=custom;centered.hud.centerY=true;check(menus::saveLabel(centered,custom,false,false)==u8"保存设置: [未保存]");
  current.pop=false;current.wiggle=false;current.animationSpeed=2;current.lingerMs=2000;auto selected=applyColorPreset(current,3);
  check(!selected.pop&&!selected.wiggle&&selected.animationSpeed==2&&selected.lingerMs==2000&&selected.hud==current.hud&&colorPresetId(selected)==3);
  selected.textColor=0x123456;check(colorPresetId(selected)==-1&&menus::root(selected,label).rows[3].label==u8"歌词颜色: [自定义]");
