@@ -1,6 +1,6 @@
 # L4D2DangoMusic
 
-> **实验已归档，停止推进，不计划合入正式版。** 此分支保留实体采集、手动跟随 Demo、源码、测试及最终 build 6 安装包。实机验证范围、已知限制与内部调用方式见 [实验归档说明](docs/entity-experiment-archive.md)。正式使用请下载 [v0.9.3 Release](https://github.com/yeyunyyds/LDBDangoMusic/releases/tag/v0.9.3)。
+> **语音字幕实验：`experiment/npc-dialogue`，默认关闭。** 从已归档实体分支独立开发，接收原生字幕编号、读取字幕字典，按角色名与生还者实体匹配并显示跟随气泡。使用方法与验证边界见 [角色台词实验指南](docs/npc-dialogue-test.md)。[原实体实验归档](docs/entity-experiment-archive.md)、正式版及其他测试分支保持原样。
 
 为《求生之路 2》（Left 4 Dead 2）提供音乐歌词显示的 L4N 插件。通过兼容 LX / BLF 的本地音乐 API 获取播放进度和歌词，在游戏中呈现带逐字动画的歌词，并支持世界空间定位、歌名与作者显示以及游戏内调节。
 
@@ -31,7 +31,7 @@
 
 ## 安装
 
-[下载实体诊断实验包](https://github.com/yeyunyyds/LDBDangoMusic/raw/refs/heads/experiment/entity-attachments/artifacts/L4D2DangoMusic-entity-diagnostics.zip) · [诊断指南](docs/entity-inventory-test.md) · [稳定版 v0.9.3](https://github.com/yeyunyyds/LDBDangoMusic/releases/tag/v0.9.3)
+[下载角色台词实验包](https://github.com/yeyunyyds/LDBDangoMusic/raw/refs/heads/experiment/npc-dialogue/artifacts/L4D2DangoMusic-npc-dialogue-preview.zip) · [实验指南](docs/npc-dialogue-test.md) · [稳定版 v0.9.3](https://github.com/yeyunyyds/LDBDangoMusic/releases/tag/v0.9.3)
 
 安装压缩包内仅包含 **bin 文件夹和 README.md**，不附带源码、构建工具、测试程序或额外依赖。
 

@@ -53,3 +53,8 @@ g++ -std=c++17 -O2 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc -Iven
 
 g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc tests/entity_follow_test.cpp -o build/entity_follow_test
 ./build/entity_follow_test
+
+g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc -Ivendor tests/dialogue_test.cpp -o build/dialogue_test
+./build/dialogue_test
+g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc -Ivendor tests/caption_resources_test.cpp -o build/caption_resources_test
+./build/caption_resources_test

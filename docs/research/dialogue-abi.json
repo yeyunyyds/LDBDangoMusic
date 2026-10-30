@@ -1,0 +1,41 @@
+{
+  "static_profile_verified": true,
+  "runtime_verified": false,
+  "sha256": "c0a8e1e88f7312db11bcfd4b0ec574d224a34b2d9a615d6088b28335eeb4af1f",
+  "interface": "VClient016",
+  "dispatch_slot": 35,
+  "dispatch_rva": "0xa9160",
+  "manager_pointer_rva": "0x6de3a4",
+  "node_bytes": 24,
+  "node_value_offset": 20,
+  "message_name_offset": 4,
+  "bf_read_bytes": 36,
+  "caption_header_bits": [
+    32,
+    15,
+    1
+  ],
+  "duration_unit_ms": 100,
+  "roles": [
+    "Nick",
+    "Rochelle",
+    "Coach",
+    "Ellis",
+    "Bill",
+    "Zoey",
+    "Francis",
+    "Louis"
+  ],
+  "caption_file": {
+    "magic": "VCCD",
+    "version": 1,
+    "header_bytes": 24,
+    "directory_entry_bytes": 12
+  },
+  "notes": [
+    "No uploaded DLL is loaded or executed.",
+    "Runtime binding validates the exact callback/profile before modifying one vtable slot.",
+    "Role prefix presence, dictionary priority and live matching still require game validation.",
+    "The legacy-campaign conversion preceding the role-name switch is not dispatched; raw network character values are logged for verification."
+  ]
+}
