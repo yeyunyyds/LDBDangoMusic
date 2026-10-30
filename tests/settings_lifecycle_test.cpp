@@ -1,6 +1,7 @@
 #include "lyrics_settings.hpp"
 #include "render_lifecycle.hpp"
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 void check(bool value){if(!value)throw std::runtime_error("Settings/lifecycle regression");}
 int main(int argc,char**){using namespace dango;
@@ -23,5 +24,15 @@ int main(int argc,char**){using namespace dango;
  check(reanchorSeconds(0)=="0"&&reanchorSeconds(100)=="0.1"&&reanchorSeconds(1875)=="1.875"&&reanchorSeconds(300000)=="300");
  c.reanchorMs=123400;auto custom=decodeConfig(encodeConfig(c));check(custom.reanchorMs==123400&&decodeConfig({{"reanchorMs",999999}}).reanchorMs==300000);
  auto hold=exitFrame(999,1000,400);check(hold.alpha==1&&!hold.done);auto fade=exitFrame(1200,1000,400);check(std::abs(fade.alpha-.5f)<.001&&!fade.done);check(exitFrame(1400,1000,400).done);
+ Config wallConfig;check(!wallConfig.wallReuse&&wallConfig.wallSurface==0&&!wallConfig.wallFloorFollow);
+ wallConfig.wallFloorFollow=true;wallConfig.wallReuse=true;wallConfig.wallSurface=1;wallConfig.wallLayout.title.x=.2f;wallConfig.wallLayout.artist.y=.35f;wallConfig.wallLayout.lyrics.size=1.5f;wallConfig.wallLayout.lyrics.depth=2;
+ auto layoutCopy=decodeConfig(encodeConfig(wallConfig));check(layoutCopy.wallFloorFollow&&layoutCopy.wallReuse&&layoutCopy.wallSurface==1&&wallLayoutJson(layoutCopy.wallLayout)==wallLayoutJson(wallConfig.wallLayout));
+ check(wallLayoutJson(applyColorPreset(wallConfig,3).wallLayout)==wallLayoutJson(wallConfig.wallLayout));
+ auto beforeTitle=wallPositionJson(wallConfig.wallLayout.title);adjustWallText(wallConfig.wallLayout,2,0,2);check(std::abs(wallConfig.wallLayout.lyrics.x-.51f)<.001f&&wallPositionJson(wallConfig.wallLayout.title)==beforeTitle);adjustWallText(wallConfig.wallLayout,2,0,4);check(std::abs(wallConfig.wallLayout.lyrics.x-.5f)<.001f);
+ auto bounded=readWallLayout({{"lyrics",{{"x",-1},{"y",2},{"size",99},{"depth",-3}}}});check(bounded.lyrics.x==0&&bounded.lyrics.y==1&&bounded.lyrics.size==3&&bounded.lyrics.depth==.05f);
+ bool badLayout=false;try{readWallLayout({{"lyrics",{{"x",std::numeric_limits<double>::infinity()}}}});}catch(...){badLayout=true;}check(badLayout);
+ wall::Panel panel;check(wall::makePanel({100,0,0},{-1,0,0},120,40,1,panel));WallTextLayout defaultLayout;
+ auto title=wallTextPanel(panel,defaultLayout.title);check(length(title.center-(panel.center+panel.up*(panel.height*.37f)+panel.normal*.05f))<.001f);
+ auto lyrics=wallTextPanel(panel,defaultLayout.lyrics);check(length(lyrics.center-(panel.center-panel.up*(panel.height*.08f)+panel.normal*.1f))<.001f);
  std::cout<<"Passed: six presets preserve connection/sync, config roundtrip, RGB validation, one-second linger\n";
 }

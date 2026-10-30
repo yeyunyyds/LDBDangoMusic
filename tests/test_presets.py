@@ -15,6 +15,6 @@ for index, name in enumerate(('warm-white', 'soft', 'neon-pink', 'ice-blue', 'am
 print('Passed: all distributed preset files match runtime presets')
 for name in ('config.example.json', 'config.demo.json', 'config.camera-demo.json', 'config.world-demo.json'):
     config = json.loads((ROOT / name).read_text())
-    if config['layout'] != actual[0]['layout'] or config['reanchorMs'] != 0 or config['defaultsVersion'] != 2 or config['verticalPosition'] != 0.44 or config['wallBackdrop'] is not False:
+    if config['layout'] != actual[0]['layout'] or config['reanchorMs'] != 0 or config['defaultsVersion'] != 2 or config['verticalPosition'] != 0.44 or config['wallBackdrop'] is not False or config['wallReuse'] is not False or config['wallFloorFollow'] is not False or config['wallSurface'] != 0 or any(abs(config['wallLayout'][part][key] - actual[0]['wallLayout'][part][key]) > 1e-5 for part in ('title', 'artist', 'lyrics') for key in ('x', 'y', 'size', 'depth')):
         raise RuntimeError(('Stale bundled layout/defaults', name))
 print('Passed: bundled configs use elevated lyric layout and disabled reanchor defaults')

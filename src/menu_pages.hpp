@@ -11,7 +11,7 @@ inline std::string saveLabel(const Config& current,const Config& saved,bool savi
  bool dirty=!hasSaved||encodeConfig(current)!=encodeConfig(saved);
  return value(u8"保存设置",dirty?u8"未保存":saving?u8"保存中":u8"已保存")+(saving&&dirty?u8" · 保存中":failed?u8" · 保存失败，见日志":"");
 }
-inline hud::Document root(const Config& c,const std::string& save){return {"L4D2DangoMusic 0.9.3",{
+inline hud::Document root(const Config& c,const std::string& save){return {"L4D2DangoMusic 0.9.4",{
  {value(u8"歌词显示",on(c.enabled)),1},{u8"显示与歌词信息",20},{u8"位置与数量（固定预览）",23},
  {value(u8"歌词颜色",presetName(colorPresetId(c))),21},{u8"动画、速度与停留",22},{value(u8"场景挂画",on(c.wallEnabled)),30},
  {save,18},{u8"更多设置",35}}};}
@@ -47,10 +47,10 @@ inline hud::Document timing(const Config& c){return {u8"停留与退场",{
  {value(u8"退场耗时",std::to_string(c.transition)+"ms"),14}}};}
 inline hud::Document more(){return {u8"更多设置",{{u8"菜单外观",9000},{u8"版本、路径与播放器诊断",24},{u8"实验：实体跟随测试",810},{u8"实验：实体接口只读诊断",800},{u8"实验：角色台词跟随",850}}};}
 inline hud::Document wall(const Config& c,const std::string& status){return {u8"场景挂画歌词",{
- {value(u8"场景挂画",on(c.wallEnabled)),700},{value(u8"放置方式",c.wallAutomatic?u8"自动寻找墙面":u8"手动挂画轮换"),709},
+ {value(u8"场景挂画",on(c.wallEnabled)),700},{value(u8"放置方式",c.wallAutomatic?(c.wallSurface?u8"自动寻找地面":u8"自动寻找墙面"):u8"手动挂画轮换"),709},
  {value(u8"内容",c.wallLiveLyrics?u8"歌词轮换":u8"固定示例"),702},{u8"尺寸、数量、搜索与停留",711},
- {u8"手动放置：3秒后按准星",701},{value(u8"新句无墙面时固定世界歌词",on(c.wallFallback)),710},
- {u8"挂画外观与维护",39},{value(u8"状态",status),0}}};}
+ {u8"手动放置：3秒后按准星",701},{value(u8"新句无表面时固定世界歌词",on(c.wallFallback)),710},
+ {value(u8"无新表面时复用旧挂画",on(c.wallReuse)),718},{u8"挂画外观与维护",39},{value(u8"状态",status),0}}};}
 inline hud::Document wallAppearance(const Config& c){return {u8"挂画外观与维护",{
- {value(u8"背景面板",on(c.wallBackdrop)),703},{value(u8"调试标识",on(c.wallDebug)),705},{u8"清空全部挂画",704}}};}
+ {value(u8"背景面板",on(c.wallBackdrop)),703},{value(u8"调试标识",on(c.wallDebug)),705},{u8"挂画文字位置与大小（固定预览）",720},{value(u8"放置表面",c.wallSurface?u8"地面":u8"墙面"),719},{value(u8"地面文字随视角转向",on(c.wallFloorFollow)),726},{u8"清空全部挂画",704}}};}
 }
