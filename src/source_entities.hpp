@@ -96,7 +96,7 @@ inline bool prepare(const GameCameraFrame& camera,Frame& frame){
  frame.epoch=camera.epoch;frame.tick=camera.tick;frame.bindingChecks=bindingChecks;frame.modelLookup=modelReady;
  if(!camera.active){frame.status="Waiting for active Source camera";return false;}
  if(faulted){frame.status="Entity ABI/profile mismatch; toggle diagnostics to retry";return false;}
- if(!bound){bound=connect();frame.bindingChecks=bindingChecks;frame.modelLookup=modelReady;log("Diagnostic build 4 binding checks");for(auto& detail:bindingChecks)log(detail);if(!bound){faulted=true;frame.status="Entity ABI/profile mismatch; see binding_checks";log(frame.status);return false;}log("Bound verified raw entity list; model lookup="+std::string(modelReady?"available":"unavailable"));}
+ if(!bound){bound=connect();frame.bindingChecks=bindingChecks;frame.modelLookup=modelReady;log("Diagnostic build 5 binding checks");for(auto& detail:bindingChecks)log(detail);if(!bound){faulted=true;frame.status="Entity ABI/profile mismatch; see binding_checks";log(frame.status);return false;}log("Bound verified raw entity list; model lookup="+std::string(modelReady?"available":"unavailable"));}
  return true;
 }
 inline void capture(const GameCameraFrame& camera){
@@ -128,7 +128,7 @@ inline void onFrame(const GameCameraFrame& camera)noexcept{
  }catch(...){faulted=true;log("Capture stopped after an exception; toggle diagnostics to retry");}
 }
 inline nlohmann::json jsonFrame(const Frame& f){
- nlohmann::json out={{"schema",1},{"diagnostic_build",4},{"epoch",f.epoch},{"tick",f.tick},{"status",f.status},{"pose_space","network_raw"},{"occupied",f.occupied},{"unknown_class",f.unknownClass},{"unknown_base",f.unknownBase},{"unknown_tables",f.unknownTables},{"getter_hints",f.getterHints},{"binding_checks",f.bindingChecks},{"model_lookup_available",f.modelLookup},{"objects",nlohmann::json::array()}};
+ nlohmann::json out={{"schema",1},{"diagnostic_build",5},{"epoch",f.epoch},{"tick",f.tick},{"status",f.status},{"pose_space","network_raw"},{"occupied",f.occupied},{"unknown_class",f.unknownClass},{"unknown_base",f.unknownBase},{"unknown_tables",f.unknownTables},{"getter_hints",f.getterHints},{"binding_checks",f.bindingChecks},{"model_lookup_available",f.modelLookup},{"objects",nlohmann::json::array()}};
  for(auto& r:f.records){nlohmann::json item={{"handle",r.handle},{"index",r.index},{"serial",r.serial},{"class",r.className},{"class_id",r.classId},{"model",r.modelName}};
  auto vector=[&](const char* key,const std::optional<Vec3>& v){if(v)item[key]={v->x,v->y,v->z};};vector("origin",r.networkOrigin);vector("angles",r.networkAngles);
  if(r.parent)item["parent_handle"]=*r.parent;if(r.parentAttachment)item["parent_attachment"]=*r.parentAttachment;if(r.dormant)item["dormant_candidate"]=*r.dormant;if(r.team)item["team"]=*r.team;if(r.modelIndex)item["model_index"]=*r.modelIndex;if(r.owner)item["owner_handle"]=*r.owner;if(r.activeWeapon)item["active_weapon_handle"]=*r.activeWeapon;if(r.viewModel)item["viewmodel_handle"]=*r.viewModel;out["objects"].push_back(std::move(item));}return out;

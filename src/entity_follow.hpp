@@ -2,17 +2,21 @@
 #include "entity_inventory.hpp"
 #include "scene_attachment.hpp"
 namespace dango::follow {
-enum class Filter {Objects,Physics,Dynamic,Players,Projectiles,GroundWeapons};
-inline const char* filterName(Filter f){const char* n[]={u8"可挂载物体",u8"物理物体",u8"动态物体",u8"玩家",u8"投掷物",u8"地上武器"};return n[int(f)];}
+enum class Filter {Objects,Physics,Dynamic,Players,Projectiles,GroundWeapons,CommonInfected,SpecialInfected,Vehicles};
+inline constexpr unsigned FilterCount=9;
+inline const char* filterName(Filter f){const char* n[]={u8"可挂载物体",u8"物理物体",u8"动态物体",u8"玩家",u8"投掷物",u8"地上武器",u8"普通感染者",u8"特殊感染者",u8"车辆实体"};return n[int(f)];}
 inline bool weaponClass(const inventory::Record& r){return r.className=="CPistol"||r.className=="CPistolMagnum"||r.className=="CTerrorMeleeWeapon"||r.className.find("CRifle")==0||r.className.find("CShotgun")==0||r.className.find("CSMG")==0||r.className=="CFirstAidKit";}
 inline bool classMatches(const inventory::Record& r,Filter f){
- bool player=r.className=="CTerrorPlayer"||r.className=="SurvivorBot";
+ bool common=r.className=="Infected";
+ bool special=r.className=="Smoker"||r.className=="Boomer"||r.className=="Hunter"||r.className=="Spitter"||r.className=="Jockey"||r.className=="Charger"||r.className=="Tank"||r.className=="Witch"||((r.className=="CTerrorPlayer"||r.className=="NextBotCombatCharacter")&&r.team&&*r.team==3);
+ bool player=(r.className=="CTerrorPlayer"&&!special)||r.className=="SurvivorBot";
+ bool vehicle=r.className=="CPropJeep"||r.className=="CPropVehicleChoreoGeneric"||r.className=="CPropVehicleDriveable"||r.className=="CFuncTrackTrain";
  bool physics=r.className=="CPhysicsProp"||r.className=="CPhysicsPropMultiplayer";
  bool dynamic=r.className=="CDynamicProp"||r.className=="CBreakableProp"||r.className=="CFuncTrackTrain";
  bool projectile=r.className.find("Projectile")!=std::string::npos||r.className=="CBaseGrenade";
  bool weapon=weaponClass(r);
  if(weapon&&r.owner&&*r.owner!=0xffffffffu)return false;
- switch(f){case Filter::Physics:return physics;case Filter::Dynamic:return dynamic;case Filter::Players:return player;case Filter::Projectiles:return projectile;case Filter::GroundWeapons:return weapon;default:return physics||dynamic||player||projectile||weapon;}
+ switch(f){case Filter::Physics:return physics;case Filter::Dynamic:return dynamic;case Filter::Players:return player;case Filter::Projectiles:return projectile;case Filter::GroundWeapons:return weapon;case Filter::CommonInfected:return common;case Filter::SpecialInfected:return special;case Filter::Vehicles:return vehicle;default:return physics||dynamic||player||projectile||weapon||common||special||vehicle;}
 }
 inline scene::Transform transform(Vec3 origin,Vec3 angles){
  constexpr float rad=.01745329252f;float sp=std::sin(angles.x*rad),cp=std::cos(angles.x*rad),sy=std::sin(angles.y*rad),cy=std::cos(angles.y*rad),sr=std::sin(angles.z*rad),cr=std::cos(angles.z*rad);

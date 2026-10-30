@@ -22,5 +22,27 @@ int main(){
  camera.worldToView={0,-1,0,0,0,0,1,0,1,0,0,0,0,0,0,1};camera.worldToClip={0,-1,0,0,0,0,1,0,1.0001f,0,0,-1.0001f,1,0,0,0};CameraPose eye;check(cameraPose(camera,eye));
  auto choices=follow::candidates(f,camera,eye,follow::Filter::Objects,1100);check(!choices.empty()&&choices.front().handle==0x9001);check(follow::candidates(f,camera,eye,follow::Filter::Players,1100).empty());check(follow::candidates(f,camera,eye,follow::Filter::Objects,1600).empty());
  f.records[0].networkOrigin=Vec3{-100,0,0};check(follow::candidates(f,camera,eye,follow::Filter::Physics,1100).empty());f.records.clear();check(!follow::resolve(f,req,7,1100).ready);
- std::cout<<"Passed: moving target, full-handle reuse, epoch/stale/delete/dormancy guards, parent-local composition/cycles/sockets, owned-weapon rejection and visible target selection\n";
+ // Newly selectable actor/vehicle classes must reach the actual visible-candidate path,
+ // not just pass a class-name predicate. Other categories must remain separate.
+ uint32_t serial=0xb001;
+ for(auto category:{follow::Filter::CommonInfected,follow::Filter::SpecialInfected,follow::Filter::Vehicles}){
+  std::vector<const char*> names;
+  if(category==follow::Filter::CommonInfected)names={"Infected"};
+  else if(category==follow::Filter::SpecialInfected)names={"Smoker","Boomer","Hunter","Spitter","Jockey","Charger","Tank","Witch"};
+  else names={"CPropJeep","CPropVehicleDriveable","CPropVehicleChoreoGeneric","CFuncTrackTrain"};
+  for(auto name:names){
+   auto target=object(serial++,{100,0,0},name);f.records={target};
+   for(auto filter:{category,follow::Filter::Objects}){auto c=follow::candidates(f,camera,eye,filter,1100);check(c.size()==1&&c[0].handle==target.handle);}
+   check(follow::candidates(f,camera,eye,follow::Filter::Players,1100).empty());
+   check(follow::resolve(f,{true,7,target.handle},7,1100).ready);
+   f.records[0].networkOrigin=Vec3{150,0,0};check(near(follow::anchor(follow::resolve(f,{true,7,target.handle},7,1100),settings).x,150));
+   f.records[0].dormant=true;check(follow::candidates(f,camera,eye,category,1100).empty());
+  }
+ }
+ auto human=object(serial++,{100,0,0},"CTerrorPlayer");human.team=3;
+ check(follow::classMatches(human,follow::Filter::SpecialInfected)&&!follow::classMatches(human,follow::Filter::Players));
+ human.team=2;check(!follow::classMatches(human,follow::Filter::SpecialInfected)&&follow::classMatches(human,follow::Filter::Players));
+ auto generic=object(serial++,{100,0,0},"NextBotCombatCharacter");check(!follow::classMatches(generic,follow::Filter::SpecialInfected));generic.team=3;check(follow::classMatches(generic,follow::Filter::SpecialInfected));
+ for(auto name:{"CWorld","MovieExplosion","CParticleSystem","CPropaneTank"})check(!follow::classMatches(object(serial++,{100,0,0},name),follow::Filter::Objects));
+ std::cout<<"Passed: moving target, full-handle reuse, epoch/stale/delete/dormancy guards, parent-local composition/cycles/sockets, owned-weapon rejection and visible player/infected/vehicle target selection\n";
 }
