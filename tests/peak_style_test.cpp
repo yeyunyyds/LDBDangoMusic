@@ -15,5 +15,11 @@ int main(){using namespace dango;
  auto outgoing=peak::retire(.2);check(std::abs(outgoing.alpha-.5f)<.0001&&outgoing.lift>0&&!outgoing.done&&peak::retire(.4).done);
  std::vector<float> mask(49,0);mask[24]=1;auto halo=peak::blur(mask,7,7,1);check(halo[24]>0&&halo[23]>0&&halo[24]<1);for(auto n:halo)check(std::isfinite(n)&&n>=0&&n<=1);
  CameraPose pose{{0,0,0},{0,0,1},{1,0,0},{0,1,0}};check(peak::position(pose,200,30,0,5).x<0&&peak::position(pose,200,30,1,5).x>0);check(std::abs(length(peak::keepDistance({0,0,20},pose,200))-120)<.01);
+ // Keep-away is persisted by callers: repeatedly approaching cannot pass
+ // through the old anchor or make it snap back when the camera retreats.
+ Vec3 retreating{0,0,200};CameraPose walk=pose;
+ for(int i=0;i<=250;++i){walk.eye.z=float(i);retreating=peak::keepDistance(retreating,walk,200);check(length(retreating-walk.eye)>=119.99f&&retreating.z>walk.eye.z);}
+ auto held=retreating;walk.eye.z-=50;retreating=peak::keepDistance(retreating,walk,200);check(length(retreating-held)<.001f);
+ walk.eye={0,0,0};check(std::abs(peak::keepDistance(walk.eye,walk,200).z-120)<.001f);check(peak::keepDistance({0,0,-1},walk,200).z>0);
  std::cout<<"Passed: Peak word-aligned pop, eight-Hz deterministic wiggle, CJK pair fallback, wrapping, 400ms lifecycle, cached blur, side placement/keep-away\n";
 }

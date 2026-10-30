@@ -1,0 +1,63 @@
+name: Publish release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to publish (for example v0.9.3)
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+      - name: Verify version tag
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          python3 - <<'PY'
+          import os, runpy, subprocess
+          version = runpy.run_path('scripts/package.py')['VERSION']
+          tag = os.environ['RELEASE_TAG']
+          if tag != 'v' + version:
+              raise SystemExit('Release tag does not match package version')
+          subprocess.run(['git', 'rev-parse', '--verify', 'refs/tags/' + tag], check=True)
+          PY
+      - name: Install Windows x86 compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++-mingw-w64-i686-posix
+      - name: Run regression tests
+        run: bash scripts/test.sh
+      - name: Build Windows x86 plugin
+        env:
+          DANGO_CXX: i686-w64-mingw32-g++-posix
+        run: bash scripts/build-mingw.sh
+      - name: Package minimal installer
+        run: python3 scripts/package.py
+      - name: Publish release and installer
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" --verify-tag --title "L4D2DangoMusic $RELEASE_TAG" --notes-file docs/releases/"$RELEASE_TAG".md --draft
+          fi
+          gh release upload "$RELEASE_TAG" build/packages/*.zip build/packages/*.sha256 --clobber
+          gh release edit "$RELEASE_TAG" --draft=false --latest

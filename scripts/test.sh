@@ -30,10 +30,20 @@ g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc tests/wal
 ./build/wall_scene_test
 g++ -std=c++17 -Wall -Wextra -Werror -Isrc tests/hud_menu_policy_test.cpp -o build/hud_menu_policy_test
 ./build/hud_menu_policy_test
+
+g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc tests/native_menu_test.cpp -o build/native_menu_test
+./build/native_menu_test
+
+g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc -Ivendor tests/menu_pages_test.cpp -o build/menu_pages_test
+./build/menu_pages_test
+
+python3 scripts/generate_menu_glyphs.py --check
+g++ -std=c++17 -O2 -Isrc -Ivendor -Ivendor/imgui tests/menu_font_test.cpp vendor/imgui/imgui.cpp vendor/imgui/imgui_draw.cpp vendor/imgui/imgui_tables.cpp vendor/imgui/imgui_widgets.cpp -o build/menu_font_test
+./build/menu_font_test
+
 g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc tests/scene_attachment_test.cpp -o build/scene_attachment_test
 ./build/scene_attachment_test
 g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc tests/source_entity_contract_test.cpp -o build/source_entity_contract_test
 ./build/source_entity_contract_test
-
 g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc tests/source_entity_binding_test.cpp -o build/source_entity_binding_test
 ./build/source_entity_binding_test

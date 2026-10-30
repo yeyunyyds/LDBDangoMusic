@@ -40,3 +40,14 @@ is a native approximation; see docs/peak-style.md for differences.
 appear only in migration instructions and preserved historical release packages.
 L4N controls, settings snapshots, preset migration and scene submission gating
 are native implementation additions. Prior third-party notices remain applicable.
+
+Native HUD menu adaptation:
+- Architecture, keyboard operation and appearance follow yeyunyyds/L4D2_Dxvk_32to64_Bridge,
+  codex/l4n-native-hud b7aa0beb3c490515da48712495853ac50a888dc6,
+  plugins/l4n/L4D2BridgePlugin.cpp (MIT, Copyright (c) 2026 yeyunyyds).
+  Its license is preserved in vendor/BRIDGE-LICENSE.MIT.
+- vendor/imgui contains Dear ImGui v1.91.9b, copied unchanged from the same
+  revision. Copyright (c) 2014-2025 Omar Cornut and Dear ImGui contributors,
+  MIT; see vendor/imgui/LICENSE.txt. Only the core and D3D9 backend are built.
+- The lyric plugin keeps its own ImGui context and uses its existing D3D9
+  Present/Reset chain. It does not call or require any Bridge control API.

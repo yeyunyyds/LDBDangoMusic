@@ -112,7 +112,7 @@
   "reuseVisibleAnchor": true,
   "lineWidthScale": 1,
   "fallbackReveal": false,
-  "wallBackdrop": true,
+  "wallBackdrop": false,
   "wallDebug": false,
   "wallEnabled": false,
   "wallAutomatic": true,

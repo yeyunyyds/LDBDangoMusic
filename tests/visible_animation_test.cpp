@@ -33,8 +33,35 @@ int main(){
  check(peak::revealFrame(gradual,untimed,last,1000,40,1,true,false,false,8,0,true).alpha==0);
  auto trFallback=peak::translationAnimation(untimed,u8"你好世界",5000);check(!trFallback.hasWordTiming);
  peak::VisibleAnimation trWhole;check(peak::revealFrame(trWhole,trFallback,3,1000,40,1,true,false,false,8,0).alpha==1);
- auto onset=untimed.starts[last];auto onsetFrame=peak::revealFrame(gradual,untimed,last,onset,41,1,true,false,false,8,0,true);check(onsetFrame.alpha>0&&onsetFrame.alpha<1);
- check(peak::revealFrame(gradual,untimed,last,onset+250,41.25,1,true,false,false,8,0,true).alpha==1);
+ // First actual draw establishes estimated timing, so a 500ms offset or
+ // late API refresh cannot collapse every short/unbroken line into one frame.
+ auto startFrame=peak::revealFrame(gradual,untimed,0,1500,40,1,false,false,false,8,0,true);check(startFrame.alpha>0&&startFrame.alpha<1);
+ auto middle=peak::revealFrame(gradual,untimed,last,2500,40.5,1,false,false,false,8,0,true);check(middle.alpha==0);
+ auto onsetFrame=peak::revealFrame(gradual,untimed,last,4500,43.25,1,false,false,false,8,0,true);check(onsetFrame.alpha>0&&onsetFrame.alpha<1);
+ check(peak::revealFrame(gradual,untimed,last,4700,43.5,1,false,false,false,8,0,true).alpha==1);
+ peak::Animation shortLine(Line{1000,u8"你好","",{}},6000);peak::VisibleAnimation shortMotion;
+ check(peak::revealFrame(shortMotion,shortLine,0,1500,50,1,true,false,false,8,0,true).alpha>0);
+ check(peak::revealFrame(shortMotion,shortLine,1,1500,50,1,true,false,false,8,0,true).alpha==0);
+ check(peak::revealFrame(shortMotion,shortLine,1,1600,50.1,1,false,false,false,8,0,true).alpha==0); // later draws do not force an unrevealed glyph opaque
+ auto oldVisible=peak::revealFrame(shortMotion,shortLine,0,1600,50.3,1,false,false,false,8,0,true);check(oldVisible.alpha==1);
+ // A synthetic line-wide word token is treated as lacking fine timing.
+ peak::Animation synthetic(Line{1000,"Hello","",{{1000,4000,"Hello"}}},5000);check(!synthetic.hasWordTiming);peak::VisibleAnimation syntheticMotion;
+ check(peak::revealFrame(syntheticMotion,synthetic,4,1500,60,1,false,false,false,8,0,true).alpha==0);
+ // A genuinely delayed single token still keeps its real onset.
+ peak::Animation delayed(Line{1000,"Hello","",{{2000,1000,"Hello"}}},4000);check(delayed.hasWordTiming);
+ check(peak::revealFrame(syntheticMotion,synthetic,0,1500,60,1,false,false,false,8,0,true).alpha>0);
+ // Estimated scheduling follows song progress (including playback rate),
+ // while the glyph entrance uses render time. Translation shares the span.
+ peak::Animation rateLine(Line{1000,"UnbrokenWord","",{}},5000);auto rateTranslation=peak::translationAnimation(rateLine,u8"中文翻译",5000);
+ peak::VisibleAnimation rateMotion,rateTrMotion;
+ peak::revealFrame(rateMotion,rateLine,0,1000,70,1,false,false,false,8,0,true);
+ peak::revealFrame(rateTrMotion,rateTranslation,0,1000,70,1,false,false,false,8,0,true);
+ check(peak::revealFrame(rateMotion,rateLine,rateLine.glyphs.size()-1,4199,71.59,1,false,false,false,8,0,true).alpha==0);
+ check(peak::revealFrame(rateMotion,rateLine,rateLine.glyphs.size()-1,4200,71.6,1,false,false,false,8,0,true).alpha>0);
+ check(peak::revealFrame(rateTrMotion,rateTranslation,rateTranslation.glyphs.size()-1,4200,71.6,1,false,false,false,8,0,true).alpha>0);
+ peak::Animation one(Line{0,u8"啊","",{}},3000);peak::VisibleAnimation oneMotion;
+ auto oneFrame=peak::revealFrame(oneMotion,one,0,500,80,1,false,false,false,8,0,true);check(oneFrame.alpha>0&&oneFrame.alpha<1);
+ peak::Animation oneSynthetic(Line{0,u8"啊","",{{0,1000,u8"啊"}}},3000);peak::VisibleAnimation oneSyntheticMotion;auto oneSyntheticFrame=peak::revealFrame(oneSyntheticMotion,oneSynthetic,0,500,90,1,false,false,false,8,0,true);check(oneSyntheticFrame.alpha>0&&oneSyntheticFrame.alpha<1);
  auto wrapped=peak::layout(animation.glyphs,[](const std::string&){return 10.f;},10,20);
  auto longer=peak::layout(animation.glyphs,[](const std::string&){return 10.f;},20,20);
  check(wrapped.rows.size()==2&&longer.rows.size()==1&&longer.glyphs[0].width==wrapped.glyphs[0].width);
