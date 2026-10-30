@@ -25,7 +25,8 @@ int main(){
  source_entities::list=reinterpret_cast<void*>(uintptr_t(listAddress));source_entities::bound=true;source_entities::wasEnabled=true;source_entities::enabled=true;source_entities::epoch=7;source_entities::nextCapture=0;
  GameCameraFrame camera;camera.active=1;camera.epoch=7;camera.tick=1000;source_entities::onFrame(camera);auto frame=std::atomic_load(&source_entities::snapshot);
  check(frame->records.size()==1);const auto& r=frame->records[0];check(r.className=="CMockEntity"&&r.classId==42&&r.handle==0x9001&&r.networkOrigin&&r.networkOrigin->y==20&&r.team==2&&r.activeWeapon==0x50005);
- auto json=source_entities::jsonFrame(*frame);check(json["pose_space"]=="network_raw"&&json["objects"][0]["origin"][2]==30);
+ auto json=source_entities::jsonFrame(*frame);check(!json["model_lookup_available"].get<bool>()&&json["binding_checks"].is_array());
+ check(json["pose_space"]=="network_raw"&&json["objects"][0]["origin"][2]==30);
  entry.entity=0;std::memcpy(storage.data()+sizeof(wire::Entry),&entry,sizeof(entry));camera.tick=1200;source_entities::onFrame(camera);check(std::atomic_load(&source_entities::snapshot)->records.empty());
  source_entities::list=reinterpret_cast<void*>(32);camera.tick=1400;source_entities::onFrame(camera);check(source_entities::faulted); // Read failure must not crash or call the address.
  source_entities::enabled=false;camera.tick=1600;source_entities::onFrame(camera);check(!source_entities::bound&&std::atomic_load(&source_entities::snapshot)->records.empty());

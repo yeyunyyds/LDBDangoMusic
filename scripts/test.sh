@@ -34,3 +34,6 @@ g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc tests/sce
 ./build/scene_attachment_test
 g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc tests/source_entity_contract_test.cpp -o build/source_entity_contract_test
 ./build/source_entity_contract_test
+
+g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc tests/source_entity_binding_test.cpp -o build/source_entity_binding_test
+./build/source_entity_binding_test

@@ -20,6 +20,8 @@ def verify(client, engine):
         return [int(n,16) for n in re.findall(r'0x([0-9a-fA-F]+)', data)]
     c, e = images['client'], images['engine']
     assert c.read(0xb8cf0,6) == b'\xb8'+(c.base+0x74a574).to_bytes(4,'little')+b'\xc3'
+    assert e.read(0x1b0950,6) == b'\xb8'+(e.base+0x432248).to_bytes(4,'little')+b'\xc3'
+    assert e.pointer(0x432248) == e.base+0x3902e4
     # RTTI COL proves this interface is the +0x10014 subobject, not the base.
     col = c.pointer(0x564b60-4)-c.base
     assert int.from_bytes(c.read(col+4,4),'little') == 0x10014
