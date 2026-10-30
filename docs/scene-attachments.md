@@ -1,12 +1,12 @@
 # 场景对象与歌词挂载接口（实验）
 
-分支：`experiment/entity-attachments`。
+分支：`experiment/entity-attachments`。**已归档，不计划合入正式版。** 最终实装范围与验证结果见 [实验归档说明](entity-experiment-archive.md)。
 
 可以为客户端可用的实体和场景物体建立统一的歌词挂载接口，但不能承诺读取“服务器世界的所有内容”。客户端只拥有当前已加载、已同步的对象；休眠实体的坐标可能过时，未同步的服务器实体不可直接枚举。静态地图、静态模型、动态实体、骨骼、第一人称视图模型也不是同一类数据。
 
-本分支已经实现**不依赖游戏指针的 C++ 接口原型和模拟测试**，并对用户提供的游戏 DLL 做了静态接口调查。**现已接入默认关闭的只读网络实体诊断采集代码，但尚未实机验收；骨骼/渲染姿态采集与歌词挂载绘制仍未接通。** 试用步骤见 [诊断指南](entity-inventory-test.md)。 当前 `main` 和 `zip` 不受本实验影响。
+本分支保留两层成果：`scene_attachment.hpp` 是不依赖游戏指针的统一场景接口原型与模拟测试；`source_entities.hpp` / `entity_follow.hpp` 是已接入的网络实体采集与单目标跟随 Demo。用户已确认部分玩家模型、掉落武器和物品能够跟随。build 5 的感染者/车辆候选及 build 6 的武器补齐已完成离线测试和交叉编译，尚无对应实机验收反馈。骨骼、渲染姿态、静态道具与跨 DLL 公共接口未接入。试用方法保留于 [诊断指南](entity-inventory-test.md)。
 
-## 挂载能力与取数路径
+## 统一场景接口的设计范围（不代表已全部实装）
 
 | 目标 | 数据路径 | 挂载方式与限制 |
 | --- | --- | --- |
@@ -35,7 +35,7 @@
 - 客户端数据包含 `DT_PipeBombProjectile`、`DT_MolotovProjectile`、`DT_VomitJarProjectile`、`DT_BasePlayer`、`DT_BaseViewModel` 等表名。
 - 可找到 `m_hActiveWeapon`、`m_hViewModel`、`m_hOwnerEntity`、`m_vecOrigin`、`m_angRotation` 等属性名。
 
-这些证明对应接口/属性入口存在，**不证明当前游戏构建的所有虚表槽和字段偏移已经验证**。新的 [entity-inventory-abi.json](research/entity-inventory-abi.json) 已进一步核对实体列表子对象、虚表、条目大小、12 位索引/20 位序列号及模型查询代码；运行时验证仍待实机。部分接口对象在运行时初始化，文件中不能直接读到最终虚表。报告的 `runtime_dispatch_verified` 为 `false`。
+这些证明对应接口/属性入口存在，**不证明当前游戏构建的所有虚表槽和字段偏移已经验证**。新的 [entity-inventory-abi.json](research/entity-inventory-abi.json) 已进一步核对实体列表子对象、虚表、条目大小、12 位索引/20 位序列号及模型查询代码；网络实体采集已有实机数据验证，具体范围见归档说明；静态报告本身仅记录静态证据。部分接口对象在运行时初始化，文件中不能直接读到最终虚表。报告的 `runtime_dispatch_verified` 为 `false`。
 
 公开 hl2sdk 的 l4d2 分支目前声明 `VClient015`，而用户实际构建为 `VClient016`；不能照抄 SDK 的客户端虚表下标。骨骼、附件和静态道具接口也要分别核对实际 ABI，然后才调用。
 
@@ -94,7 +94,7 @@ if (windowAnchor) {
 
 同一辆车可分别创建车窗、车厢内部和外壁的锚点。已知车型的预设也可直接构造 `Anchor.local`，不依赖车窗碰撞命中。文字是否朝向相机、是否继承物体旋转、何时选择目标，属于歌词预设/绘制层策略，而不是强制写死在采集层。
 
-## 接入顺序
+## 原规划接入顺序（已停止推进）
 
 1. **只读场景诊断**：核对实体列表与网络类/RecvTable ABI，在已有游戏线程回调中枚举完整句柄、模型、渲染变换、休眠状态和关系；导出诊断数据验证目标出现/消失。
 2. **实体原点/局部平面**：先验证 gnome 和投掷物，处理拾取、掉落、销毁、序列号复用和切图。

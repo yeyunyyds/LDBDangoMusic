@@ -1,6 +1,6 @@
 # L4D2DangoMusic
 
-> 此分支为基于 v0.9.3 的实体接口实验，已合入原生 HUD、菜单归类、保存状态和缺字修正。手动跟随 Demo 位于“更多设置 → 实验：实体跟随测试”，默认关闭，可锁定网络实体显示示例或当前歌词；骨骼与手持附件仍未接入。稳定版仍见 [v0.9.3 Release](https://github.com/yeyunyyds/LDBDangoMusic/releases/tag/v0.9.3)。
+> **实验已归档，停止推进，不计划合入正式版。** 此分支保留实体采集、手动跟随 Demo、源码、测试及最终 build 6 安装包。实机验证范围、已知限制与内部调用方式见 [实验归档说明](docs/entity-experiment-archive.md)。正式使用请下载 [v0.9.3 Release](https://github.com/yeyunyyds/LDBDangoMusic/releases/tag/v0.9.3)。
 
 为《求生之路 2》（Left 4 Dead 2）提供音乐歌词显示的 L4N 插件。通过兼容 LX / BLF 的本地音乐 API 获取播放进度和歌词，在游戏中呈现带逐字动画的歌词，并支持世界空间定位、歌名与作者显示以及游戏内调节。
 
@@ -47,7 +47,7 @@ bin/neko/plugins/L4D2DangoMusic.dll
 bin/neko/plugins/L4D2DangoMusic/config.json
 ```
 
-源码和构建脚本维护在 [`main` 分支](https://github.com/yeyunyyds/LDBDangoMusic/tree/main)，[`zip` 分支](https://github.com/yeyunyyds/LDBDangoMusic/tree/zip) 仅提供安装压缩包。
+正式版源码和构建脚本维护在 [`main` 分支](https://github.com/yeyunyyds/LDBDangoMusic/tree/main)，[`zip` 分支](https://github.com/yeyunyyds/LDBDangoMusic/tree/zip) 仅提供安装压缩包。
 
 从源码构建的用户仍可使用 `scripts/install.ps1 -GameRoot "游戏根目录"` 安装；运行目录为源码根目录。安装包用户直接复制 `bin` 即可。
 
