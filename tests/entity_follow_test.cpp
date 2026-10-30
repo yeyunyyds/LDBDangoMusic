@@ -39,10 +39,39 @@ int main(){
    f.records[0].dormant=true;check(follow::candidates(f,camera,eye,category,1100).empty());
   }
  }
+ // All concrete pickup classes seen in this DLL, including previously omitted
+ // basic guns, snipers and map spawn entities, must be selectable when unowned.
+ for(auto name:{"CPistol","CMagnumPistol","CSubMachinegun","CSMG_Silenced","CSMG_MP5",
+  "CPumpShotgun","CShotgun_Chrome","CAutoShotgun","CShotgun_SPAS","CAssaultRifle",
+  "CRifle_Desert","CRifle_AK47","CRifle_SG552","CRifle_M60","CSniperRifle",
+  "CSniper_Military","CSniper_AWP","CSniper_Scout","CGrenadeLauncher","CChainsaw","CTerrorMeleeWeapon",
+  "CFirstAidKit","CPainPills","CItem_Adrenaline","CItemDefibrillator","CItemUpgradePackExplosive",
+  "CItemUpgradePackIncendiary","CItem_VomitJar","CPipeBomb","CMolotov","CGasCan","CColaBottles",
+  "CGnome","COxygenTank","CPropaneTank","CFireworkCrate","CWeaponSpawn","CWeaponAmmoSpawn",
+  "CWeaponScavengeItemSpawn","CBaseUpgradeItem"}){
+  auto gun=object(serial++,{100,0,0},name);gun.owner=0xffffffffu;gun.weaponOwner=0xffffffffu;
+  f.records={gun};for(auto filter:{follow::Filter::GroundWeapons,follow::Filter::Objects}){
+   auto targets=follow::candidates(f,camera,eye,filter,1100);check(targets.size()==1&&targets[0].handle==gun.handle);
+  }
+  inventory::FollowRequest lock{true,7,gun.handle};check(follow::resolve(f,lock,7,1100).ready);
+  // Picking up a locked target must hide it as well as exclude new selections.
+  for(bool combatOwner:{false,true}){f.records={gun};if(combatOwner)f.records[0].weaponOwner=0x9001;else f.records[0].owner=0x9001;
+   check(follow::candidates(f,camera,eye,follow::Filter::GroundWeapons,1100).empty());
+   check(!follow::resolve(f,lock,7,1100).ready);
+   f.records[0].parent=0x9001;f.records.push_back(object(0x9001,{200,0,0}));check(!follow::resolve(f,lock,7,1100).ready);
+  }
+ }
+ for(auto name:{"CGrenadeLauncher_Projectile","CMolotovProjectile","CPipeBombProjectile","CVomitJarProjectile"}){
+  auto shot=object(serial++,{100,0,0},name);shot.owner=0x9001;f.records={shot};
+  check(follow::candidates(f,camera,eye,follow::Filter::GroundWeapons,1100).empty());
+  check(follow::candidates(f,camera,eye,follow::Filter::Projectiles,1100).size()==1);
+ }
+ for(auto name:{"CTerrorViewModel","CEnvWeaponFire","CWeaponCubemap","CWeaponCycler","CPropMountedGun","CRifle_Unknown"})
+  check(!follow::classMatches(object(serial++,{100,0,0},name),follow::Filter::GroundWeapons));
  auto human=object(serial++,{100,0,0},"CTerrorPlayer");human.team=3;
  check(follow::classMatches(human,follow::Filter::SpecialInfected)&&!follow::classMatches(human,follow::Filter::Players));
  human.team=2;check(!follow::classMatches(human,follow::Filter::SpecialInfected)&&follow::classMatches(human,follow::Filter::Players));
  auto generic=object(serial++,{100,0,0},"NextBotCombatCharacter");check(!follow::classMatches(generic,follow::Filter::SpecialInfected));generic.team=3;check(follow::classMatches(generic,follow::Filter::SpecialInfected));
- for(auto name:{"CWorld","MovieExplosion","CParticleSystem","CPropaneTank"})check(!follow::classMatches(object(serial++,{100,0,0},name),follow::Filter::Objects));
- std::cout<<"Passed: moving target, full-handle reuse, epoch/stale/delete/dormancy guards, parent-local composition/cycles/sockets, owned-weapon rejection and visible player/infected/vehicle target selection\n";
+ for(auto name:{"CWorld","MovieExplosion","CParticleSystem"})check(!follow::classMatches(object(serial++,{100,0,0},name),follow::Filter::Objects));
+ std::cout<<"Passed: moving target, full-handle reuse, epoch/stale/delete/dormancy guards, parent-local composition/cycles/sockets, owned-weapon rejection and visible weapon/item/player/infected/vehicle target selection\n";
 }
