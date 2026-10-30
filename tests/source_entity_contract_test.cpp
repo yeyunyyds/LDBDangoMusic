@@ -1,4 +1,5 @@
 #include "source_entity_contract.hpp"
+#include "source_entity_profile.hpp"
 #include <cstring>
 #include <iostream>
 #include <stdexcept>
@@ -12,7 +13,7 @@ struct Memory {
  uint32_t props(const std::vector<wire::Prop>& p){next=(next+3)&~3u;auto at=next;next+=uint32_t(p.size()*sizeof(wire::Prop));std::memcpy(data.data()+at,p.data(),p.size()*sizeof(wire::Prop));return at;}
 };
 wire::Prop prop(Memory& m,const char* name,int type,int offset){wire::Prop p;p.name=m.str(name);p.type=type;p.offset=offset;return p;}
-int main(){Memory m;
+int main(){Memory m;check(wire::className("CBaseEntity")&&wire::className("MovieExplosion")&&wire::className("NextBotCombatCharacter")&&!wire::className("")&&!wire::className("9bad")&&!wire::className("not a class"));check(source_entities::profile::ClassSlot==1&&source_entities::profile::DormantSlot==7&&source_entities::profile::DataBaseSlot==10);
  check(wire::handle(17,0xabc)==std::optional<uint32_t>(0xabc011));check(!wire::handle(4096,1)&&!wire::handle(4095,0xfffff));check(wire::handle(3,4)!=wire::handle(3,5));
  auto origin=prop(m,"m_vecOrigin",2,32),model=prop(m,"m_nModelIndex",0,64),owner=prop(m,"m_hOwnerEntity",0,80);
  wire::Table base;base.count=3;base.props=m.props({origin,model,owner});base.name=m.str("DT_BaseEntity");auto baseAddress=m.add(base);
@@ -25,6 +26,8 @@ int main(){Memory m;
  std::memcpy(m.data.data()+code,"\x8d\x41\xf8\xc3",4);check(wire::addressGetter(m,code,1000)==992);
  std::memcpy(m.data.data()+code,"\x8d\x81\x00\x01\x00\x00\xc3",7);check(wire::addressGetter(m,code,1000)==1256);
  std::memcpy(m.data.data()+code,"\x8a\x41\x04\xc3",4);m.data[1004]=1;check(wire::byteGetter(m,code,1000)==true);m.data[1004]=0;check(wire::byteGetter(m,code,1000)==false);m.data[1004]=2;check(!wire::byteGetter(m,code,1000));
+ const uint8_t conditional[]={0x83,0x79,0x50,0xff,0x74,0x07,0x8a,0x81,0xd5,0,0,0,0xc3,0x32,0xc0,0xc3};std::memcpy(m.data.data()+code,conditional,sizeof(conditional));int32_t registered=17;std::memcpy(m.data.data()+1080,&registered,4);m.data[1213]=1;check(wire::byteGetter(m,code,1000)==true);m.data[1213]=0;check(wire::byteGetter(m,code,1000)==false);m.data[1213]=2;check(!wire::byteGetter(m,code,1000));registered=-1;std::memcpy(m.data.data()+1080,&registered,4);check(wire::byteGetter(m,code,1000)==false);m.data[code+15]=0xcc;check(!wire::byteGetter(m,code,1000));
+ std::memcpy(m.data.data()+code,"\x32\xc0\xc3",3);check(wire::byteGetter(m,code,0)==false);std::memcpy(m.data.data()+code,"\xb0\x01\xc3",3);check(wire::byteGetter(m,code,0)==true);
  std::memset(m.data.data()+code,0xcc,8);check(!wire::addressGetter(m,code,1000));check(wire::text(m,base.name)=="DT_BaseEntity");
  std::cout<<"Passed: full handle serials, bounded RecvTable base traversal, offsets/types, cycle/read rejection and no-dispatch getter decoding\n";
 }

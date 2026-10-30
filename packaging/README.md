@@ -1,8 +1,8 @@
-# L4D2DangoMusic @VERSION@ · 实体诊断实验 build 2 · 原生 HUD
+# L4D2DangoMusic @VERSION@ · 实体诊断实验 build 3 · 原生 HUD
 
 此包来自 `experiment/entity-attachments`，用于只读实体采集验证，尚未完成实机验收，不是稳定版新增挂载功能。安装后进入 L4N → L4D2DangoMusic → 更多设置 → 实验：实体接口只读诊断，开启定时采集，测试 20～30 秒后关闭。结果位于 `bin/neko/plugins/L4D2DangoMusic/entities.jsonl`，主日志为 `bin/neko/plugins/L4D2DangoMusic/L4D2DangoMusic.log`。主日志和实体 JSONL 位于同一目录，便于一起收集；旧目录日志不会被删除或继续追加。网络坐标可能相对父实体，不等于世界坐标，也不是骨骼或插值后的渲染姿态；本包不会自动跟随队友或投掷物绘制歌词。
 
-本次增加逐项 `binding_checks` 与 `model_lookup_available`，并将非调用的列表虚函数钩子、可选模型查询与原始实体枚举解耦；对象/布局不符时仍停止采集。JSONL 新帧标记 `diagnostic_build: 2`。本实验已合入稳定版 v0.9.3 的原生 HUD、单页主菜单、保存状态提示和缺字修正；实体解析逻辑保持 build 2，需要恢复稳定版时退出游戏再换回 DLL。
+本次按实机日志及原 DLL 的 257 份网络接口虚表，修正类名、休眠、数据基址槽位为 1/7/10；接受合法的非 C 前缀类名。保留逐项 `binding_checks` 与 `model_lookup_available`，并将非调用的列表虚函数钩子、可选模型查询与原始实体枚举解耦；对象/布局不符时仍停止采集。JSONL 新帧标记 `diagnostic_build: 3`。本实验已合入稳定版 v0.9.3 的原生 HUD、单页主菜单、保存状态提示和缺字修正；实体解析逻辑保持 build 3，需要恢复稳定版时退出游戏再换回 DLL。
 
 《求生之路 2》原生 L4N 歌词插件。支持 LX / BLF 本地 API、翻译、逐字动画、固定世界歌词和场景挂画歌词。
 

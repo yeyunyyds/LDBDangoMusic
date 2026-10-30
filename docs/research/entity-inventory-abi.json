@@ -31,6 +31,54 @@
       "bytes": "558bec8b450885c07509"
     }
   },
+  "networkable_slots": {
+    "client_class": 1,
+    "dormant": 7,
+    "data_base": 10
+  },
+  "network_tables_verified": 257,
+  "dormancy_patterns": {
+    "index_guarded_boolean": 256,
+    "constant_false": 1
+  },
+  "runtime_hint_evidence": [
+    {
+      "previous_class_hint_rva": "0x4cc20",
+      "verified_tables": 128,
+      "sample": {
+        "table_rva": "0x53f134",
+        "class_getter_rva": "0x1e830",
+        "class_name": "CBaseParticleEntity"
+      }
+    },
+    {
+      "previous_class_hint_rva": "0x226ae0",
+      "verified_tables": 10,
+      "sample": {
+        "table_rva": "0x59f668",
+        "class_getter_rva": "0x222110",
+        "class_name": "CCSPlayer"
+      }
+    },
+    {
+      "previous_class_hint_rva": "0x2e5a0",
+      "verified_tables": 59,
+      "sample": {
+        "table_rva": "0x53eb20",
+        "class_getter_rva": "0x1dd90",
+        "class_name": "CBaseGrenade"
+      }
+    },
+    {
+      "previous_class_hint_rva": "0x41690",
+      "verified_tables": 60,
+      "sample": {
+        "table_rva": "0x53dfc0",
+        "class_getter_rva": "0x15900",
+        "class_name": "CBaseCombatWeapon"
+      }
+    }
+  ],
   "notes": [
     "No entity virtuals are dispatched: tiny class/data-base/dormancy getters are decoded or reported unknown.",
     "RecvTable/RecvProp interpretation is bounded and shape-checked at runtime; offsets are network properties, not render poses.",

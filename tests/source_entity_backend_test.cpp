@@ -13,18 +13,19 @@ uint32_t ptr(const void* p){return uint32_t(reinterpret_cast<uintptr_t>(p));}
 struct FakeEntity {uint32_t prefix[2]{};void** networkTable=nullptr;Vec3 origin{10,20,30};int team=2;uint32_t owner=0xffffffff,weapon=0x50005;};
 int main(){
  static_assert(sizeof(void*)==4,"Windows x86 only");source_camera::clientModule=GetModuleHandleW(nullptr);
- static void* netMethods[12]{};netMethods[2]=reinterpret_cast<void*>(&classGetter);netMethods[11]=reinterpret_cast<void*>(&baseGetter);
+ // Match the independently verified game slots; 2 and 11 are deliberately empty.
+ static void* netMethods[12]{};netMethods[1]=reinterpret_cast<void*>(&classGetter);netMethods[10]=reinterpret_cast<void*>(&baseGetter);
  FakeEntity entity;entity.networkTable=netMethods;
  wire::Prop props[4]{};const char* names[]={"m_vecOrigin","m_iTeamNum","m_hOwnerEntity","m_hActiveWeapon"};const int offsets[]={offsetof(FakeEntity,origin),offsetof(FakeEntity,team),offsetof(FakeEntity,owner),offsetof(FakeEntity,weapon)};
  for(int i=0;i<4;++i){props[i].name=ptr(names[i]);props[i].type=i?0:2;props[i].offset=offsets[i];}
- wire::Table recv;recv.props=ptr(props);recv.count=4;recv.name=ptr("DT_MockEntity");mockClass.name=ptr("CMockEntity");mockClass.table=ptr(&recv);mockClass.id=42;
+ wire::Table recv;recv.props=ptr(props);recv.count=4;recv.name=ptr("DT_MockEntity");mockClass.name=ptr("MovieExplosion");mockClass.table=ptr(&recv);mockClass.id=42;
  // The list layout is the real producer's profiled layout. Binding is skipped
  // only in this mock; no actual game/model-info methods are invoked.
  std::vector<uint8_t> storage(0x15000);auto listAddress=ptr(storage.data()+0x10010);int highest=1;std::memcpy(reinterpret_cast<void*>(uintptr_t(listAddress+0x24)),&highest,4);
  wire::Entry entry;entry.entity=ptr(&entity);entry.serial=9;std::memcpy(storage.data()+sizeof(wire::Entry),&entry,sizeof(entry));auto net=ptr(&entity.networkTable);std::memcpy(reinterpret_cast<void*>(uintptr_t(listAddress+0x28+8)),&net,4);
  source_entities::list=reinterpret_cast<void*>(uintptr_t(listAddress));source_entities::bound=true;source_entities::wasEnabled=true;source_entities::enabled=true;source_entities::epoch=7;source_entities::nextCapture=0;
  GameCameraFrame camera;camera.active=1;camera.epoch=7;camera.tick=1000;source_entities::onFrame(camera);auto frame=std::atomic_load(&source_entities::snapshot);
- check(frame->records.size()==1);const auto& r=frame->records[0];check(r.className=="CMockEntity"&&r.classId==42&&r.handle==0x9001&&r.networkOrigin&&r.networkOrigin->y==20&&r.team==2&&r.activeWeapon==0x50005);
+ check(frame->records.size()==1);const auto& r=frame->records[0];check(r.className=="MovieExplosion"&&r.classId==42&&r.handle==0x9001&&r.networkOrigin&&r.networkOrigin->y==20&&r.team==2&&r.activeWeapon==0x50005);
  auto json=source_entities::jsonFrame(*frame);check(!json["model_lookup_available"].get<bool>()&&json["binding_checks"].is_array());
  check(json["pose_space"]=="network_raw"&&json["objects"][0]["origin"][2]==30);
  entry.entity=0;std::memcpy(storage.data()+sizeof(wire::Entry),&entry,sizeof(entry));camera.tick=1200;source_entities::onFrame(camera);check(std::atomic_load(&source_entities::snapshot)->records.empty());

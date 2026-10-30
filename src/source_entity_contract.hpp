@@ -14,6 +14,12 @@ struct Prop {uint32_t name=0;int32_t type=0,flags=0,stringSize=0;uint8_t inside=
 static_assert(sizeof(Entry)==16&&sizeof(ClientClass)==24&&sizeof(Table)==20&&sizeof(Prop)==60,"x86 diagnostic wire layouts");
 struct Field {uint32_t offset=0;int32_t type=0;};
 using Fields=std::map<std::string,Field>;
+inline bool className(const std::string& name){
+ if(name.empty()||name.size()>127)return false;
+ auto letter=[](unsigned char c){return (c>='A'&&c<='Z')||(c>='a'&&c<='z')||c=='_';};
+ if(!letter(static_cast<unsigned char>(name[0])))return false;
+ for(unsigned char c:name)if(!letter(c)&&!(c>='0'&&c<='9'))return false;return true;
+}
 template<class Reader,class T> bool load(Reader& r,uint32_t address,T& out){return address&&uint64_t(address)+sizeof(T)<=0x100000000ull&&r.read(address,&out,sizeof(T));}
 template<class Reader> std::string text(Reader& r,uint32_t address,size_t limit=128){
  std::string result;if(!address)return result;for(size_t i=0;i<limit;){char bytes[16];size_t n=std::min(sizeof(bytes),limit-i);if(uint64_t(address)+i+n>0x100000000ull)return {};
@@ -47,8 +53,17 @@ template<class Reader> std::optional<uint32_t> addressGetter(Reader& r,uint32_t 
 }
 template<class Reader> std::optional<bool> byteGetter(Reader& r,uint32_t code,uint32_t self){
  uint8_t b[8];if(!r.read(code,b,sizeof(b)))return {};int64_t address=0;
+ if(b[0]==0x32&&b[1]==0xc0&&b[2]==0xc3)return false;
+ if(b[0]==0xb0&&b[1]<=1&&b[2]==0xc3)return b[1]!=0;
  if(b[0]==0x8a&&b[1]==0x41&&b[3]==0xc3)address=int64_t(self)+int8_t(b[2]);
- else if(b[0]==0x8a&&b[1]==0x81&&b[6]==0xc3){int32_t offset;std::memcpy(&offset,b+2,4);address=int64_t(self)+offset;}else return {};
+ else if(b[0]==0x8a&&b[1]==0x81&&b[6]==0xc3){int32_t offset;std::memcpy(&offset,b+2,4);address=int64_t(self)+offset;}
+ else if(b[0]==0x83&&b[1]==0x79&&b[3]==0xff&&b[4]==0x74&&b[5]==0x07&&b[6]==0x8a&&b[7]==0x81){
+ // Verified IsDormant: an unregistered index (-1) returns false; otherwise
+ // return the object's boolean field. Decode reads only; never call the getter.
+ uint8_t codeBytes[16];if(!r.read(code,codeBytes,sizeof(codeBytes))||codeBytes[12]!=0xc3||codeBytes[13]!=0x32||codeBytes[14]!=0xc0||codeBytes[15]!=0xc3)return {};
+ auto indexAddress=int64_t(self)+int8_t(b[2]);if(indexAddress<=0||indexAddress>0xffffffffll)return {};int32_t index;if(!load(r,uint32_t(indexAddress),index))return {};if(index==-1)return false;
+ int32_t offset;std::memcpy(&offset,codeBytes+8,4);address=int64_t(self)+offset;
+ }else return {};
  if(address<=0||address>0xffffffffll)return {};uint8_t value;if(!load(r,uint32_t(address),value)||value>1)return {};return value!=0;
 }
 }
