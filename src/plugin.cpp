@@ -165,7 +165,7 @@ void peakFrame(IDirect3DDevice9* dev,const State& state,int at,int64_t song,bool
  for(size_t i=0;i<peakEntries.size();){auto& entry=*peakEntries[i];ExitFrame life;if(entry.retired>=0)life=exitFrame((clock-entry.retired)*1000,cfg.lingerMs,cfg.transition);
  if(life.done){peakEntries.erase(peakEntries.begin()+i);continue;}++i;
  const auto& position=cfg.layout.lyrics[entry.slot];Placement place=screenComponent(position,width,height,cfg.size);
- if(world){if(entry.retired<0&&needsReanchor(clock,entry.lastPlaced,cfg.reanchorMs)){componentAnchor(camera,pose,position,entry.anchor);anchors.slots.remember(entry.slot,entry.anchor);anchors.current=entry.anchor;entry.lastPlaced=clock;}
+ if(world){if(entry.retired<0&&refreshWorldComponentAnchor(camera,pose,position,entry.anchor,cfg.reuseVisibleAnchor,cfg.reuseDistanceFactor,clock,entry.lastPlaced,cfg.reanchorMs)){anchors.slots.remember(entry.slot,entry.anchor);anchors.current=entry.anchor;}
  if(cfg.keepAway){entry.anchor=peak::keepDistance(entry.anchor,pose,position.distance);if(entry.retired<0){anchors.slots.remember(entry.slot,entry.anchor);anchors.current=entry.anchor;}}if(!worldComponent(camera,entry.anchor,position,width,height,cfg.worldHeight,cfg.size,place))continue;}
  float scale=place.scale,center=place.x,top=place.y-entry.layout.height*scale*.5f;
  top-=life.lift*(world?20.f*scale*cfg.size/cfg.worldHeight:height*.025f);

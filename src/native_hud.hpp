@@ -27,7 +27,7 @@ class NativeHud {
  std::atomic<bool> opened{false},restart{false},f10{false};
  ImGuiContext* context=nullptr;ImVector<ImWchar> fontRanges;IDirect3DDevice9* device=nullptr;HWND window=nullptr;bool backend=false,subclass=false,hotkeyHeld=false;
  KeyGate gate;MenuStack stack;enum class Page {Settings,Appearance,Position};std::atomic<Page> page{Page::Settings};
- unsigned preset=0,selected=0,step=8;float opacity=.48f,fontPixels=22,x=8,y=14;std::array<bool,4> arrows{};uint64_t retryAfter=0;bool submitted=false,fontReady=false;
+ unsigned preset=0,selected=0,step=8;float opacity=.48f,fontPixels=22,x=8,y=14;bool centerY=true;std::array<bool,4> arrows{};uint64_t retryAfter=0;bool submitted=false,fontReady=false;
  ImVec4 background{.015f,.018f,.020f,1};
  struct ContextScope {ImGuiContext* previous;explicit ContextScope(ImGuiContext* c):previous(ImGui::GetCurrentContext()){ImGui::SetCurrentContext(c);}~ContextScope(){ImGui::SetCurrentContext(previous);}};
  static constexpr UINT_PTR SubclassId=0x44414e47;
@@ -69,7 +69,7 @@ class NativeHud {
  if(owner==GetCurrentThreadId())subclass=SetWindowSubclass(window,proc,SubclassId,reinterpret_cast<DWORD_PTR>(this))!=FALSE;
  if(log){char status[256];std::snprintf(status,sizeof(status),"Native HUD attached window=%p windowThread=%lu renderThread=%lu subclass=%d; %s",static_cast<void*>(window),static_cast<unsigned long>(owner),static_cast<unsigned long>(GetCurrentThreadId()),int(subclass),subclass?"window input filter ready":"focused polling fallback");log(status);}return true;
  }
- void move(bool focused){const int vk[]={VK_LEFT,VK_UP,VK_RIGHT,VK_DOWN};for(size_t i=0;i<4;++i){bool held=focused&&gate.armed&&down(vk[i]);if(held&&!arrows[i]){if(i==0)x-=step;if(i==1)y-=step;if(i==2)x+=step;if(i==3)y+=step;}arrows[i]=held;}}
+ void move(bool focused){const int vk[]={VK_LEFT,VK_UP,VK_RIGHT,VK_DOWN};for(size_t i=0;i<4;++i){bool held=focused&&gate.armed&&down(vk[i]);if(held&&!arrows[i]){if(centerY){y=ImGui::GetWindowPos().y;centerY=false;}if(i==0)x-=step;if(i==1)y-=step;if(i==2)x+=step;if(i==3)y+=step;}arrows[i]=held;}}
  void appearance(const KeyGate::Keys& edge){
  static const char* names[]={u8"深黑",u8"烟灰",u8"石墨",u8"高透明"};
  if(edge[1]){preset=(preset+1)%4;applyPreset();selected=0;}if(edge[2])selected=1;if(edge[3])selected=2;
@@ -81,8 +81,8 @@ class NativeHud {
  }
 public:
  void configure(Builder b,Action a,Close c,Notice n,Log l,AppearanceWrite w){build=b;act=a;closed=c;notice=n;log=l;appearanceWrite=w;}
- Appearance appearanceValue()const{Appearance a;a.preset=preset;a.step=step;a.opacity=opacity;a.font=fontPixels;a.x=x;a.y=y;a.f10=f10;return a;}
- void loadAppearance(const Appearance& a){preset=a.preset;applyPreset();opacity=a.opacity;fontPixels=a.font;x=a.x;y=a.y;step=a.step;f10=a.f10;}
+ Appearance appearanceValue()const{Appearance a;a.preset=preset;a.step=step;a.opacity=opacity;a.font=fontPixels;a.x=x;a.y=y;a.centerY=centerY;a.f10=f10;return a;}
+ void loadAppearance(const Appearance& a){preset=a.preset;applyPreset();opacity=a.opacity;fontPixels=a.font;x=a.x;y=a.y;centerY=a.centerY;step=a.step;f10=a.f10;}
  bool isOpen()const{return opened.load();}
  void open(){if(!opened.exchange(true)){restart=true;if(log)log("Native HUD open requested");}}
  void pollHotkey(IDirect3DDevice9* d){if(!f10)return;bool held=down(VK_F10);HWND target=window;if(!target){D3DDEVICE_CREATION_PARAMETERS c{};if(SUCCEEDED(d->GetCreationParameters(&c)))target=c.hFocusWindow;}
@@ -96,7 +96,7 @@ public:
  auto& io=ImGui::GetIO();io.DisplaySize={width,height};static thread_local LARGE_INTEGER last{};LARGE_INTEGER tick{},frequency{};QueryPerformanceCounter(&tick);QueryPerformanceFrequency(&frequency);io.DeltaTime=last.QuadPart?float(double(tick.QuadPart-last.QuadPart)/double(frequency.QuadPart)):1.f/60;io.DeltaTime=std::clamp(io.DeltaTime,.001f,.1f);last=tick;
  if(!fontReady){fontReady=ImGui_ImplDX9_CreateDeviceObjects();if(!fontReady){ImGui_ImplDX9_InvalidateDeviceObjects();if(log)log("Native HUD font texture creation failed; retrying");retryAfter=GetTickCount64()+1000;return;}}
  ImGui_ImplDX9_NewFrame();ImGui::NewFrame();float panelWidth=std::min(680.f,std::max(180.f,width-16));x=std::clamp(x,0.f,std::max(0.f,width-120));y=std::clamp(y,0.f,std::max(0.f,height-50));
- ImGui::SetNextWindowPos({x,y},ImGuiCond_Always);ImGui::SetNextWindowSizeConstraints({panelWidth,0},{panelWidth,std::max(50.f,height-y-8)});ImGui::SetNextWindowBgAlpha(opacity);ImGui::PushStyleColor(ImGuiCol_WindowBg,background);
+ ImGui::SetNextWindowPos({x,centerY?height*.5f:y},ImGuiCond_Always,{0,centerY?.5f:0.f});ImGui::SetNextWindowSizeConstraints({panelWidth,0},{panelWidth,std::max(50.f,centerY?height-16:height-y-8)});ImGui::SetNextWindowBgAlpha(opacity);ImGui::PushStyleColor(ImGuiCol_WindowBg,background);
  uintptr_t action=0;bool openAppearance=false;
  if(ImGui::Begin("L4D2DangoMusic Native HUD",nullptr,ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoSavedSettings|ImGuiWindowFlags_NoScrollbar|ImGuiWindowFlags_AlwaysAutoResize)){
  ImGui::SetWindowFontScale(fontPixels/24.f);
@@ -107,7 +107,7 @@ public:
  size_t count=std::max<size_t>(1,(doc.rows.size()+MenuStack::PageSize-1)/MenuStack::PageSize);if(count>1)text(u8"[-] 上页    [=] 下页    "+std::to_string(stack.current().sheet+1)+" / "+std::to_string(count),{.58f,.60f,.60f,1});
  openAppearance=action==9000;
  }else if(page==Page::Appearance){text(u8"菜单外观",{1,.84f,.22f,1});ImGui::Separator();appearance(edge);
- }else{text(u8"调整菜单位置",{1,.84f,.22f,1});ImGui::Separator();if(edge[12]&&step>1)--step;if(edge[13]&&step<64)++step;if(edge[1]){x=8;y=14;}move(focused);text(u8"位置："+std::to_string(int(x))+", "+std::to_string(int(y)));text(u8"方向键移动菜单；[- / =] 步宽："+std::to_string(step)+" px",{1,.84f,.22f,1});row(1,u8"重置到左上角");}
+ }else{text(u8"调整菜单位置",{1,.84f,.22f,1});ImGui::Separator();if(edge[12]&&step>1)--step;if(edge[13]&&step<64)++step;if(edge[1]){x=8;y=14;centerY=true;}move(focused);text(u8"位置："+std::to_string(int(x))+", "+std::to_string(int(centerY?ImGui::GetWindowPos().y:y)));text(u8"方向键移动菜单；[- / =] 步宽："+std::to_string(step)+" px",{1,.84f,.22f,1});row(1,u8"重置到默认位置");}
  if(notice){auto message=notice();if(!message.empty()){ImGui::Separator();text(message,{1,.84f,.22f,1});}}
  ImGui::Separator();text(stack.frames.size()==1&&page==Page::Settings?u8"[0] 关闭    [/ / Esc] 关闭":u8"[0] 返回    [/ / Esc] 关闭",{1,.84f,.22f,1});
  }ImGui::End();ImGui::PopStyleColor();ImGui::Render();auto data=ImGui::GetDrawData();ImGui_ImplDX9_RenderDrawData(data);if(!submitted&&data&&data->TotalVtxCount){submitted=true;if(log)log("Native HUD first frame submitted vertices="+std::to_string(data->TotalVtxCount));}
