@@ -50,3 +50,6 @@ g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc tests/sou
 
 # Optional replay input is generated from user DLLs, which are not redistributed.
 g++ -std=c++17 -O2 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc -Ivendor tests/source_entity_slot_replay.cpp -o build/source_entity_slot_replay
+
+g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc tests/entity_follow_test.cpp -o build/entity_follow_test
+./build/entity_follow_test

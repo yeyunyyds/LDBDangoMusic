@@ -16,10 +16,11 @@ wire::Prop prop(Memory& m,const char* name,int type,int offset){wire::Prop p;p.n
 int main(){Memory m;check(wire::className("CBaseEntity")&&wire::className("MovieExplosion")&&wire::className("NextBotCombatCharacter")&&!wire::className("")&&!wire::className("9bad")&&!wire::className("not a class"));check(source_entities::profile::ClassSlot==1&&source_entities::profile::DormantSlot==7&&source_entities::profile::DataBaseSlot==10);
  check(wire::handle(17,0xabc)==std::optional<uint32_t>(0xabc011));check(!wire::handle(4096,1)&&!wire::handle(4095,0xfffff));check(wire::handle(3,4)!=wire::handle(3,5));
  auto origin=prop(m,"m_vecOrigin",2,32),model=prop(m,"m_nModelIndex",0,64),owner=prop(m,"m_hOwnerEntity",0,80);
- wire::Table base;base.count=3;base.props=m.props({origin,model,owner});base.name=m.str("DT_BaseEntity");auto baseAddress=m.add(base);
+ auto moveparent=prop(m,"moveparent",0,96),attachment=prop(m,"m_iParentAttachment",0,100);
+ wire::Table base;base.count=5;base.props=m.props({origin,model,owner,moveparent,attachment});base.name=m.str("DT_BaseEntity");auto baseAddress=m.add(base);
  auto parent=prop(m,"baseclass",6,16);parent.table=baseAddress;auto weapon=prop(m,"m_hActiveWeapon",0,128);
  wire::Table derived;derived.count=2;derived.props=m.props({parent,weapon});derived.name=m.str("DT_BasePlayer");auto root=m.add(derived);
- wire::Fields found;check(wire::fields(m,root,found));check(found.at("m_vecOrigin").offset==48&&found.at("m_nModelIndex").offset==80&&found.at("m_hActiveWeapon").offset==128);
+ wire::Fields found;check(wire::fields(m,root,found));check(found.at("m_vecOrigin").offset==48&&found.at("m_nModelIndex").offset==80&&found.at("m_hActiveWeapon").offset==128&&found.at("moveparent").offset==112&&found.at("m_iParentAttachment").offset==116);
  auto previous=found;auto cycle=parent;cycle.table=root;std::memcpy(m.data.data()+derived.props,&cycle,sizeof(cycle));check(!wire::fields(m,root,found)&&found.size()==previous.size());std::memcpy(m.data.data()+derived.props,&parent,sizeof(parent));
  auto invalid=derived;invalid.count=3000;auto bad=m.add(invalid);check(!wire::fields(m,bad,found));check(!wire::fields(m,65530,found));
  auto code=m.next;m.next+=16;std::memcpy(m.data.data()+code,"\xb8\x00\x10\x00\x00\xc3",6);check(wire::addressGetter(m,code,0)==4096);

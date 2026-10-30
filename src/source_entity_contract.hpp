@@ -36,7 +36,7 @@ template<class Reader> bool fields(Reader& r,uint32_t root,Fields& result){
  uint32_t parent=0,parentOffset=0;
  for(const auto& p:props){auto name=text(r,p.name);if(name.empty()||p.type<0||p.type>7||p.offset<0||p.offset>65536)return false;
  if(name=="baseclass"&&p.type==6){if(parent||!p.table)return false;parent=p.table;parentOffset=uint32_t(p.offset);}
- if(name=="m_vecOrigin"||name=="m_angRotation"||name=="m_nModelIndex"||name=="m_iTeamNum"||name=="m_hOwnerEntity"||name=="m_hActiveWeapon"||name=="m_hViewModel[0]"){
+ if(name=="moveparent"||name=="m_iParentAttachment"||name=="m_vecOrigin"||name=="m_angRotation"||name=="m_nModelIndex"||name=="m_iTeamNum"||name=="m_hOwnerEntity"||name=="m_hActiveWeapon"||name=="m_hViewModel[0]"){
  if(uint64_t(base)+uint32_t(p.offset)>65536)return false;next.emplace(name,Field{base+uint32_t(p.offset),p.type});}}
  if(!parent){result=std::move(next);return true;}if(uint64_t(base)+parentOffset>65536)return false;base+=parentOffset;address=parent;
  }return false;

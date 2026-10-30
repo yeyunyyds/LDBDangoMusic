@@ -35,6 +35,13 @@ def verify(client, engine, replay=None):
         checks[name]=dict(rva=hex(address),bytes=code.hex())
     assert b'\xc1\xea\x0c\x39\x50\x04' in c.read(0xbb4c0,48)
     assert bytes.fromhex('05ffefffff03c08b0cc1') in c.read(0xb8dc0,48)
+    # Actual RecvProp construction: four-byte parent handle, byte attachment.
+    assert c.read(0x244f1-9,9)==bytes.fromhex('6a006a046834010000')
+    assert c.read(0x244f1,5)==b'\x68'+struct.pack('<I',c.base+0x540048)
+    assert c.read(0x4b3fa-11,11)==bytes.fromhex('6a006a006a0168f8010000')
+    assert c.read(0x4b3fa,5)==b'\x68'+struct.pack('<I',c.base+0x544c2c)
+    # Receive proxy expands wire packing into the same 12-bit-index handle.
+    assert c.read(0x18bfc2,15)==bytes.fromhex('c1f90bc1e10c25ff0700000bc8890a')
     def slot(name):
         return int(re.search(r'\b' + name + r'\s*=\s*(\d+)', header).group(1))
     slots = dict(client_class=slot('ClassSlot'), dormant=slot('DormantSlot'), data_base=slot('DataBaseSlot'))
@@ -93,6 +100,7 @@ def verify(client, engine, replay=None):
                 entry_base_from_interface='-0x10010',entry_size=16,entry_bits=12,serial_bits=20,
                 networkable_cache_offset='0x28',cache_stride=8,networked_limit=2048,
                 model_interface='VModelInfoClient004',checks=checks,networkable_slots=slots,
+                network_parent_layout={'moveparent': {'offset': '0x134', 'bytes': 4}, 'm_iParentAttachment': {'offset': '0x1f8', 'bytes': 1}},
                 network_tables_verified=len(tables),dormancy_patterns=dormancy_patterns,runtime_hint_evidence=samples,
                 notes=['No entity virtuals are dispatched: tiny class/data-base/dormancy getters are decoded or reported unknown.',
                        'RecvTable/RecvProp interpretation is bounded and shape-checked at runtime; offsets are network properties, not render poses.',

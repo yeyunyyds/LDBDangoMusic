@@ -36,6 +36,16 @@
     "dormant": 7,
     "data_base": 10
   },
+  "network_parent_layout": {
+    "moveparent": {
+      "offset": "0x134",
+      "bytes": 4
+    },
+    "m_iParentAttachment": {
+      "offset": "0x1f8",
+      "bytes": 1
+    }
+  },
   "network_tables_verified": 257,
   "dormancy_patterns": {
     "index_guarded_boolean": 256,

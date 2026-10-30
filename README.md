@@ -1,6 +1,6 @@
 # L4D2DangoMusic
 
-> 此分支为基于 v0.9.3 的实体接口实验，已合入原生 HUD、菜单归类、保存状态和缺字修正。实体诊断入口位于“更多设置 → 实验：实体接口只读诊断”，尚未实现实机实体挂载。稳定版仍见 [v0.9.3 Release](https://github.com/yeyunyyds/LDBDangoMusic/releases/tag/v0.9.3)。
+> 此分支为基于 v0.9.3 的实体接口实验，已合入原生 HUD、菜单归类、保存状态和缺字修正。手动跟随 Demo 位于“更多设置 → 实验：实体跟随测试”，默认关闭，可锁定网络实体显示示例或当前歌词；骨骼与手持附件仍未接入。稳定版仍见 [v0.9.3 Release](https://github.com/yeyunyyds/LDBDangoMusic/releases/tag/v0.9.3)。
 
 为《求生之路 2》（Left 4 Dead 2）提供音乐歌词显示的 L4N 插件。通过兼容 LX / BLF 的本地音乐 API 获取播放进度和歌词，在游戏中呈现带逐字动画的歌词，并支持世界空间定位、歌名与作者显示以及游戏内调节。
 

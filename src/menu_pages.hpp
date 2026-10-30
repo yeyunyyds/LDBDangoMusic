@@ -45,7 +45,7 @@ inline hud::Document animation(const Config& c){return {u8"动画、速度与停
 inline hud::Document timing(const Config& c){return {u8"停留与退场",{
  {value(u8"换句后额外停留",std::to_string(c.lingerMs)+"ms"),15},
  {value(u8"退场耗时",std::to_string(c.transition)+"ms"),14}}};}
-inline hud::Document more(){return {u8"更多设置",{{u8"菜单外观",9000},{u8"版本、路径与播放器诊断",24},{u8"实验：实体接口只读诊断",800}}};}
+inline hud::Document more(){return {u8"更多设置",{{u8"菜单外观",9000},{u8"版本、路径与播放器诊断",24},{u8"实验：实体跟随测试",810},{u8"实验：实体接口只读诊断",800}}};}
 inline hud::Document wall(const Config& c,const std::string& status){return {u8"场景挂画歌词",{
  {value(u8"场景挂画",on(c.wallEnabled)),700},{value(u8"放置方式",c.wallAutomatic?u8"自动寻找墙面":u8"手动挂画轮换"),709},
  {value(u8"内容",c.wallLiveLyrics?u8"歌词轮换":u8"固定示例"),702},{u8"尺寸、数量、搜索与停留",711},

@@ -3,6 +3,7 @@
 #include "source_entity_contract.hpp"
 #include "source_entity_profile.hpp"
 #include "source_entity_binding.hpp"
+#include "entity_inventory.hpp"
 #include "json.hpp"
 #include <filesystem>
 #include <fstream>
@@ -10,12 +11,11 @@
 namespace source_entities {
 using namespace dango;
 namespace wire=dango::entitywire;
-struct Record {
- uint32_t handle=0,index=0,serial=0;std::string className,modelName;int classId=-1;
- std::optional<bool> dormant;std::optional<Vec3> networkOrigin,networkAngles;
- std::optional<int> team,modelIndex;std::optional<uint32_t> owner,activeWeapon,viewModel;
-};
-struct Frame {uint32_t epoch=0;uint64_t tick=0;unsigned occupied=0,unknownClass=0,unknownBase=0,unknownTables=0;std::vector<Record> records;std::vector<std::string> getterHints,bindingChecks;bool modelLookup=false;std::string status="Entity diagnostics off";};
+using Record=dango::inventory::Record;using Frame=dango::inventory::Frame;
+inline std::atomic<bool> browseRequested{false};
+inline std::shared_ptr<const dango::inventory::FollowRequest> followRequest=std::make_shared<dango::inventory::FollowRequest>();
+inline std::shared_ptr<const Frame> followSnapshot=std::make_shared<Frame>();
+inline uint64_t nextFollow=0;
 inline std::shared_ptr<const Frame> snapshot=std::make_shared<Frame>();
 inline std::atomic<bool> enabled{false},dumpRequested{false},resetRequested{false};
 inline void* list=nullptr;inline void* modelInfo=nullptr;inline bool bound=false,faulted=false,wasEnabled=false;
@@ -80,45 +80,63 @@ inline std::string modelName(int index){
 inline void getterHint(Frame& frame,const char* kind,uint32_t fn){
  if(!fn||frame.getterHints.size()>=16||!source_camera::owns(reinterpret_cast<void*>(uintptr_t(fn)),source_camera::clientModule))return;uint8_t code[12];if(!reader.read(fn,code,sizeof(code)))return;char prefix[96];std::snprintf(prefix,sizeof(prefix),"%s client+0x%x bytes=",kind,fn-uint32_t(reinterpret_cast<uintptr_t>(source_camera::clientModule)));std::string hint=prefix;const char* digits="0123456789abcdef";for(auto c:code){hint+=digits[c>>4];hint+=digits[c&15];}if(std::find(frame.getterHints.begin(),frame.getterHints.end(),hint)==frame.getterHints.end())frame.getterHints.push_back(std::move(hint));
 }
-inline void capture(const GameCameraFrame& camera){
- Frame frame;frame.epoch=camera.epoch;frame.tick=camera.tick;frame.bindingChecks=bindingChecks;frame.modelLookup=modelReady;
- if(!camera.active){frame.status="Waiting for active Source camera";publish(std::move(frame));return;}
- if(faulted){frame.status="Entity ABI/profile mismatch; toggle diagnostics to retry";publish(std::move(frame));return;}
- if(!bound){bound=connect();frame.bindingChecks=bindingChecks;frame.modelLookup=modelReady;log("Diagnostic build 3 binding checks");for(auto& detail:bindingChecks)log(detail);if(!bound){faulted=true;frame.status="Entity ABI/profile mismatch; see binding_checks";log(frame.status);publish(std::move(frame));return;}log("Bound verified raw entity list; model lookup="+std::string(modelReady?"available":"unavailable"));}
- uint32_t object=uint32_t(reinterpret_cast<uintptr_t>(list));int highest=-1;
- if(!wire::load(reader,object+profile::HighestOffset,highest)||highest< -1||highest>=4096){faulted=true;frame.status="Entity highest-index validation failed";publish(std::move(frame));return;}
- std::array<wire::Entry,profile::MaxNetworked> entries{};struct Cache {uint32_t networkable;uint16_t dormant,padding;};std::array<Cache,profile::MaxNetworked> cache{};
- uint32_t entryBase=uint32_t(int64_t(object)+profile::EntryBaseDelta);
- if(!reader.read(entryBase,entries.data(),sizeof(entries))||!reader.read(object+profile::CacheOffset,cache.data(),sizeof(cache))){faulted=true;frame.status="Entity list memory unavailable";publish(std::move(frame));return;}
- for(unsigned i=0;i<unsigned(std::min(highest+1,int(profile::MaxNetworked)));++i){auto entry=entries[i];auto net=cache[i].networkable;if(!entry.entity||!net)continue;++frame.occupied;
- auto h=wire::handle(i,entry.serial);if(!h)continue;Record r;r.index=i;r.serial=entry.serial;r.handle=*h;
- auto cls=classAddress(net);if(!cls){++frame.unknownClass;uint32_t getter=0;if(method(net,profile::ClassSlot,getter))getterHint(frame,"class",getter);continue;}auto it=classes.find(*cls);if(it==classes.end())it=classes.emplace(*cls,readClass(*cls)).first;const auto& info=it->second;if(info.name.empty()){++frame.unknownClass;continue;}r.className=info.name;r.classId=info.id;
+inline std::optional<Record> readRecord(unsigned i,const wire::Entry& entry,uint32_t net,Frame& frame){
+ ++frame.occupied;auto h=wire::handle(i,entry.serial);if(!h)return {};Record r;r.index=i;r.serial=entry.serial;r.handle=*h;
+ auto cls=classAddress(net);if(!cls){++frame.unknownClass;uint32_t getter=0;if(method(net,profile::ClassSlot,getter))getterHint(frame,"class",getter);return {};}auto it=classes.find(*cls);if(it==classes.end())it=classes.emplace(*cls,readClass(*cls)).first;const auto& info=it->second;if(info.name.empty()){++frame.unknownClass;return {};}r.className=info.name;r.classId=info.id;
  uint32_t fn;if(method(net,profile::DormantSlot,fn))r.dormant=wire::byteGetter(reader,fn,net);
  // The cached IsDormant bit is only a diagnostic comparison, not authority.
  uint32_t base=0,dataGetter=0;if(method(net,profile::DataBaseSlot,dataGetter)){auto b=wire::addressGetter(reader,dataGetter,net);if(b&&*b==entry.entity)base=*b;}
  if(!base){++frame.unknownBase;getterHint(frame,"data_base",dataGetter);}else if(!info.schema)++frame.unknownTables;else{
  r.networkOrigin=vectorField(base,info,"m_vecOrigin");r.networkAngles=vectorField(base,info,"m_angRotation");r.team=field<int>(base,info,"m_iTeamNum",0);
  auto index=field<int16_t>(base,info,"m_nModelIndex",0);if(index){r.modelIndex=int(*index);r.modelName=modelName(*index);}
- r.owner=field<uint32_t>(base,info,"m_hOwnerEntity",0);r.activeWeapon=field<uint32_t>(base,info,"m_hActiveWeapon",0);r.viewModel=field<uint32_t>(base,info,"m_hViewModel[0]",0);
- }frame.records.push_back(std::move(r));}
+ r.parent=field<uint32_t>(base,info,"moveparent",0);r.parentAttachment=field<uint8_t>(base,info,"m_iParentAttachment",0);r.owner=field<uint32_t>(base,info,"m_hOwnerEntity",0);r.activeWeapon=field<uint32_t>(base,info,"m_hActiveWeapon",0);r.viewModel=field<uint32_t>(base,info,"m_hViewModel[0]",0);
+ }return r;
+}
+inline bool prepare(const GameCameraFrame& camera,Frame& frame){
+ frame.epoch=camera.epoch;frame.tick=camera.tick;frame.bindingChecks=bindingChecks;frame.modelLookup=modelReady;
+ if(!camera.active){frame.status="Waiting for active Source camera";return false;}
+ if(faulted){frame.status="Entity ABI/profile mismatch; toggle diagnostics to retry";return false;}
+ if(!bound){bound=connect();frame.bindingChecks=bindingChecks;frame.modelLookup=modelReady;log("Diagnostic build 4 binding checks");for(auto& detail:bindingChecks)log(detail);if(!bound){faulted=true;frame.status="Entity ABI/profile mismatch; see binding_checks";log(frame.status);return false;}log("Bound verified raw entity list; model lookup="+std::string(modelReady?"available":"unavailable"));}
+ return true;
+}
+inline void capture(const GameCameraFrame& camera){
+ Frame frame;if(!prepare(camera,frame)){publish(std::move(frame));return;}
+ uint32_t object=uint32_t(reinterpret_cast<uintptr_t>(list));int highest=-1;
+ if(!wire::load(reader,object+profile::HighestOffset,highest)||highest< -1||highest>=4096){faulted=true;frame.status="Entity highest-index validation failed";publish(std::move(frame));return;}
+ std::array<wire::Entry,profile::MaxNetworked> entries{};struct Cache {uint32_t networkable;uint16_t dormant,padding;};std::array<Cache,profile::MaxNetworked> cache{};
+ uint32_t entryBase=uint32_t(int64_t(object)+profile::EntryBaseDelta);
+ if(!reader.read(entryBase,entries.data(),sizeof(entries))||!reader.read(object+profile::CacheOffset,cache.data(),sizeof(cache))){faulted=true;frame.status="Entity list memory unavailable";publish(std::move(frame));return;}
+ for(unsigned i=0;i<unsigned(std::min(highest+1,int(profile::MaxNetworked)));++i){auto entry=entries[i];auto net=cache[i].networkable;if(!entry.entity||!net)continue;auto record=readRecord(i,entry,net,frame);if(record)frame.records.push_back(std::move(*record));}
  frame.bindingChecks=bindingChecks;frame.modelLookup=modelReady;frame.status="Network inventory: "+std::to_string(frame.records.size())+" objects; position source=network properties; not render poses";publish(std::move(frame));
 }
+inline void captureFollow(const GameCameraFrame& camera,const dango::inventory::FollowRequest& request){
+ Frame f;f.epoch=camera.epoch;f.tick=camera.tick;
+ auto finish=[&](){f.bindingChecks=bindingChecks;f.modelLookup=modelReady;std::atomic_store(&followSnapshot,std::make_shared<const Frame>(std::move(f)));};
+ if(request.epoch!=camera.epoch||!prepare(camera,f)){finish();return;}
+ auto object=uint32_t(reinterpret_cast<uintptr_t>(list));std::set<uint32_t> seen;uint32_t handle=request.handle;
+ for(unsigned depth=0;depth<16&&handle!=0xffffffffu;++depth){if(!seen.insert(handle).second)break;unsigned index=handle&4095;if(index>=profile::MaxNetworked)break;
+ wire::Entry entry;uint32_t net=0;auto entries=uint32_t(int64_t(object)+profile::EntryBaseDelta);
+ if(!wire::load(reader,entries+index*sizeof(wire::Entry),entry)||entry.serial!=(handle>>12)||!entry.entity||!wire::load(reader,object+profile::CacheOffset+index*8,net)||!net)break;
+ auto record=readRecord(index,entry,net,f);if(!record)break;auto parent=record->parent;f.records.push_back(std::move(*record));if(!parent)break;handle=*parent;
+ }f.status=f.records.empty()?"Follow target unavailable":"Target-only network pose update";finish();
+}
 inline void onFrame(const GameCameraFrame& camera)noexcept{
- try{bool active=enabled.load();if(!active){if(wasEnabled){classes.clear();models.clear();bound=faulted=modelReady=false;bindingChecks.clear();list=modelInfo=nullptr;Frame f;f.epoch=camera.epoch;f.tick=camera.tick;publish(std::move(f));}wasEnabled=false;return;}
- if(resetRequested.exchange(false)||!wasEnabled||epoch!=camera.epoch){classes.clear();models.clear();bound=faulted=modelReady=false;bindingChecks.clear();nextCapture=0;epoch=camera.epoch;wasEnabled=true;}
- if(camera.tick<nextCapture)return;nextCapture=camera.tick+200;capture(camera);
+ try{auto request=std::atomic_load(&followRequest);bool active=enabled.load()||browseRequested.load()||request->enabled;if(!active){if(wasEnabled){classes.clear();models.clear();bound=faulted=modelReady=false;bindingChecks.clear();list=modelInfo=nullptr;std::atomic_store(&followSnapshot,std::make_shared<const Frame>());Frame f;f.epoch=camera.epoch;f.tick=camera.tick;publish(std::move(f));}wasEnabled=false;return;}
+ if(resetRequested.exchange(false)||!wasEnabled||epoch!=camera.epoch){classes.clear();models.clear();bound=faulted=modelReady=false;bindingChecks.clear();nextCapture=nextFollow=0;epoch=camera.epoch;wasEnabled=true;}
+ if(request->enabled&&camera.tick>=nextFollow){nextFollow=camera.tick+33;captureFollow(camera,*request);}
+ if((enabled.load()||browseRequested.load())&&camera.tick>=nextCapture){nextCapture=camera.tick+200;capture(camera);}
  }catch(...){faulted=true;log("Capture stopped after an exception; toggle diagnostics to retry");}
 }
 inline nlohmann::json jsonFrame(const Frame& f){
- nlohmann::json out={{"schema",1},{"diagnostic_build",3},{"epoch",f.epoch},{"tick",f.tick},{"status",f.status},{"pose_space","network_raw"},{"occupied",f.occupied},{"unknown_class",f.unknownClass},{"unknown_base",f.unknownBase},{"unknown_tables",f.unknownTables},{"getter_hints",f.getterHints},{"binding_checks",f.bindingChecks},{"model_lookup_available",f.modelLookup},{"objects",nlohmann::json::array()}};
+ nlohmann::json out={{"schema",1},{"diagnostic_build",4},{"epoch",f.epoch},{"tick",f.tick},{"status",f.status},{"pose_space","network_raw"},{"occupied",f.occupied},{"unknown_class",f.unknownClass},{"unknown_base",f.unknownBase},{"unknown_tables",f.unknownTables},{"getter_hints",f.getterHints},{"binding_checks",f.bindingChecks},{"model_lookup_available",f.modelLookup},{"objects",nlohmann::json::array()}};
  for(auto& r:f.records){nlohmann::json item={{"handle",r.handle},{"index",r.index},{"serial",r.serial},{"class",r.className},{"class_id",r.classId},{"model",r.modelName}};
  auto vector=[&](const char* key,const std::optional<Vec3>& v){if(v)item[key]={v->x,v->y,v->z};};vector("origin",r.networkOrigin);vector("angles",r.networkAngles);
- if(r.dormant)item["dormant_candidate"]=*r.dormant;if(r.team)item["team"]=*r.team;if(r.modelIndex)item["model_index"]=*r.modelIndex;if(r.owner)item["owner_handle"]=*r.owner;if(r.activeWeapon)item["active_weapon_handle"]=*r.activeWeapon;if(r.viewModel)item["viewmodel_handle"]=*r.viewModel;out["objects"].push_back(std::move(item));}return out;
+ if(r.parent)item["parent_handle"]=*r.parent;if(r.parentAttachment)item["parent_attachment"]=*r.parentAttachment;if(r.dormant)item["dormant_candidate"]=*r.dormant;if(r.team)item["team"]=*r.team;if(r.modelIndex)item["model_index"]=*r.modelIndex;if(r.owner)item["owner_handle"]=*r.owner;if(r.activeWeapon)item["active_weapon_handle"]=*r.activeWeapon;if(r.viewModel)item["viewmodel_handle"]=*r.viewModel;out["objects"].push_back(std::move(item));}return out;
 }
 // Only called from the existing background worker; never writes on game/render threads.
 inline void drain(const std::filesystem::path& directory){
  static uint64_t next=0,last=0;uint64_t tick=GetTickCount64();bool requested=dumpRequested.exchange(false);if(!requested&&(!enabled||tick<next))return;next=tick+1000;auto frame=std::atomic_load(&snapshot);if(!frame->tick||(!requested&&frame->tick==last))return;
- try{std::filesystem::create_directories(directory);std::ofstream file(directory/L"entities.jsonl",std::ios::app|std::ios::binary);file<<jsonFrame(*frame).dump(-1,' ',false,nlohmann::json::error_handler_t::replace)<<'\n';file.flush();if(!file)throw std::runtime_error("write failed");last=frame->tick;++fileFrames;}
+ try{std::filesystem::create_directories(directory);auto output=jsonFrame(*frame);auto request=std::atomic_load(&followRequest);if(request->enabled){auto target=std::atomic_load(&followSnapshot);output["follow"]={{"request_epoch",request->epoch},{"request_handle",request->handle},{"snapshot",jsonFrame(*target)}};}std::ofstream file(directory/L"entities.jsonl",std::ios::app|std::ios::binary);file<<output.dump(-1,' ',false,nlohmann::json::error_handler_t::replace)<<'\n';file.flush();if(!file)throw std::runtime_error("write failed");last=frame->tick;++fileFrames;}
  catch(const std::exception& e){enabled=false;log(std::string("Diagnostic output failed: ")+e.what());}
 }
 }
