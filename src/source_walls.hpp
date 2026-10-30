@@ -17,8 +17,8 @@ inline std::shared_ptr<const wallscene::Options> options=std::make_shared<wallsc
 inline std::shared_ptr<const wallscene::Ticket> ticket=std::make_shared<wallscene::Ticket>();
 inline wallscene::Scene scene;inline uint64_t nextSearch=0,searchToken=0;inline unsigned searchAttempt=0,visibilityCursor=0;
 inline void configure(const Config& c){
- wallscene::Options o;o.automatic=c.wallAutomatic;o.live=c.wallLiveLyrics;o.size=c.wallSize;o.capacity=c.wallCapacity;o.lingerMs=c.wallLingerMs;o.fadeMs=c.wallFadeMs;o.range=c.wallRange;o.spacing=c.wallSpacing;
- auto old=std::atomic_load(&options);bool reset=old->automatic!=o.automatic||old->live!=o.live;
+ wallscene::Options o;o.reuse=c.wallReuse;o.fallback=c.wallFallback;o.surface=c.wallSurface;o.automatic=c.wallAutomatic;o.live=c.wallLiveLyrics;o.size=c.wallSize;o.capacity=c.wallCapacity;o.lingerMs=c.wallLingerMs;o.fadeMs=c.wallFadeMs;o.range=c.wallRange;o.spacing=c.wallSpacing;
+ auto old=std::atomic_load(&options);bool reset=old->automatic!=o.automatic||old->live!=o.live||old->surface!=o.surface;
  std::atomic_store(&options,std::make_shared<const wallscene::Options>(o));
  bool active=c.wallEnabled&&c.enabled;bool previous=enabled.exchange(active);if((active&&!previous)||reset)resetRequested=true;
 }
@@ -73,7 +73,7 @@ inline void onFrame(const GameCameraFrame& camera){
  uint64_t due=placeAt.load();if(due&&camera.tick>=due&&placeAt.compare_exchange_strong(due,0)){
  trace::Result hit;if(cast(pose.eye,pose.eye+pose.forward*1024,hit)&&trace::wallHit(hit)){
  const float widths[]={80,120,180},heights[]={28,40,60};int size=std::clamp(o.size,0,2);wall::Panel panel;
- if(wall::makePanel(hit.end,hit.plane.normal,widths[size],heights[size],camera.epoch,panel)&&wallscene::separated(panel,scene.items,40)&&trace::supported(panel,cast)&&trace::visible(panel,pose.eye,cast)){
+ if(wall::makeSurfacePanel(hit.end,hit.plane.normal,widths[size],heights[size],camera.epoch,panel,o.surface,pose.forward)&&wallscene::separated(panel,scene.items,40)&&trace::supported(panel,cast)&&trace::visible(panel,pose.eye,cast)){
  scene.add(panel,false,t,camera.tick,o);status("Manual panel placed; axes are fixed to the wall");log("Manual panel id="+std::to_string(scene.sequence));nextVisibility=0;
  }else if(!faulted)status("Wall patch unsupported, obstructed or too close to an existing panel");
  }else if(!faulted)status("No suitable wall hit (sky/glass/floor/solid start rejected)");
@@ -91,6 +91,7 @@ inline void onFrame(const GameCameraFrame& camera){
  nextVisibility=camera.tick+50;size_t count=std::min<size_t>(2,scene.items.size());
  for(size_t n=0;n<count;++n){auto& item=scene.items[visibilityCursor++%scene.items.size()];item.visible=trace::visible(item.panel,pose.eye,cast);item.visibleTick=camera.tick;if(faulted)break;}
  }
+ if(!faulted&&!cleared&&o.automatic&&o.reuse&&searchToken==t.serial&&searchAttempt>=5&&scene.reuseExisting(t,camera.tick,camera,pose,o))status("No new surface; reused existing panel in creation order");
  if(!o.automatic&&!faulted)scene.assignManual(t,camera.tick);
  if(faulted)scene.reset();publish();
 }

@@ -1,6 +1,6 @@
 # L4D2DangoMusic
 
-> 此分支用于验证位置复用与长句回归冲突修正，以及菜单默认垂直居中。基于正式版 v0.9.3，未混入实体挂载实验。详情见 [修正说明](docs/visible-anchor-reuse-fix.md)。
+> 此分支用于验证位置复用修正、菜单默认垂直居中，以及挂画复用、文字布局和地面放置。基于正式版 v0.9.3，未混入实体挂载实验。详情见 [位置修正说明](docs/visible-anchor-reuse-fix.md) 与 [挂画新增功能](docs/wall-reuse-layout.md)。
 
 > 当前稳定版 [v0.9.3](https://github.com/yeyunyyds/LDBDangoMusic/releases/tag/v0.9.3) 提供原生 HUD 菜单、世界歌词和场景挂画。场景挂画及挂画背景默认关闭；使用方法见 [场景挂画指南](docs/wall-experiment-guide.md)。
 
