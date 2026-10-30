@@ -59,5 +59,36 @@ int main(){
  Corridor failed;failed.failure=true;wall::Panel p;check(!wallscene::candidate(frame,pose,0,1,options,{},std::ref(failed),p),"failed trace");
  auto corners=wall::point(left,0,0);auto moved=camera({80,0,0});check(wallscene::onScreen(left,moved,1280,720),"parallax visible");check(length(wall::point(left,0,0)-corners)<.001,"fixed plane");
  auto away=camera({},3.14159265f);check(!wallscene::onScreen(left,away,1280,720),"offscreen rejection");
+ // Reuse is opt-in, replaces content in creation order and never changes geometry.
+ wallscene::Scene reuse;auto ro=options;ro.capacity=6;ro.reuse=false;ticket={9,1,30000,7,true};reuse.observe(ticket,30000,7,ro);reuse.add(left,true,ticket,30000,ro);
+ ticket.serial=2;ticket.tick=30010;reuse.observe(ticket,30010,7,ro);reuse.add(right,true,ticket,30010,ro);
+ ticket.serial=3;ticket.tick=30020;reuse.observe(ticket,30020,7,ro);for(auto& i:reuse.items)i.visibleTick=30020;
+ auto firstPlane=reuse.items[0].panel;check(!reuse.reuseExisting(ticket,30020,frame,pose,ro),"reuse disabled by default");ro.reuse=true;
+ check(reuse.reuseExisting(ticket,30020,frame,pose,ro)&&reuse.items[0].token==3&&reuse.items[1].token==2,"oldest panel first");
+ check(length(reuse.items[0].panel.center-firstPlane.center)<.001f&&reuse.items[0].id==1,"reuse preserves plane and identity");
+ check(!reuse.reuseExisting(ticket,30020,frame,pose,ro),"no duplicate assignment");
+ ticket.serial=4;ticket.tick=30030;reuse.observe(ticket,30030,7,ro);check(reuse.reuseExisting(ticket,30030,frame,pose,ro)&&reuse.items[1].token==4,"reuse second panel");
+ ticket.serial=5;ticket.tick=30040;reuse.observe(ticket,30040,7,ro);check(reuse.reuseExisting(ticket,30040,frame,pose,ro)&&reuse.items[0].token==5,"reuse wraps without old text resurrection");
+ ticket.serial=6;ticket.tick=30050;reuse.observe(ticket,30050,7,ro);for(auto& i:reuse.items)i.visible=false;check(!reuse.reuseExisting(ticket,30050,frame,pose,ro),"occluded panels not reused");
+ for(auto& i:reuse.items){i.visible=true;i.visibleTick=29000;}check(!reuse.reuseExisting(ticket,30050,frame,pose,ro),"stale visibility not reused");
+ for(auto& i:reuse.items)i.visibleTick=30050;ro.range=1;check(!reuse.reuseExisting(ticket,30050,frame,pose,ro),"distant panels not reused");ro.range=600;
+ check(!reuse.reuseExisting(ticket,30050,away,pose,ro),"offscreen panels not reused");ro.surface=1;check(!reuse.reuseExisting(ticket,30050,frame,pose,ro),"wall not reused as floor");ro.surface=0;
+ ticket.place=false;reuse.observe(ticket,30050,7,ro);check(!reuse.reuseExisting(ticket,30050,frame,pose,ro),"sticky fallback blocks late reuse");
+ // A complete five-direction search fails on occupied wall patches; reuse
+ // must settle the route before the renderer's one-second fallback deadline.
+ wallscene::Scene occupied;auto crowded=ro;crowded.spacing=10000;ticket={10,1,40000,7,true};occupied.observe(ticket,40000,7,crowded);occupied.add(left,true,ticket,40000,crowded);occupied.add(right,true,ticket,40000,crowded);
+ ticket.serial=2;wallscene::SentenceRoute reusedRoute;
+ for(unsigned attempt=0;attempt<5;++attempt){uint64_t tick=40010+attempt*200;ticket.tick=tick;occupied.observe(ticket,tick,7,crowded);for(auto& i:occupied.items)i.visibleTick=tick;wall::Panel unused;check(!wallscene::candidate(frame,pose,attempt,ticket.serial,crowded,occupied.items,std::ref(world),unused),"no unoccupied new patch");if(attempt==4)check(occupied.reuseExisting(ticket,tick,frame,pose,crowded),"reuse before timeout");}
+ reusedRoute.choose(!occupied.pending(ticket),40810,40010,true);check(reusedRoute.attached&&!reusedRoute.fallback,"reused wall wins before fallback");
+ // A delayed backend may still see a place=true ticket after the renderer's
+ // fallback deadline; it must not overwrite retained old content in that race.
+ ticket.serial=3;ticket.tick=42000;ticket.started=41000;occupied.observe(ticket,42000,7,crowded);for(auto& i:occupied.items)i.visibleTick=42000;
+ auto keptToken=occupied.items.front().token;check(!occupied.reuseExisting(ticket,42000,frame,pose,crowded)&&occupied.items.front().token==keptToken,"deadline preserves old panel content");
+ crowded.fallback=false;check(occupied.reuseExisting(ticket,42000,frame,pose,crowded),"no deadline when fallback disabled");
+ // Floor search is explicit; the default wall search still rejects floor hits.
+ auto ground=[](Vec3 start,Vec3 end,trace::Result& hit){hit={};hit.start=start;hit.end=end;auto d=end-start;if(std::abs(d.z)<.0001f)return true;float t=-start.z/d.z;if(t>=0&&t<hit.fraction){hit.fraction=t;hit.end=start+d*t;hit.plane.normal={0,0,1};hit.contents=1;}return true;};
+ auto above=camera({0,0,80});CameraPose groundPose;check(cameraPose(above,groundPose),"floor camera");wall::Panel groundPanel;auto groundOptions=wallscene::Options{};
+ check(!wallscene::candidate(above,groundPose,0,1,groundOptions,{},ground,groundPanel),"floor not enabled implicitly");groundOptions.surface=1;groundOptions.size=0;
+ check(wallscene::candidate(above,groundPose,0,1,groundOptions,{},ground,groundPanel)&&groundPanel.normal.z>.99f,"automatic ground placement");
  std::cout<<"Passed: corridor side search/budget, distinct lyric assignment, hold/fade/expiry, pause/stale/map/session clear, manual rotation, capacity/spacing and fixed wall parallax\n";
 }

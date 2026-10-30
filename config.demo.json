@@ -124,5 +124,28 @@
   "wallFadeMs": 1000,
   "wallRange": 600,
   "wallSpacing": 140,
-  "reuseDistanceFactor": 3
+  "reuseDistanceFactor": 3,
+  "wallReuse": false,
+  "wallSurface": 0,
+  "wallFloorFollow": false,
+  "wallLayout": {
+    "title": {
+      "x": 0.5,
+      "y": 0.13,
+      "size": 1,
+      "depth": 0.05
+    },
+    "artist": {
+      "x": 0.5,
+      "y": 0.26,
+      "size": 1,
+      "depth": 0.05
+    },
+    "lyrics": {
+      "x": 0.5,
+      "y": 0.58,
+      "size": 1,
+      "depth": 0.1
+    }
+  }
 }

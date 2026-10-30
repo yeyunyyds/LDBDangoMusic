@@ -3,10 +3,10 @@
 #include <vector>
 namespace dango::wallscene {
 struct Options {
- bool automatic=true,live=true;int size=1,capacity=6,lingerMs=4000,fadeMs=1000;
+ bool automatic=true,live=true,reuse=false,fallback=true;int surface=0;int size=1,capacity=6,lingerMs=4000,fadeMs=1000;
  float range=600,spacing=140;
 };
-struct Ticket {uint64_t session=0,serial=0,tick=0;uint32_t epoch=0;bool active=false,place=true;};
+struct Ticket {uint64_t session=0,serial=0,tick=0;uint32_t epoch=0;bool active=false,place=true;uint64_t started=0;};
 struct Item {wall::Panel panel;unsigned id=0;bool visible=false,automatic=false;uint64_t token=0,session=0,born=0,visibleTick=0;int64_t retired=-1;};
 struct SentenceRoute {
  bool attached=false,fallback=false;
@@ -35,14 +35,14 @@ inline bool separated(const wall::Panel& candidate,const std::vector<Item>& item
  }return true;
 }
 struct Scene {
- std::vector<Item> items;uint64_t session=0,observed=0,handled=0;unsigned sequence=0,rotation=0;bool active=false;
- void reset(){items.clear();session=observed=handled=0;active=false;rotation=0;}
- void clear(const Ticket& t){items.clear();observed=handled=t.serial;}
+ std::vector<Item> items;uint64_t session=0,observed=0,handled=0;unsigned sequence=0,rotation=0,reuseAfter=0;bool active=false;
+ void reset(){items.clear();session=observed=handled=0;active=false;rotation=reuseAfter=0;}
+ void clear(const Ticket& t){reuseAfter=0;items.clear();observed=handled=t.serial;}
  void observe(const Ticket& t,uint64_t now,uint32_t epoch,const Options& o){
  bool valid=fresh(t,now,epoch)&&o.live;
  if(!valid||session!=t.session){
  items.erase(std::remove_if(items.begin(),items.end(),[](const Item& i){return i.automatic;}),items.end());
- for(auto& i:items){i.token=0;i.retired=-1;}observed=handled=0;session=t.session;}
+ for(auto& i:items){i.token=0;i.retired=-1;}observed=handled=0;reuseAfter=0;session=t.session;}
  active=valid;
  // A no-wall decision is final for this sentence. Discard a placement that
  // raced the renderer's deadline without removing outgoing sentence panels.
@@ -61,6 +61,17 @@ struct Scene {
  Item item;item.panel=panel;item.id=++sequence;item.automatic=automatic;item.visible=true;item.visibleTick=now;
  if(pending(t)){assign(item,t,now);rotation=unsigned(items.size()+1);}items.push_back(item);
  }
+ bool reuseExisting(const Ticket& t,uint64_t now,const GameCameraFrame& camera,const CameraPose& pose,const Options& o){
+ if(!o.reuse||!o.automatic||!pending(t)||items.empty()||camera.epoch!=t.epoch)return false;
+ // Never overwrite an old panel after the renderer can commit world fallback.
+ if(o.fallback&&t.started&&(now<t.started||now-t.started>=1000))return false;
+ size_t start=0;while(start<items.size()&&items[start].id<=reuseAfter)++start;if(start==items.size())start=0;
+ for(size_t n=0;n<items.size();++n){auto& item=items[(start+n)%items.size()];auto& p=item.panel;
+ bool matching=o.surface==1?p.normal.z>=.5f:std::abs(p.normal.z)<=.5f;
+ if(!matching||!item.visible||now<item.visibleTick||now-item.visibleTick>350||length(p.center-pose.eye)>o.range||!onScreen(p,camera,float(camera.width),float(camera.height)))continue;
+ assign(item,t,now);reuseAfter=item.id;return true;
+ }return false;
+ }
  bool assignManual(const Ticket& t,uint64_t now){
  if(!pending(t)||items.empty())return false;
  for(size_t n=0;n<items.size();++n){size_t index=(rotation+n)%items.size();auto& i=items[index];
@@ -74,10 +85,10 @@ template<class Cast> bool candidate(const GameCameraFrame& camera,const CameraPo
  auto forward=normalize(Vec3{pose.forward.x,pose.forward.y,0});if(length(forward)<.9f)forward=normalize(Vec3{pose.up.x,pose.up.y,0});if(length(forward)<.9f)return false;
  auto right=normalize(wall::cross(forward,{0,0,1}));const float angles[]={35,-35,55,-55,0};
  float angle=angles[attempt%5]*(serial%2?1.f:-1.f)*.01745329252f;
- auto direction=forward*std::cos(angle)+right*std::sin(angle);trace::Result hit;
+ auto direction=forward*std::cos(angle)+right*std::sin(angle);if(options.surface==1)direction=normalize(direction+Vec3{0,0,-1});trace::Result hit;
  if(!cast(pose.eye,pose.eye+direction*options.range,hit)||!trace::wallHit(hit))return false;
  const float widths[]={80,120,180},heights[]={28,40,60};int size=std::clamp(options.size,0,2);
- if(!wall::makePanel(hit.end,hit.plane.normal,widths[size],heights[size],camera.epoch,panel)||!separated(panel,existing,options.spacing))return false;
+ if(!wall::makeSurfacePanel(hit.end,hit.plane.normal,widths[size],heights[size],camera.epoch,panel,options.surface,forward)||!separated(panel,existing,options.spacing))return false;
  // The proposed rectangle must be in front of the current camera and reachable
  // by the eye, rather than attached to the far side of a corridor corner.
  if(!onScreen(panel,camera,float(camera.width),float(camera.height)))return false;

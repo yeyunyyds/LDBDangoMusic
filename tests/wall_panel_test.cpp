@@ -22,6 +22,16 @@ int main(){
  auto degenerate=p;degenerate.width=0;check(!wall::projectPanel(degenerate,camera(),1280,720,front));
  auto changedMap=camera();changedMap.epoch=8;check(!wall::projectPanel(p,changedMap,1280,720,front));
  check(!wall::makePanel({0,0,0},{0,0,1},40,20,7,p));check(!wall::makePanel({0,0,0},{0,0,0},40,20,7,p));check(!wall::makePanel({0,0,0},{-1,0,0},0,20,7,p));check(!wall::makePanel({std::numeric_limits<float>::quiet_NaN(),0,0},{-1,0,0},40,20,7,p));
+ wall::Panel floor;check(wall::makeSurfacePanel({150,0,0},{0,0,1},80,28,7,floor,1,{1,0,0}));
+ check(near(floor.center.z,.75f)&&near(floor.up.x,1)&&near(floor.right.y,-1));
+ CameraPose viewer;check(cameraPose(camera({0,0,80},.6f),viewer));
+ auto fixed=wall::floorTextFacing(floor,viewer,false);check(length(fixed.up-floor.up)<.001f);
+ auto facing=wall::floorTextFacing(floor,viewer,true);check(length(facing.center-floor.center)<.001f&&length(facing.normal-floor.normal)<.001f&&length(facing.up-viewer.forward)<.001f&&length(facing.up-floor.up)>.1f);
+ auto fixedWall=wall::floorTextFacing(saved,viewer,true);check(length(fixedWall.up-saved.up)<.001f);
+ viewer.forward={0,0,-1};viewer.up={1,0,0};check(length(wall::floorTextFacing(floor,viewer,true).up-Vec3{1,0,0})<.001f);
+ auto floorCenter=floor.center;check(wall::projectPanel(floor,camera({0,0,80}),1280,720,front));check(wall::projectPanel(floor,camera({10,0,80},.1f),1280,720,moved));check(length(floor.center-floorCenter)<.001f);
+ check(!wall::makeSurfacePanel({150,0,0},{0,0,-1},80,28,7,p,1,{1,0,0}));check(!wall::makeSurfacePanel({150,0,0},{-1,0,0},80,28,7,p,1,{1,0,0}));
+ check(wall::makeSurfacePanel({150,0,0},{0,0,1},80,28,7,p,1,{0,0,-1})); // straight-down aim still has a stable heading
  wall::Vertex vertex;check(!wall::projectVertex(camera().worldToClip,{-10,0,0},1280,720,0,0,vertex));
  std::cout<<"Passed: fixed wall axes, camera translation/yaw perspective, unequal corner rhw, corridor turn, backface/map rejection and invalid hits\n";
 }
