@@ -40,6 +40,9 @@ def verify(client, engine, replay=None):
     assert c.read(0x244f1,5)==b'\x68'+struct.pack('<I',c.base+0x540048)
     assert c.read(0x4b3fa-11,11)==bytes.fromhex('6a006a006a0168f8010000')
     assert c.read(0x4b3fa,5)==b'\x68'+struct.pack('<I',c.base+0x544c2c)
+    # Four-byte weapon world-model index and one-byte physical carryable flag.
+    assert c.read(0x15ba0,12)==bytes.fromhex('6a006a006a04687409000068')
+    assert c.read(0x864c8,12)==bytes.fromhex('6a016863090000689c715510')
     # Receive proxy expands wire packing into the same 12-bit-index handle.
     assert c.read(0x18bfc2,15)==bytes.fromhex('c1f90bc1e10c25ff0700000bc8890a')
     def slot(name):

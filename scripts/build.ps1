@@ -27,3 +27,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Wall scene tests failed' }
 if ($LASTEXITCODE -ne 0) { throw 'Entity diagnostic producer test build failed' }
 & ./build/source_entity_backend_test.exe
 if ($LASTEXITCODE -ne 0) { throw 'Entity diagnostic producer mock failed' }
+
+& cl.exe /nologo /std:c++17 /EHsc /utf-8 /W4 /Isrc tests/gnome_follow_test.cpp /Fobuild/gnome_follow_test.obj /Febuild/gnome_follow_test.exe
+if ($LASTEXITCODE -ne 0) { throw 'Gnome representation test build failed' }
+& ./build/gnome_follow_test.exe
+if ($LASTEXITCODE -ne 0) { throw 'Gnome representation tests failed' }

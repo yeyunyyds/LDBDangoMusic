@@ -58,7 +58,7 @@ inline const inventory::Record* find(const inventory::Frame& frame,uint32_t hand
 struct Pose {bool ready=false;scene::Transform matrix=scene::identity();std::string status=u8"目标已消失";};
 inline Pose pose(const inventory::Frame& f,uint32_t handle,std::vector<uint32_t> chain={}){
  if(chain.size()>=16||std::find(chain.begin(),chain.end(),handle)!=chain.end())return {false,{},u8"父级关系无效"};chain.push_back(handle);
- auto r=find(f,handle);if(!r)return {};if(!r->dormant||*r->dormant)return {false,{},u8"目标休眠或状态未知"};
+ auto r=find(f,handle);if(!r)return {};if(r->effects&&(*r->effects&32))return {false,{},u8"目标暂不可见"};if(!r->dormant||*r->dormant)return {false,{},u8"目标休眠或状态未知"};
  if(!r->networkOrigin||!r->networkAngles||!r->parent)return {false,{},u8"网络姿态或父级信息缺失"};
  if(held(f,*r)&&(weaponClass(*r)||(*r->parent==0xffffffffu&&length(*r->networkOrigin)<.001f)))return {false,{},u8"目标已被拿起，需要渲染挂点"};
  if(!scene::finite(*r->networkOrigin)||!scene::finite(*r->networkAngles))return {false,{},u8"网络姿态无效"};
@@ -66,9 +66,10 @@ inline Pose pose(const inventory::Frame& f,uint32_t handle,std::vector<uint32_t>
  if(*r->parent!=0xffffffffu){if(!r->parentAttachment||*r->parentAttachment)return {false,{},u8"需要骨骼或附件姿态"};auto parent=pose(f,*r->parent,std::move(chain));if(!parent.ready)return parent;local=scene::multiply(parent.matrix,local);}
  if(!scene::valid(local))return {false,{},u8"目标变换无效"};return {true,local,u8"正在跟随（网络姿态）"};
 }
+inline uint32_t effectiveHandle(const inventory::Frame& f,const inventory::FollowRequest& request){return f.requestedFollowHandle==request.handle&&f.followedHandle!=0xffffffffu?f.followedHandle:request.handle;}
 inline Pose resolve(const inventory::Frame& f,const inventory::FollowRequest& request,uint32_t epoch,uint64_t tick){
  if(!request.enabled)return {false,{},u8"跟随未开启"};if(!epoch||request.epoch!=epoch||f.epoch!=epoch)return {false,{},u8"地图已变化，请重新锁定"};
- if(!f.tick||tick<f.tick||tick-f.tick>250)return {false,{},u8"等待目标新快照"};return pose(f,request.handle);
+ if(!f.tick||tick<f.tick||tick-f.tick>250)return {false,{},u8"等待目标新快照"};return pose(f,effectiveHandle(f,request));
 }
 struct Candidate {uint32_t handle=0;float score=0;std::string name;};
 inline std::vector<Candidate> candidates(const inventory::Frame& f,const GameCameraFrame& camera,const CameraPose& eye,Filter filter,uint64_t tick){

@@ -12,15 +12,15 @@ __declspec(noinline) void* __fastcall baseGetter(void* self,void*){return static
 __declspec(noinline) void* __fastcall holderClassGetter(void*,void*){return &mockHolderClass;}
 static const uint8_t notDormant[16]={0x32,0xc0,0xc3}; // decoded only, never executed
 uint32_t ptr(const void* p){return uint32_t(reinterpret_cast<uintptr_t>(p));}
-struct FakeEntity {uint32_t prefix[2]{};void** networkTable=nullptr;Vec3 origin{10,20,30};int team=2;uint32_t owner=0xffffffff,weaponOwner=0xffffffff,weapon=0x50005,parent=0xffffffff;uint8_t parentAttachment=0;int character=5,health=100;uint8_t life=0;};
+struct FakeEntity {uint32_t prefix[2]{};void** networkTable=nullptr;Vec3 origin{10,20,30};int team=2;uint32_t owner=0xffffffff,weaponOwner=0xffffffff,weapon=0x50005,parent=0xffffffff;uint8_t parentAttachment=0;int character=5,health=100;uint8_t life=0,carryable=1;int worldModel=42,effects=0;};
 int main(){
  static_assert(sizeof(void*)==4,"Windows x86 only");source_camera::clientModule=GetModuleHandleW(nullptr);
  // Match the independently verified game slots; 2 and 11 are deliberately empty.
  static void* netMethods[12]{};netMethods[1]=reinterpret_cast<void*>(&classGetter);netMethods[10]=reinterpret_cast<void*>(&baseGetter);
  FakeEntity entity;entity.networkTable=netMethods;
- wire::Prop props[10]{};const char* names[]={"m_vecOrigin","m_iTeamNum","m_hOwnerEntity","m_hActiveWeapon","moveparent","m_iParentAttachment","m_hOwner","m_survivorCharacter","m_iHealth","m_lifeState"};const int offsets[]={offsetof(FakeEntity,origin),offsetof(FakeEntity,team),offsetof(FakeEntity,owner),offsetof(FakeEntity,weapon),offsetof(FakeEntity,parent),offsetof(FakeEntity,parentAttachment),offsetof(FakeEntity,weaponOwner),offsetof(FakeEntity,character),offsetof(FakeEntity,health),offsetof(FakeEntity,life)};
- for(int i=0;i<10;++i){props[i].name=ptr(names[i]);props[i].type=i?0:2;props[i].offset=offsets[i];}
- wire::Table recv;recv.props=ptr(props);recv.count=10;recv.name=ptr("DT_MockEntity");mockClass.name=ptr("MovieExplosion");mockClass.table=ptr(&recv);mockClass.id=42;
+ wire::Prop props[13]{};const char* names[]={"m_vecOrigin","m_iTeamNum","m_hOwnerEntity","m_hActiveWeapon","moveparent","m_iParentAttachment","m_hOwner","m_survivorCharacter","m_iHealth","m_lifeState","m_iWorldModelIndex","m_isCarryable","m_fEffects"};const int offsets[]={offsetof(FakeEntity,origin),offsetof(FakeEntity,team),offsetof(FakeEntity,owner),offsetof(FakeEntity,weapon),offsetof(FakeEntity,parent),offsetof(FakeEntity,parentAttachment),offsetof(FakeEntity,weaponOwner),offsetof(FakeEntity,character),offsetof(FakeEntity,health),offsetof(FakeEntity,life),offsetof(FakeEntity,worldModel),offsetof(FakeEntity,carryable),offsetof(FakeEntity,effects)};
+ for(int i=0;i<13;++i){props[i].name=ptr(names[i]);props[i].type=i?0:2;props[i].offset=offsets[i];}
+ wire::Table recv;recv.props=ptr(props);recv.count=13;recv.name=ptr("DT_MockEntity");mockClass.name=ptr("MovieExplosion");mockClass.table=ptr(&recv);mockClass.id=42;
  // The list layout is the real producer's profiled layout. Binding is skipped
  // only in this mock; no actual game/model-info methods are invoked.
  std::vector<uint8_t> storage(0x15000);auto listAddress=ptr(storage.data()+0x10010);int highest=1;std::memcpy(reinterpret_cast<void*>(uintptr_t(listAddress+0x24)),&highest,4);
@@ -30,7 +30,8 @@ int main(){
  check(frame->records.size()==1);const auto& r=frame->records[0];check(r.className=="MovieExplosion"&&r.classId==42&&r.handle==0x9001&&r.networkOrigin&&r.networkOrigin->y==20&&r.team==2&&r.activeWeapon==0x50005);
  auto json=source_entities::jsonFrame(*frame);check(!json["model_lookup_available"].get<bool>()&&json["binding_checks"].is_array());
  check(json["pose_space"]=="network_raw"&&json["objects"][0]["origin"][2]==30);
- check(r.character==5&&r.health==100&&r.lifeState==0);
+ check(r.character==5&&r.health==100&&r.lifeState==0);check(r.worldModelIndex==42&&r.isCarryable&&*r.isCarryable&&r.effects==0);
+ check(json["diagnostic_build"]==9&&json["objects"][0]["world_model_index"]==42&&json["objects"][0]["is_carryable"]==true);
  check(r.parent==0xffffffffu&&r.parentAttachment==0&&r.weaponOwner==0xffffffffu);
  check(json["objects"][0]["weapon_owner_handle"]==0xffffffffu);
  source_entities::enabled=false;auto request=std::make_shared<const inventory::FollowRequest>(inventory::FollowRequest{true,7,0x9001});std::atomic_store(&source_entities::followRequest,request);camera.tick=1033;source_entities::onFrame(camera);auto selected=std::atomic_load(&source_entities::followSnapshot);check(selected->records.size()==1&&std::atomic_load(&source_entities::snapshot)->tick==1000);
