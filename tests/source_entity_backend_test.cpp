@@ -6,9 +6,11 @@
 using namespace dango;
 namespace wire=dango::entitywire;
 void check(bool v){if(!v)throw std::runtime_error("Entity diagnostic producer mock failed");}
-static wire::ClientClass mockClass;
+static wire::ClientClass mockClass,mockHolderClass;
 __declspec(noinline) void* __fastcall classGetter(void*,void*){return &mockClass;}
 __declspec(noinline) void* __fastcall baseGetter(void* self,void*){return static_cast<char*>(self)-8;}
+__declspec(noinline) void* __fastcall holderClassGetter(void*,void*){return &mockHolderClass;}
+static const uint8_t notDormant[16]={0x32,0xc0,0xc3}; // decoded only, never executed
 uint32_t ptr(const void* p){return uint32_t(reinterpret_cast<uintptr_t>(p));}
 struct FakeEntity {uint32_t prefix[2]{};void** networkTable=nullptr;Vec3 origin{10,20,30};int team=2;uint32_t owner=0xffffffff,weaponOwner=0xffffffff,weapon=0x50005,parent=0xffffffff;uint8_t parentAttachment=0;int character=5,health=100;uint8_t life=0;};
 int main(){
@@ -33,6 +35,17 @@ int main(){
  check(json["objects"][0]["weapon_owner_handle"]==0xffffffffu);
  source_entities::enabled=false;auto request=std::make_shared<const inventory::FollowRequest>(inventory::FollowRequest{true,7,0x9001});std::atomic_store(&source_entities::followRequest,request);camera.tick=1033;source_entities::onFrame(camera);auto selected=std::atomic_load(&source_entities::followSnapshot);check(selected->records.size()==1&&std::atomic_load(&source_entities::snapshot)->tick==1000);
  entity.origin.x=123;entity.weaponOwner=0x9002;camera.tick=1066;source_entities::onFrame(camera);check(std::atomic_load(&source_entities::followSnapshot)->records[0].networkOrigin->x==123&&std::atomic_load(&source_entities::followSnapshot)->records[0].weaponOwner==0x9002);
+ // The real target-only producer must include the carry item's holder so
+ // release detection works with diagnostics and candidate browsing both off.
+ mockClass.name=ptr("CGnome");mockHolderClass=mockClass;mockHolderClass.name=ptr("CTerrorPlayer");source_entities::classes.clear();
+ static void* holderMethods[12]{};std::copy(std::begin(netMethods),std::end(netMethods),holderMethods);holderMethods[1]=reinterpret_cast<void*>(&holderClassGetter);holderMethods[7]=netMethods[7]=const_cast<uint8_t*>(notDormant);
+ FakeEntity holder;holder.networkTable=holderMethods;holder.weapon=0x9001;
+ wire::Entry holderEntry;holderEntry.entity=ptr(&holder);holderEntry.serial=11;std::memcpy(storage.data()+2*sizeof(wire::Entry),&holderEntry,sizeof(holderEntry));auto holderNet=ptr(&holder.networkTable);std::memcpy(reinterpret_cast<void*>(uintptr_t(listAddress+0x28+16)),&holderNet,4);
+ entity.owner=entity.weaponOwner=0xb002;camera.tick=1080;source_entities::captureFollow(camera,*request);selected=std::atomic_load(&source_entities::followSnapshot);
+ check(selected->records.size()==2&&selected->records[1].handle==0xb002&&selected->records[1].activeWeapon==0x9001);check(!follow::resolve(*selected,*request,7,1080).ready);
+ holder.weapon=0x9005;camera.tick=1081;source_entities::captureFollow(camera,*request);selected=std::atomic_load(&source_entities::followSnapshot);check(follow::resolve(*selected,*request,7,1081).ready);
+ holderEntry.serial=12;std::memcpy(storage.data()+2*sizeof(wire::Entry),&holderEntry,sizeof(holderEntry));camera.tick=1082;source_entities::captureFollow(camera,*request);selected=std::atomic_load(&source_entities::followSnapshot);check(selected->records.size()==1&&!follow::resolve(*selected,*request,7,1082).ready);
+ entity.owner=entity.weaponOwner=0xffffffffu;mockClass.name=ptr("MovieExplosion");source_entities::classes.clear();
  entry.serial=10;std::memcpy(storage.data()+sizeof(wire::Entry),&entry,sizeof(entry));camera.tick=1099;source_entities::onFrame(camera);check(std::atomic_load(&source_entities::followSnapshot)->records.empty());entry.serial=9;std::memcpy(storage.data()+sizeof(wire::Entry),&entry,sizeof(entry));std::atomic_store(&source_entities::followRequest,std::make_shared<const inventory::FollowRequest>());source_entities::enabled=true;
  entry.entity=0;std::memcpy(storage.data()+sizeof(wire::Entry),&entry,sizeof(entry));camera.tick=1200;source_entities::onFrame(camera);check(std::atomic_load(&source_entities::snapshot)->records.empty());
  source_entities::list=reinterpret_cast<void*>(32);camera.tick=1400;source_entities::onFrame(camera);check(source_entities::faulted); // Read failure must not crash or call the address.

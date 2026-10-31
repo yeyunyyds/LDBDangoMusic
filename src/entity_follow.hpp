@@ -21,7 +21,24 @@ inline bool weaponClass(const inventory::Record& r){
  for(auto name:names)if(r.className==name)return true;return false;
 }
 inline bool owned(const inventory::Record& r){return (r.owner&&*r.owner!=0xffffffffu)||(r.weaponOwner&&*r.weaponOwner!=0xffffffffu);}
-inline bool classMatches(const inventory::Record& r,Filter f){
+inline bool carryable(const inventory::Record& r){
+ return r.className=="CGnome"||r.className=="CGasCan"||r.className=="CColaBottles"||r.className=="COxygenTank"||r.className=="CPropaneTank"||r.className=="CFireworkCrate";
+}
+// Carry items can retain a thrower/owner after release. Ownership alone does
+// not prove they are still held. Require a fresh owner snapshot and an active
+// weapon different from this item before trusting its free-standing world pose.
+inline bool held(const inventory::Frame& frame,const inventory::Record& r){
+ if(!owned(r))return false;if(!carryable(r))return true;
+ if(!r.parent||*r.parent!=0xffffffffu||!r.networkOrigin||!scene::finite(*r.networkOrigin)||length(*r.networkOrigin)<.001f)return true;
+ bool checked=false;
+ for(auto owner:{r.owner,r.weaponOwner}){if(!owner||*owner==0xffffffffu)continue;
+ auto actor=std::find_if(frame.records.begin(),frame.records.end(),[&](const auto& v){return v.handle==*owner;});
+ if(actor==frame.records.end()||!actor->dormant||*actor->dormant||!actor->activeWeapon)return true;
+ if(actor->className!="CTerrorPlayer"&&actor->className!="SurvivorBot"&&actor->className!="NextBotCombatCharacter")return true;
+ if(*actor->activeWeapon==r.handle)return true;checked=true;
+ }return !checked;
+}
+inline bool classMatches(const inventory::Record& r,Filter f,const inventory::Frame* frame=nullptr){
  bool common=r.className=="Infected";
  bool special=r.className=="Smoker"||r.className=="Boomer"||r.className=="Hunter"||r.className=="Spitter"||r.className=="Jockey"||r.className=="Charger"||r.className=="Tank"||r.className=="Witch"||((r.className=="CTerrorPlayer"||r.className=="NextBotCombatCharacter")&&r.team&&*r.team==3);
  bool player=(r.className=="CTerrorPlayer"&&!special)||r.className=="SurvivorBot";
@@ -30,7 +47,7 @@ inline bool classMatches(const inventory::Record& r,Filter f){
  bool dynamic=r.className=="CDynamicProp"||r.className=="CBreakableProp"||r.className=="CFuncTrackTrain";
  bool projectile=r.className.find("Projectile")!=std::string::npos||r.className=="CBaseGrenade";
  bool weapon=weaponClass(r);
- if(weapon&&owned(r))return false;
+ if(weapon&&owned(r)&&(!frame||held(*frame,r)))return false;
  switch(f){case Filter::Physics:return physics;case Filter::Dynamic:return dynamic;case Filter::Players:return player;case Filter::Projectiles:return projectile;case Filter::GroundWeapons:return weapon;case Filter::CommonInfected:return common;case Filter::SpecialInfected:return special;case Filter::Vehicles:return vehicle;default:return physics||dynamic||player||projectile||weapon||common||special||vehicle;}
 }
 inline scene::Transform transform(Vec3 origin,Vec3 angles){
@@ -43,7 +60,7 @@ inline Pose pose(const inventory::Frame& f,uint32_t handle,std::vector<uint32_t>
  if(chain.size()>=16||std::find(chain.begin(),chain.end(),handle)!=chain.end())return {false,{},u8"父级关系无效"};chain.push_back(handle);
  auto r=find(f,handle);if(!r)return {};if(!r->dormant||*r->dormant)return {false,{},u8"目标休眠或状态未知"};
  if(!r->networkOrigin||!r->networkAngles||!r->parent)return {false,{},u8"网络姿态或父级信息缺失"};
- if(owned(*r)&&(weaponClass(*r)||(*r->parent==0xffffffffu&&length(*r->networkOrigin)<.001f)))return {false,{},u8"目标已被拿起，需要渲染挂点"};
+ if(held(f,*r)&&(weaponClass(*r)||(*r->parent==0xffffffffu&&length(*r->networkOrigin)<.001f)))return {false,{},u8"目标已被拿起，需要渲染挂点"};
  if(!scene::finite(*r->networkOrigin)||!scene::finite(*r->networkAngles))return {false,{},u8"网络姿态无效"};
  auto local=transform(*r->networkOrigin,*r->networkAngles);
  if(*r->parent!=0xffffffffu){if(!r->parentAttachment||*r->parentAttachment)return {false,{},u8"需要骨骼或附件姿态"};auto parent=pose(f,*r->parent,std::move(chain));if(!parent.ready)return parent;local=scene::multiply(parent.matrix,local);}
@@ -56,7 +73,7 @@ inline Pose resolve(const inventory::Frame& f,const inventory::FollowRequest& re
 struct Candidate {uint32_t handle=0;float score=0;std::string name;};
 inline std::vector<Candidate> candidates(const inventory::Frame& f,const GameCameraFrame& camera,const CameraPose& eye,Filter filter,uint64_t tick){
  std::vector<Candidate> out;if(!camera.active||f.epoch!=camera.epoch||tick<f.tick||tick-f.tick>500)return out;
- for(auto& r:f.records){if(!classMatches(r,filter))continue;auto p=pose(f,r.handle);if(!p.ready)continue;auto point=scene::point(p.matrix,{}),ray=point-eye.eye;float distance=length(ray);if(distance<48||distance>1200)continue;Vec3 clip;if(!dango::transform(camera.worldToClip,point,clip,true)||std::abs(clip.x)>.98f||std::abs(clip.y)>.98f||clip.z<0||clip.z>1)continue;
+ for(auto& r:f.records){if(!classMatches(r,filter,&f))continue;auto p=pose(f,r.handle);if(!p.ready)continue;auto point=scene::point(p.matrix,{}),ray=point-eye.eye;float distance=length(ray);if(distance<48||distance>1200)continue;Vec3 clip;if(!dango::transform(camera.worldToClip,point,clip,true)||std::abs(clip.x)>.98f||std::abs(clip.y)>.98f||clip.z<0||clip.z>1)continue;
  float cosine=(ray.x*eye.forward.x+ray.y*eye.forward.y+ray.z*eye.forward.z)/distance;if(cosine<.5f)continue;out.push_back({r.handle,(1-cosine)*1000+distance*.0001f,r.className});}
  std::sort(out.begin(),out.end(),[](const Candidate& a,const Candidate& b){return a.score==b.score?a.handle<b.handle:a.score<b.score;});return out;
 }

@@ -61,6 +61,23 @@ int main(){
    f.records[0].parent=0x9001;f.records.push_back(object(0x9001,{200,0,0}));check(!follow::resolve(f,lock,7,1100).ready);
   }
  }
+ // Ground -> carried -> thrown with owner fields retained -> carried again.
+ // The selected full handle never changes and other gnomes are not substituted.
+ for(auto name:{"CGnome","CGasCan","CColaBottles","COxygenTank","CPropaneTank","CFireworkCrate"}){
+ auto item=object(0x9003,{100,0,0},name);auto holder=object(0x9004,{90,0,0},"CTerrorPlayer");holder.activeWeapon=item.handle;
+ inventory::FollowRequest locked{true,7,item.handle};f.records={item};check(follow::resolve(f,locked,7,1100).ready);
+ item.owner=holder.handle;item.weaponOwner=holder.handle;f.records={item,holder};check(!follow::resolve(f,locked,7,1100).ready);
+ holder.activeWeapon=0x9005;item.networkOrigin=Vec3{140,10,5};f.records={item,holder};check(follow::resolve(f,locked,7,1100).ready);
+ check(follow::candidates(f,camera,eye,follow::Filter::GroundWeapons,1100).size()==1);
+ holder.activeWeapon=item.handle;f.records={item,holder};check(!follow::resolve(f,locked,7,1100).ready);
+ holder.activeWeapon=0x9005;item.parent=holder.handle;f.records={item,holder};check(!follow::resolve(f,locked,7,1100).ready);
+ item.parent=0xffffffffu;item.networkOrigin=Vec3{};f.records={item,holder};check(!follow::resolve(f,locked,7,1100).ready);
+ item.networkOrigin=Vec3{140,10,5};f.records={item};check(!follow::resolve(f,locked,7,1100).ready);
+ holder.activeWeapon.reset();f.records={item,holder};check(!follow::resolve(f,locked,7,1100).ready);
+ holder.activeWeapon=0x9005;holder.dormant=true;f.records={item,holder};check(!follow::resolve(f,locked,7,1100).ready);
+ holder.dormant=false;f.records={item,holder};check(follow::resolve(f,locked,7,1100).ready);
+ f.records[0].handle=0xa003;check(!follow::resolve(f,locked,7,1100).ready);
+ }
  for(auto name:{"CGrenadeLauncher_Projectile","CMolotovProjectile","CPipeBombProjectile","CVomitJarProjectile"}){
   auto shot=object(serial++,{100,0,0},name);shot.owner=0x9001;f.records={shot};
   check(follow::candidates(f,camera,eye,follow::Filter::GroundWeapons,1100).empty());
