@@ -10,6 +10,11 @@ int main(){
  follow::Settings layout;follow::adjustLayout(layout,0,0);follow::adjustLayout(layout,1,1);follow::adjustLayout(layout,2,3);follow::adjustLayout(layout,3,2);check(near(layout.offset.y,10)&&near(layout.offset.z,33)&&near(layout.offset.x,10)&&near(layout.size,1.05f));
  for(int i=0;i<100;++i){follow::adjustLayout(layout,0,0);follow::adjustLayout(layout,3,3);}check(layout.offset.y==512&&layout.size==3);
  for(int axis=0;axis<4;++axis)follow::adjustLayout(layout,axis,4);check(near(layout.offset.x,0)&&near(layout.offset.y,0)&&near(layout.offset.z,32)&&near(layout.size,1));
+ follow::Settings bob;check(near(follow::bobOffset(bob,.125),0));bob.bobEnabled=true;check(near(follow::bobOffset(bob,0),0)&&near(follow::bobOffset(bob,.125),1)&&near(follow::bobOffset(bob,.375),-1)&&near(follow::bobOffset(bob,.5),0));
+ follow::adjustBob(bob,true,1);follow::adjustBob(bob,false,-1);check(near(bob.bobPeriod,.6f)&&near(bob.bobAmplitude,.9f));
+ for(int i=0;i<1000;++i){follow::adjustBob(bob,true,-1);follow::adjustBob(bob,false,-1);}check(near(bob.bobPeriod,.1f)&&bob.bobAmplitude==0&&follow::bobOffset(bob,.1)==0);
+ for(int i=0;i<1000;++i){follow::adjustBob(bob,true,1);follow::adjustBob(bob,false,1);}check(bob.bobPeriod==30&&bob.bobAmplitude==64);
+ follow::Pose fixed;fixed.matrix=scene::identity();bob.bobPeriod=.5f;bob.bobAmplitude=1;auto floating=follow::animatedAnchor(fixed,bob,.125);check(near(floating.x,bob.offset.x)&&near(floating.y,bob.offset.y)&&near(floating.z,bob.offset.z+1));
  inventory::Frame f;f.epoch=7;f.tick=1000;f.records.push_back(object(0x9001,{100,0,0}));inventory::FollowRequest req{true,7,0x9001};follow::Settings settings;settings.target=req;
  auto p=follow::resolve(f,req,7,1100);check(p.ready);auto a=follow::anchor(p,settings);check(near(a.x,100)&&near(a.z,32));
  f.records[0].networkOrigin=Vec3{120,5,0};auto moved=follow::resolve(f,req,7,1100);check(moved.ready&&near(follow::anchor(moved,settings).x,120));
