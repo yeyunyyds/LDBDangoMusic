@@ -1,0 +1,131 @@
+{
+  "client": {
+    "sha256": "c0a8e1e88f7312db11bcfd4b0ec574d224a34b2d9a615d6088b28335eeb4af1f",
+    "timestamp": 1782845135,
+    "image_size": 9842688,
+    "interfaces": [
+      {
+        "name": "VClient016",
+        "name_rva": "0x5648c0",
+        "registration_rva": "0x4fd810",
+        "factory_rva": "0xa87d0",
+        "factory_bytes": "b8984a6c10c3",
+        "object_rva": "0x6c4a98",
+        "vtable_rva": "0x56441c",
+        "first_9_method_rvas": [
+          "0xa8960",
+          "0xb03c0",
+          "0xa89f0",
+          "0xb2360",
+          "0xaad90",
+          "0xab170",
+          "0xb14e0",
+          "0xa8a40",
+          "0xaa430"
+        ]
+      },
+      {
+        "name": "VClientEntityList003",
+        "name_rva": "0x564bc0",
+        "registration_rva": "0x4fda00",
+        "factory_rva": "0xb8cf0",
+        "factory_bytes": "b874a57410c3",
+        "object_rva": "0x74a574",
+        "vtable_note": "Object is initialized at runtime; no file-backed vtable proof."
+      }
+    ],
+    "receive_table_names": [
+      "DT_BaseCombatCharacter",
+      "DT_BaseCombatWeapon",
+      "DT_BaseEntity",
+      "DT_BasePlayer",
+      "DT_BaseViewModel",
+      "DT_MolotovProjectile",
+      "DT_PipeBombProjectile",
+      "DT_VomitJarProjectile"
+    ],
+    "property_names": [
+      "m_angRotation",
+      "m_hActiveWeapon",
+      "m_hOwnerEntity",
+      "m_hViewModel",
+      "m_hWeapon",
+      "m_iTeamNum",
+      "m_nModelIndex",
+      "m_vecOrigin"
+    ],
+    "runtime_dispatch_verified": false,
+    "note": "Registration/string evidence only. No validated entity, bone, attachment or static-prop dispatch ABI yet."
+  },
+  "engine": {
+    "sha256": "8a6d468059394bf4cfce32f11dcba12ef45de88da1373084d5a2916d0bf7ba86",
+    "timestamp": 1782845142,
+    "image_size": 7598080,
+    "interfaces": [
+      {
+        "name": "EngineTraceClient003",
+        "name_rva": "0x3876c0",
+        "registration_rva": "0x340e60",
+        "factory_rva": "0x1774e0",
+        "factory_bytes": "b85cfa4210c3",
+        "object_rva": "0x42fa5c",
+        "vtable_rva": "0x387474",
+        "first_9_method_rvas": [
+          "0x177630",
+          "0x177600",
+          "0x178950",
+          "0x177990",
+          "0x179ff0",
+          "0x179760",
+          "0x177d60",
+          "0x177da0",
+          "0x17a240"
+        ]
+      },
+      {
+        "name": "VModelInfoClient004",
+        "name_rva": "0x390484",
+        "registration_rva": "0x3438e0",
+        "factory_rva": "0x1b0950",
+        "factory_bytes": "b848224310c3",
+        "object_rva": "0x432248",
+        "vtable_rva": "0x3902e4",
+        "first_9_method_rvas": [
+          "0x1b0e30",
+          "0x1b0420",
+          "0x1b0440",
+          "0x1afba0",
+          "0x1b0220",
+          "0x1b0190",
+          "0x1b02b0",
+          "0x1afbd0",
+          "0x1afc20"
+        ]
+      },
+      {
+        "name": "StaticPropMgrClient005",
+        "name_rva": "0x3972b4",
+        "registration_rva": "0x344c70",
+        "factory_rva": "0x1f3ea0",
+        "factory_bytes": "b8bc334310c3",
+        "object_rva": "0x4333bc",
+        "vtable_rva": "0x396fa4",
+        "first_9_method_rvas": [
+          "0x1f6260",
+          "0x1f6d50",
+          "0x1f76f0",
+          "0x1f76e0",
+          "0x1f6340",
+          "0x1f6e10",
+          "0x1f43e0",
+          "0x1f4420",
+          "0x1f7010"
+        ]
+      }
+    ],
+    "receive_table_names": [],
+    "property_names": [],
+    "runtime_dispatch_verified": false,
+    "note": "Registration/string evidence only. No validated entity, bone, attachment or static-prop dispatch ABI yet."
+  }
+}

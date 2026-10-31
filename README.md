@@ -1,5 +1,7 @@
 # L4D2DangoMusic
 
+> **实体歌词跟随版**：基于最新正式版 **v0.9.4**，增加锁定实体并持续显示当前歌词的可选功能；不包含角色台词采集、字幕字典或字幕钩子。入口：更多设置 → 实体持续跟随歌词。用法及限制见 [实体歌词跟随指南](docs/entity-follow-preview.md)。
+
 > 当前稳定版 [v0.9.4](https://github.com/yeyunyyds/LDBDangoMusic/releases/tag/v0.9.4) 提供原生 HUD 菜单、世界歌词、墙面及地面挂画。挂画、挂画复用、背景与地面文字随视角转向默认关闭；使用方法见 [场景挂画指南](docs/wall-experiment-guide.md)。
 
 为《求生之路 2》（Left 4 Dead 2）提供音乐歌词显示的 L4N 插件。通过兼容 LX / BLF 的本地音乐 API 获取播放进度和歌词，在游戏中呈现带逐字动画的歌词，并支持世界空间定位、歌名与作者显示以及游戏内调节。

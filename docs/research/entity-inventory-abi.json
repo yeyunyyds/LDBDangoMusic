@@ -1,0 +1,97 @@
+{
+  "static_profile_verified": true,
+  "runtime_dispatch_verified": false,
+  "entity_interface": "VClientEntityList003",
+  "entity_object_rva": "0x74a574",
+  "entity_vtable_rva": "0x564b60",
+  "interface_subobject_offset": "0x10014",
+  "entry_base_from_interface": "-0x10010",
+  "entry_size": 16,
+  "entry_bits": 12,
+  "serial_bits": 20,
+  "networkable_cache_offset": "0x28",
+  "cache_stride": 8,
+  "networked_limit": 2048,
+  "model_interface": "VModelInfoClient004",
+  "checks": {
+    "HighestCode": {
+      "rva": "0xb8db0",
+      "bytes": "8b4124c3"
+    },
+    "HandleCode": {
+      "rva": "0xbb4c0",
+      "bytes": "558bec8b550883faff74218bc225ff0f00002d01100000c1e004"
+    },
+    "ModelCode": {
+      "rva": "0x1b0420",
+      "bytes": "558bec8b450850e87428edff8bc8e8fd18eeff5dc20400"
+    },
+    "NameCode": {
+      "rva": "0x1afba0",
+      "bytes": "558bec8b450885c07509"
+    }
+  },
+  "networkable_slots": {
+    "client_class": 1,
+    "dormant": 7,
+    "data_base": 10
+  },
+  "network_parent_layout": {
+    "moveparent": {
+      "offset": "0x134",
+      "bytes": 4
+    },
+    "m_iParentAttachment": {
+      "offset": "0x1f8",
+      "bytes": 1
+    }
+  },
+  "network_tables_verified": 257,
+  "dormancy_patterns": {
+    "index_guarded_boolean": 256,
+    "constant_false": 1
+  },
+  "runtime_hint_evidence": [
+    {
+      "previous_class_hint_rva": "0x4cc20",
+      "verified_tables": 128,
+      "sample": {
+        "table_rva": "0x53f134",
+        "class_getter_rva": "0x1e830",
+        "class_name": "CBaseParticleEntity"
+      }
+    },
+    {
+      "previous_class_hint_rva": "0x226ae0",
+      "verified_tables": 10,
+      "sample": {
+        "table_rva": "0x59f668",
+        "class_getter_rva": "0x222110",
+        "class_name": "CCSPlayer"
+      }
+    },
+    {
+      "previous_class_hint_rva": "0x2e5a0",
+      "verified_tables": 59,
+      "sample": {
+        "table_rva": "0x53eb20",
+        "class_getter_rva": "0x1dd90",
+        "class_name": "CBaseGrenade"
+      }
+    },
+    {
+      "previous_class_hint_rva": "0x41690",
+      "verified_tables": 60,
+      "sample": {
+        "table_rva": "0x53dfc0",
+        "class_getter_rva": "0x15900",
+        "class_name": "CBaseCombatWeapon"
+      }
+    }
+  ],
+  "notes": [
+    "No entity virtuals are dispatched: tiny class/data-base/dormancy getters are decoded or reported unknown.",
+    "RecvTable/RecvProp interpretation is bounded and shape-checked at runtime; offsets are network properties, not render poses.",
+    "Only the profiled model-info GetModel/GetModelName calls are dispatched; real game validation is pending."
+  ]
+}

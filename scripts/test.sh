@@ -40,3 +40,16 @@ g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc -Ivendor 
 python3 scripts/generate_menu_glyphs.py --check
 g++ -std=c++17 -O2 -Isrc -Ivendor -Ivendor/imgui tests/menu_font_test.cpp vendor/imgui/imgui.cpp vendor/imgui/imgui_draw.cpp vendor/imgui/imgui_tables.cpp vendor/imgui/imgui_widgets.cpp -o build/menu_font_test
 ./build/menu_font_test
+
+g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc tests/scene_attachment_test.cpp -o build/scene_attachment_test
+./build/scene_attachment_test
+g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc tests/source_entity_contract_test.cpp -o build/source_entity_contract_test
+./build/source_entity_contract_test
+g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc tests/source_entity_binding_test.cpp -o build/source_entity_binding_test
+./build/source_entity_binding_test
+
+# Optional replay input is generated from user DLLs, which are not redistributed.
+g++ -std=c++17 -O2 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc -Ivendor tests/source_entity_slot_replay.cpp -o build/source_entity_slot_replay
+
+g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc tests/entity_follow_test.cpp -o build/entity_follow_test
+./build/entity_follow_test

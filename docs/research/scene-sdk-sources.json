@@ -1,0 +1,38 @@
+{
+  "cdll_int.h": {
+    "sha256": "3491fcbc8bd46be0cc5cbce030836e1b925a2e350f07f5fb135cf9bd3e2c7123",
+    "source": "https://github.com/alliedmodders/hl2sdk/blob/l4d2/public/cdll_int.h"
+  },
+  "ivmodelinfo.h": {
+    "sha256": "4ee1f98f9e00edb6916ccccc551138db0319bb638b039a20bd4ac4c781e14714",
+    "source": "https://github.com/alliedmodders/hl2sdk/blob/l4d2/public/engine/ivmodelinfo.h"
+  },
+  "client_class.h": {
+    "sha256": "077b8eb1e71ebdf8d5767f563f5b6e9a70abd972745422ca4f17c6e4b2d3a818",
+    "source": "https://github.com/alliedmodders/hl2sdk/blob/l4d2/public/client_class.h"
+  },
+  "dt_recv.h": {
+    "sha256": "777d6d5a125a6adbd394e2f1ed21c45d5d8d3cf472b5e5f99ddc0eb9e081384d",
+    "source": "https://github.com/alliedmodders/hl2sdk/blob/l4d2/public/dt_recv.h"
+  },
+  "basehandle.h": {
+    "sha256": "2b9146358b551baa2620c9bfdeafa0c6ec90890fd22bf0d47811df10beaf38db",
+    "source": "https://github.com/alliedmodders/hl2sdk/blob/l4d2/public/basehandle.h"
+  },
+  "iclientrenderable.h": {
+    "sha256": "3dee603dd3357000a551cdaadd598909704b720126a3b0c6f5ac7ecd6b77cbcb",
+    "source": "https://github.com/alliedmodders/hl2sdk/blob/l4d2/public/iclientrenderable.h"
+  },
+  "iclientunknown.h": {
+    "sha256": "1df3c0e0716b4edcee64d97516ab5c323e1783006fd8015cf494ed5e14d60f38",
+    "source": "https://github.com/alliedmodders/hl2sdk/blob/l4d2/public/iclientunknown.h"
+  },
+  "iclientnetworkable.h": {
+    "sha256": "15382debbd6fe28b892fd00d8f4b7e9c029d832bb8a3f2f0f49758b81565ba60",
+    "source": "https://github.com/alliedmodders/hl2sdk/blob/l4d2/public/iclientnetworkable.h"
+  },
+  "icliententitylist.h": {
+    "sha256": "69d5b95964677f9d812aa31e234b2f4b27b6ea91c659474887fba291a8dd29a6",
+    "source": "https://github.com/alliedmodders/hl2sdk/blob/l4d2/public/icliententitylist.h"
+  }
+}

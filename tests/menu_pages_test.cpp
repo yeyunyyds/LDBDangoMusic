@@ -13,7 +13,8 @@ int main(){
  check(root.rows[3].label==u8"歌词颜色: [暖白浮光]");
  auto display=menus::display(base);check(display.rows[1].action==31&&display.rows[2].action==16&&display.rows[2].label==u8"同步偏移: [500ms]");
  for(auto doc:{menus::root(base,label),menus::display(base),menus::world(base),menus::metadata(base),menus::colors(base),menus::animation(base),menus::timing(base),menus::more(),menus::wall(base,"active"),menus::wallAppearance(base),menus::palette(base,false),menus::palette(base,true),menus::channels(base,false)})check(doc.rows.size()<=9);
- for(auto id:{35,36,37,38,39,40,41,720,721,722,723,730,741})check(hud::opensChild(id));
+ check(menus::more().rows.back().action==800&&menus::more().rows[2].action==810);
+ for(auto id:{35,36,37,38,39,40,41,720,721,722,723,730,741,800,810,811,812})check(hud::opensChild(id));
  current.translation=true;check(menus::saveLabel(current,base,false,false)==u8"保存设置: [未保存]");
  auto firstRequest=current;current.offset=600;
  // An older completed write only advances the saved baseline to that request;
