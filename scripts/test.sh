@@ -58,3 +58,6 @@ g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc -Ivendor 
 ./build/dialogue_test
 g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc -Ivendor tests/caption_resources_test.cpp -o build/caption_resources_test
 ./build/caption_resources_test
+
+g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc tests/caption_binding_test.cpp -o build/caption_binding_test
+./build/caption_binding_test
