@@ -79,5 +79,6 @@ inline std::vector<Candidate> candidates(const inventory::Frame& f,const GameCam
  std::sort(out.begin(),out.end(),[](const Candidate& a,const Candidate& b){return a.score==b.score?a.handle<b.handle:a.score<b.score;});return out;
 }
 struct Settings {bool enabled=false,sample=false;Filter filter=Filter::Objects;Vec3 offset{0,0,32};inventory::FollowRequest target;uint64_t revision=0;};
+inline bool useEntityRoute(const Settings& s,uint32_t epoch){return s.enabled&&s.target.enabled&&s.target.epoch==epoch;}
 inline Vec3 anchor(const Pose& p,const Settings& s){return scene::point(p.matrix,s.offset);}
 }

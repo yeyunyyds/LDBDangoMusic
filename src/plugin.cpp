@@ -335,7 +335,7 @@ void WINAPI render(IDirect3DDevice9* dev,const PresentInfo* present){
  if(cfg.enabled&&cfg.worldLyrics&&cfg.debugOverlay&&!preview&&!wallMode){auto status=image(dev,cameraValid?std::string("GAME CAMERA: ACTIVE (experimental)"):std::string("GAME CAMERA: ")+source_camera::status()+" - screen fallback");draw(dev,status,16,cfg.demo?64.f:16.f,std::min(.65f,desc.Width*.9f/std::max(status.width,1)),.8f,cameraValid?0x99ffbb:0xffcc88);}
  if(!cfg.enabled&&!preview){}
  else if(preview){if(wallPositionPreview.load())drawWallLayoutPreview(dev,gameFrame,cameraGood,pose,float(desc.Width),float(desc.Height));else drawPositionPreview(dev,gameFrame,cameraValid,pose,float(desc.Width),float(desc.Height));}
- else if(followState->enabled){
+ else if(follow::useEntityRoute(*followState,gameFrame.epoch)){
  auto entities=std::atomic_load(&source_entities::followSnapshot);auto result=follow::resolve(*entities,followState->target,gameFrame.epoch,uint64_t(now()));
  if(cameraGood&&result.ready){auto target=follow::anchor(result,*followState);auto record=follow::find(*entities,follow::effectiveHandle(*entities,followState->target));
  if(followState->sample){peakEntries.clear();lyricLifecycle.reset();auto label=std::string(u8"实体持续跟随歌词 · ")+(record?record->className:std::string{});Placement marker;if(projectAnchor(gameFrame,target,float(desc.Width),float(desc.Height),cfg.worldHeight,cfg.size,marker)){auto im=image(dev,label);float scale=std::clamp(marker.scale,.5f,1.5f);styled(dev,im,marker.x-im.width*scale*.5f,marker.y-im.height*scale*.5f,scale,cfg.opacity,cfg.textColor);}}
@@ -473,8 +473,8 @@ const char* followMenu(){auto state=std::atomic_load(&followSettings);auto frame
 void followAction(uintptr_t id){auto next=*std::atomic_load(&followSettings);followNotice.clear();followNoticeUntil=uint64_t(now())+2000;
  if(id==820)next.enabled=!next.enabled;
  else if(id==823)next.sample=!next.sample;
- else if(id==824)next.target={};
- else if(id>=825&&id<825+follow::FilterCount){next.filter=follow::Filter(id-825);next.target={};}
+ else if(id==824||id==847){next.target={};next.enabled=false;followNotice=u8"已关闭实体跟随，恢复普通歌词";}
+ else if(id>=825&&id<825+follow::FilterCount){next.filter=follow::Filter(id-825);next.target={};next.enabled=false;}
  else if(id>=840&&id<=846){if(id==846)next.offset={0,0,32};else{auto axis=(id-840)/2;float* v=axis==0?&next.offset.x:axis==1?&next.offset.y:&next.offset.z;*v=std::clamp(*v+(id%2?10.f:-10.f),-512.f,512.f);}}
  else if(id==821||id==822){auto frame=std::atomic_load(&source_entities::snapshot);auto camera=std::atomic_load(&source_camera::snapshot);CameraPose eye;
  if(!usableCamera(*camera,uint64_t(now()))||!cameraPose(*camera,eye)){followNotice=u8"等待有效游戏相机";return;}
@@ -509,6 +509,7 @@ const char* menuActionImpl(void* argument){uintptr_t id=reinterpret_cast<uintptr
  if(id>=3000&&id<=3103){int index=int(id-3000)/10,axis=int(id-3000)%10;if(index>=2+MaxLyricSlots||axis>3)return nullptr;positionPreview=true;return positionAxisMenu(c,index,axis);}
  if(id>=20000&&id<=31304){int code=int(id-20000),index=code/1000,axis=code%1000/100,choice=code%100;if(index>2+MaxLyricSlots||axis>3||choice>4)return nullptr;positionPreview=true;if(index==2+MaxLyricSlots)adjustLyricGroup(c.layout,axis,choice);else adjustPosition(c.layout,index,axis,choice);changeSettings(c);return positionAxisMenu(c,index,axis);}
  positionPreview=false;
+ if(id==847){followAction(id);if(!c.enabled){c.enabled=true;changeSettings(c);}return nullptr;}
  if(id==810)return followMenu();
  if(id==811){std::string rows;for(unsigned i=0;i<follow::FilterCount;++i)rows+=item(follow::filterName(follow::Filter(i)),825+i);return page(u8"跟随目标筛选",rows);}
  if(id==812){auto f=std::atomic_load(&followSettings);return page(u8"实体局部位置偏移",item("X -10",840)+item("X +10",841)+item("Y -10",842)+item("Y +10",843)+item("Z -10",844)+item("Z +10",845)+item(u8"重置为上方 32",846)+item(menus::value("X / Y / Z",positionValue(f->offset.x)+" / "+positionValue(f->offset.y)+" / "+positionValue(f->offset.z)),0));}
@@ -584,7 +585,7 @@ const char* menuAction(void* argument){
  auto id=reinterpret_cast<uintptr_t>(argument);auto result=menuActionImpl(argument);
  if(!hud::opensChild(id)&&id){auto c=*std::atomic_load(&settings);std::string text=u8"设置已实时应用";
  auto status=[&](const char* label,bool value){text=std::string(label)+(value?u8"：已开启":u8"：已关闭");};
- switch(id){case 820:case 821:case 822:case 823:case 824:case 825:case 826:case 827:case 828:case 829:case 830:case 831:case 832:case 833:case 840:case 841:case 842:case 843:case 844:case 845:case 846:text=followNotice.empty()?u8"实体跟随设置已应用":followNotice;break;case 801:status(u8"实体诊断采集",source_entities::enabled.load());break;case 802:text=u8"已请求后台导出当前实体快照";break;case 1:status(u8"歌词显示",c.enabled);break;case 2:status(u8"翻译",c.translation);break;case 3:status(u8"抖动",c.wiggle);break;case 4:status(u8"弹跳",c.pop);break;case 5:status(u8"歌名",c.showTitle);break;case 6:status(u8"作者",c.showArtist);break;case 7:status(u8"世界歌词",c.worldLyrics);break;case 8:status(u8"柔光",c.glow);break;case 9:status(u8"靠近后退（悬浮世界歌词）",c.keepAway);break;case 28:status(u8"按演唱进度显字",c.progressiveReveal);break;case 29:status(u8"沿用可见锚点",c.reuseVisibleAnchor);break;case 32:text=c.fallbackReveal?u8"无逐字时间轴：估算渐显":u8"无逐字时间轴：整句显示";break;case 18:case 2098:text=u8"已提交保存设置";break;case 2099:text=u8"已结束位置预览";break;case 700:status(u8"场景挂画",c.wallEnabled);break;case 702:text=c.wallLiveLyrics?u8"挂画内容：歌词轮换":u8"挂画内容：固定示例";break;case 703:status(u8"挂画背景",c.wallBackdrop);break;case 705:status(u8"挂画调试标识",c.wallDebug);break;case 709:text=c.wallAutomatic?u8"自动寻找墙面":u8"手动挂画轮换";break;case 710:status(u8"新句无墙面时固定世界歌词",c.wallFallback);break;case 704:text=u8"已请求清空挂画，下一句重新寻找墙面";break;default:break;}
+ switch(id){case 847:case 820:case 821:case 822:case 823:case 824:case 825:case 826:case 827:case 828:case 829:case 830:case 831:case 832:case 833:case 840:case 841:case 842:case 843:case 844:case 845:case 846:text=followNotice.empty()?u8"实体跟随设置已应用":followNotice;break;case 801:status(u8"实体诊断采集",source_entities::enabled.load());break;case 802:text=u8"已请求后台导出当前实体快照";break;case 1:status(u8"歌词显示",c.enabled);break;case 2:status(u8"翻译",c.translation);break;case 3:status(u8"抖动",c.wiggle);break;case 4:status(u8"弹跳",c.pop);break;case 5:status(u8"歌名",c.showTitle);break;case 6:status(u8"作者",c.showArtist);break;case 7:status(u8"世界歌词",c.worldLyrics);break;case 8:status(u8"柔光",c.glow);break;case 9:status(u8"靠近后退（悬浮世界歌词）",c.keepAway);break;case 28:status(u8"按演唱进度显字",c.progressiveReveal);break;case 29:status(u8"沿用可见锚点",c.reuseVisibleAnchor);break;case 32:text=c.fallbackReveal?u8"无逐字时间轴：估算渐显":u8"无逐字时间轴：整句显示";break;case 18:case 2098:text=u8"已提交保存设置";break;case 2099:text=u8"已结束位置预览";break;case 700:status(u8"场景挂画",c.wallEnabled);break;case 702:text=c.wallLiveLyrics?u8"挂画内容：歌词轮换":u8"挂画内容：固定示例";break;case 703:status(u8"挂画背景",c.wallBackdrop);break;case 705:status(u8"挂画调试标识",c.wallDebug);break;case 709:text=c.wallAutomatic?u8"自动寻找墙面":u8"手动挂画轮换";break;case 710:status(u8"新句无墙面时固定世界歌词",c.wallFallback);break;case 704:text=u8"已请求清空挂画，下一句重新寻找墙面";break;default:break;}
  if(id>=100&&id<=105)text=std::string(u8"预设：")+presetName(c.presetId);
  if(id>=10000&&id<11209)text=std::string(id>=11000?u8"光晕颜色：":u8"正文颜色：")+colorText(id>=11000?c.accent:c.textColor);
  if(id>=2201&&id<=2209)text=u8"歌词位置数量："+std::to_string(c.layout.lyricCount);
@@ -620,7 +621,7 @@ void updateHudAppearance(const hud::Appearance& appearance){std::lock_guard<std:
 std::string nativeMenuNotice(){auto notice=std::atomic_load(&menuNotice);auto tick=uint64_t(now());return tick>=notice->tick&&tick-notice->tick<2000?notice->text:std::string{};}
 const char* openNativeMenu(void*){nativeHud.open();return nullptr;}
 const char* nativeEntryMenu(){static std::string entry;char callback[32];std::snprintf(callback,sizeof(callback),"0x%lx",static_cast<unsigned long>(reinterpret_cast<uintptr_t>(&openNativeMenu)));entry="\"L4D2DangoMusic\" { \"打开歌词控制面板\" { \"callback\" \""+std::string(callback)+"\" \"user_data\" \"0x0\" } }";return entry.c_str();}
-const char* rootMenu(bool title){if(title)return "L4D2DangoMusic 0.9.4";positionPreview=false;wallPositionPreview=false;auto c=*std::atomic_load(&settings);auto saved=std::atomic_load(&savedSettings);auto state=saveState.load();bool saving=state==1||bool(std::atomic_load(&pendingSave));return menuPage(menus::root(c,menus::saveLabel(c,saved?*saved:Config{},saving,state<0,bool(saved))));}
+const char* rootMenu(bool title){if(title)return "L4D2DangoMusic 0.9.4";positionPreview=false;wallPositionPreview=false;auto c=*std::atomic_load(&settings);auto saved=std::atomic_load(&savedSettings);auto state=saveState.load();bool saving=state==1||bool(std::atomic_load(&pendingSave));return menuPage(menus::root(c,menus::saveLabel(c,saved?*saved:Config{},saving,state<0,bool(saved)),std::atomic_load(&followSettings)->enabled));}
 
 class LyricsPlugin final:public IL4NPlugin {
  bool started=false,attempted=false,duplicate=false;HANDLE renderOwner=nullptr;

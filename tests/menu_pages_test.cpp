@@ -11,6 +11,7 @@ int main(){
  auto root=menus::root(current,label);check(root.rows.size()<=9&&root.rows[6].action==18);
  for(auto& row:root.rows)check(row.action!=10&&row.action!=11&&row.action!=31&&row.action!=16);
  check(root.rows[3].label==u8"歌词颜色: [暖白浮光]");
+ auto following=menus::root(base,label,true);check(following.rows.size()==9&&following.rows[6].action==18&&following.rows[8].action==847&&following.rows[0].label.find(u8"实体跟随")!=std::string::npos);
  auto display=menus::display(base);check(display.rows[1].action==31&&display.rows[2].action==16&&display.rows[2].label==u8"同步偏移: [500ms]");
  for(auto doc:{menus::root(base,label),menus::display(base),menus::world(base),menus::metadata(base),menus::colors(base),menus::animation(base),menus::timing(base),menus::more(),menus::wall(base,"active"),menus::wallAppearance(base),menus::palette(base,false),menus::palette(base,true),menus::channels(base,false)})check(doc.rows.size()<=9);
  check(menus::more().rows.back().action==800&&menus::more().rows[2].action==810);

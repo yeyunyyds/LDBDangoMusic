@@ -49,7 +49,9 @@ int main(){
  // HUD continues working when the lyric switch itself is off.
  press('1');present();require(hudPixels>10000,"Disabling lyrics also hid the menu");press('1');press('8');press('4');press('1');press('2');press('1');press('0');press('3');press('6');press('6');press('0');press('5');press('7');press('0');press('1');press('1');press('0');press('0');press('7');saved([](const auto& c){return c.at("hudAppearance").value("preset",0)==1;});press(VK_ESCAPE);
  // Entity-follow controls stay on the same live page without a game target.
- menu(plugin,false);present();present();press('8');press('3');press('1');press('5');press('5');press('7');press('0');press('0');press(VK_ESCAPE);
+ menu(plugin,false);present();present();press('8');press('3');press('1');press('5');press('5');press('7');press('1');press('0');press('0');
+ auto offCount=[&](){std::ifstream log(root/L"build/L4D2DangoMusic/L4D2DangoMusic.log");std::string line;unsigned count=0;while(std::getline(log,line))if(line.find("Entity follow enabled=0")!=std::string::npos)++count;return count;};
+ auto offBefore=offCount();press('9');require(offCount()>offBefore,"Root return-to-normal action did not stop entity following");press(VK_ESCAPE);
  // Wall reuse, floor options and the fixed layout preview use real native keys.
  menu(plugin,false);present();present();press('6');press('7');press('8');press('4');press('5');press('3');press('3');press('1');press('3');press('6');
  saved([](const auto& c){return c.value("wallReuse",false)&&c.value("wallSurface",0)==1&&c.value("wallFloorFollow",false)&&std::abs(c.at("wallLayout").at("lyrics").at("x").template get<float>()-.51f)<.001f;});press(VK_ESCAPE);

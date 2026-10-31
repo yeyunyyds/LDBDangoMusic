@@ -11,10 +11,10 @@ inline std::string saveLabel(const Config& current,const Config& saved,bool savi
  bool dirty=!hasSaved||encodeConfig(current)!=encodeConfig(saved);
  return value(u8"保存设置",dirty?u8"未保存":saving?u8"保存中":u8"已保存")+(saving&&dirty?u8" · 保存中":failed?u8" · 保存失败，见日志":"");
 }
-inline hud::Document root(const Config& c,const std::string& save){return {"L4D2DangoMusic 0.9.4",{
- {value(u8"歌词显示",on(c.enabled)),1},{u8"显示与歌词信息",20},{u8"位置与数量（固定预览）",23},
+inline hud::Document root(const Config& c,const std::string& save,bool following=false){hud::Document doc{"L4D2DangoMusic 0.9.4",{
+ {value(u8"歌词显示",std::string(on(c.enabled))+(following?u8" · 实体跟随":"")),1},{u8"显示与歌词信息",20},{u8"位置与数量（固定预览）",23},
  {value(u8"歌词颜色",presetName(colorPresetId(c))),21},{u8"动画、速度与停留",22},{value(u8"场景挂画",on(c.wallEnabled)),30},
- {save,18},{u8"更多设置",35}}};}
+ {save,18},{u8"更多设置",35}}};if(following)doc.rows.push_back({u8"返回普通歌词（关闭实体跟随）",847});return doc;}
 inline hud::Document display(const Config& c){return {u8"显示与歌词信息",{
  {value(u8"翻译",on(c.translation)),2},{value(u8"单行长度",number(c.lineWidthScale)+"x"),31},
  {value(u8"同步偏移",std::to_string(c.offset)+"ms"),16},{value(u8"世界歌词",on(c.worldLyrics)),7},
