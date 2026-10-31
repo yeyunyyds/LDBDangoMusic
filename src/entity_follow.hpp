@@ -78,7 +78,14 @@ inline std::vector<Candidate> candidates(const inventory::Frame& f,const GameCam
  float cosine=(ray.x*eye.forward.x+ray.y*eye.forward.y+ray.z*eye.forward.z)/distance;if(cosine<.5f)continue;out.push_back({r.handle,(1-cosine)*1000+distance*.0001f,r.className});}
  std::sort(out.begin(),out.end(),[](const Candidate& a,const Candidate& b){return a.score==b.score?a.handle<b.handle:a.score<b.score;});return out;
 }
-struct Settings {bool enabled=false,sample=false;Filter filter=Filter::Objects;Vec3 offset{0,0,32};inventory::FollowRequest target;uint64_t revision=0;};
+struct Settings {bool enabled=false,sample=false;Filter filter=Filter::Objects;Vec3 offset{0,0,32};float size=1;inventory::FollowRequest target;uint64_t revision=0;};
+inline float layoutAxis(const Settings& s,int axis){return axis==0?s.offset.y:axis==1?s.offset.z:axis==2?s.offset.x:s.size;}
+inline void adjustLayout(Settings& s,int axis,int choice){
+ if(axis<0||axis>3||choice<0||choice>4)return;float& value=axis==0?s.offset.y:axis==1?s.offset.z:axis==2?s.offset.x:s.size;
+ if(choice==4){value=layoutAxis(Settings{},axis);return;}
+ const float position[]={10,1,-1,-10},depth[]={-10,-1,1,10},scale[]={-.25f,-.05f,.05f,.25f};
+ value=std::clamp(value+(axis==3?scale[choice]:axis==2?depth[choice]:position[choice]),axis==3?.25f:-512.f,axis==3?3.f:512.f);
+}
 inline bool useEntityRoute(const Settings& s,uint32_t epoch){return s.enabled&&s.target.enabled&&s.target.epoch==epoch;}
 inline Vec3 anchor(const Pose& p,const Settings& s){return scene::point(p.matrix,s.offset);}
 }

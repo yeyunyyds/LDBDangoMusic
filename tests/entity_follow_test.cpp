@@ -7,6 +7,9 @@ bool near(float a,float b){return std::abs(a-b)<.01f;}
 inventory::Record object(uint32_t handle,Vec3 at,const char* name="CPhysicsProp"){inventory::Record r;r.handle=handle;r.index=handle&4095;r.serial=handle>>12;r.className=name;r.networkOrigin=at;r.networkAngles=Vec3{};r.parent=0xffffffff;r.parentAttachment=0;r.dormant=false;return r;}
 int main(){
  follow::Settings routing;check(!follow::useEntityRoute(routing,7));routing.enabled=true;check(!follow::useEntityRoute(routing,7));routing.target={true,7,0x9001};check(follow::useEntityRoute(routing,7)&&!follow::useEntityRoute(routing,8));routing.target={};check(!follow::useEntityRoute(routing,7));
+ follow::Settings layout;follow::adjustLayout(layout,0,0);follow::adjustLayout(layout,1,1);follow::adjustLayout(layout,2,3);follow::adjustLayout(layout,3,2);check(near(layout.offset.y,10)&&near(layout.offset.z,33)&&near(layout.offset.x,10)&&near(layout.size,1.05f));
+ for(int i=0;i<100;++i){follow::adjustLayout(layout,0,0);follow::adjustLayout(layout,3,3);}check(layout.offset.y==512&&layout.size==3);
+ for(int axis=0;axis<4;++axis)follow::adjustLayout(layout,axis,4);check(near(layout.offset.x,0)&&near(layout.offset.y,0)&&near(layout.offset.z,32)&&near(layout.size,1));
  inventory::Frame f;f.epoch=7;f.tick=1000;f.records.push_back(object(0x9001,{100,0,0}));inventory::FollowRequest req{true,7,0x9001};follow::Settings settings;settings.target=req;
  auto p=follow::resolve(f,req,7,1100);check(p.ready);auto a=follow::anchor(p,settings);check(near(a.x,100)&&near(a.z,32));
  f.records[0].networkOrigin=Vec3{120,5,0};auto moved=follow::resolve(f,req,7,1100);check(moved.ready&&near(follow::anchor(moved,settings).x,120));

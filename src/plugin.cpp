@@ -39,6 +39,7 @@ using namespace dango;
 void captureSourceFeatures(const GameCameraFrame& frame){source_walls::onFrame(frame);source_entities::onFrame(frame);}
 hud::NativeHud nativeHud;
 std::shared_ptr<const follow::Settings> followSettings=std::make_shared<follow::Settings>();
+std::atomic<bool> followPositionPreview{false};
 std::string followNotice;uint64_t followNoticeUntil=0;
 uint64_t lastFollowRevision=0;
 std::string buildNativeMenu(uintptr_t);
@@ -152,26 +153,28 @@ struct PeakEntry {
  PeakEntry(const Line& l,int64_t next,int i,double tick,Vec3 point,uint32_t e):line(l),animation(l,next),translated(peak::translationAnimation(animation,l.translation,next)),motion(animation.glyphs.size()),translationMotion(translated.glyphs.size()),index(i),born(tick),lastPlaced(tick),anchor(point),epoch(e){}
 };
 std::vector<std::unique_ptr<PeakEntry>> peakEntries;int peakIndex=-1;bool lastWorldMode=false;float lastWidth=0,lastHeight=0;
-void peakFrame(IDirect3DDevice9* dev,const State& state,int at,int64_t song,bool world,const GameCameraFrame& camera,CameraPose pose,float width,float height,const Vec3* attached=nullptr){
+void peakFrame(IDirect3DDevice9* dev,const State& state,int at,int64_t song,bool world,const GameCameraFrame& camera,CameraPose pose,float width,float height,const Vec3* attached=nullptr,float attachmentSize=1){
  double clock=now()/1000.;
  bool contextChanged=lastWorldMode!=world||lastWidth!=width||lastHeight!=height||(!peakEntries.empty()&&world&&peakEntries.back()->epoch!=camera.epoch);
  lastWorldMode=world;lastWidth=width;lastHeight=height;
  if(contextChanged){lyricLifecycle.reset();peakEntries.clear();}
  std::string text=at>=0?state.timeline[at].text:std::string{};
- lyricLifecycle.update(state.key,at,text,clock,cfg.lingerMs,cfg.transition,false,cfg.layout.lyricCount);
+ // An attached target is a single subtitle surface: replace its current
+ // sentence immediately instead of piling outgoing leases onto the same anchor.
+ lyricLifecycle.update(state.key,at,text,clock,attached?0:cfg.lingerMs,attached?0:cfg.transition,false,attached?1:cfg.layout.lyricCount);
  peakEntries.erase(std::remove_if(peakEntries.begin(),peakEntries.end(),[&](auto& entry){return std::none_of(lyricLifecycle.entries.begin(),lyricLifecycle.entries.end(),[&](auto& lease){return lease.id==entry->leaseId;});}),peakEntries.end());
  for(auto& lease:lyricLifecycle.entries){auto existing=std::find_if(peakEntries.begin(),peakEntries.end(),[&](auto& e){return e->leaseId==lease.id;});
  if(existing!=peakEntries.end()){(*existing)->retired=lease.retired;continue;}
  auto& line=state.timeline[lease.index];auto next=lease.index+1<int(state.timeline.size())?state.timeline[lease.index+1].start:line.start+5000;
  auto entry=std::make_unique<PeakEntry>(line,next,lease.index,clock,world?(attached?*attached:anchors.current):Vec3{},camera.epoch);entry->leaseId=lease.id;entry->retired=lease.retired;entry->slot=lease.slot;
  if(world&&!attached&&cfg.keepAway){entry->anchor=peak::keepDistance(entry->anchor,pose,cfg.layout.lyrics[lease.slot].distance);if(lease.retired<0){anchors.slots.remember(lease.slot,entry->anchor);anchors.current=entry->anchor;}}
- const auto& position=cfg.layout.lyrics[lease.slot];auto initial=screenComponent(position,width,height,cfg.size);if(world)worldComponent(camera,entry->anchor,position,width,height,cfg.worldHeight,cfg.size,initial);float maxPixels=width*cfg.width*cfg.lineWidthScale/std::max(initial.scale,.02f);
+ auto position=attached?ComponentPosition{.5f,.44f,200,attachmentSize}:cfg.layout.lyrics[lease.slot];auto initial=screenComponent(position,width,height,cfg.size);if(world)worldComponent(camera,entry->anchor,position,width,height,cfg.worldHeight,cfg.size,initial);float maxPixels=width*cfg.width*cfg.lineWidthScale/std::max(initial.scale,.02f);
  entry->layout=peak::layout(entry->animation.glyphs,[&](const std::string& glyph){return image(dev,glyph).advance;},maxPixels,cfg.size*1.35f);entry->translationLayout=peak::layout(entry->translated.glyphs,[&](const std::string& glyph){return image(dev,glyph).advance;},maxPixels/.72f,cfg.size*1.35f);peakEntries.push_back(std::move(entry));}
  visibleLyricIndex=at;
  for(size_t i=0;i<peakEntries.size();){auto& entry=*peakEntries[i];ExitFrame life;if(entry.retired>=0)life=exitFrame((clock-entry.retired)*1000,cfg.lingerMs,cfg.transition);
  if(life.done){peakEntries.erase(peakEntries.begin()+i);continue;}++i;
- const auto& position=cfg.layout.lyrics[entry.slot];Placement place=screenComponent(position,width,height,cfg.size);
- if(world){if(attached){entry.anchor=*attached+pose.right*((position.x-.5f)*80)+pose.up*((.44f-position.y)*80);}
+ auto position=attached?ComponentPosition{.5f,.44f,200,attachmentSize}:cfg.layout.lyrics[entry.slot];Placement place=screenComponent(position,width,height,cfg.size);
+ if(world){if(attached){entry.anchor=*attached;}
  if(!attached&&entry.retired<0&&refreshWorldComponentAnchor(camera,pose,position,entry.anchor,cfg.reuseVisibleAnchor,cfg.reuseDistanceFactor,clock,entry.lastPlaced,cfg.reanchorMs)){anchors.slots.remember(entry.slot,entry.anchor);anchors.current=entry.anchor;}
  if(!attached&&cfg.keepAway){entry.anchor=peak::keepDistance(entry.anchor,pose,position.distance);if(entry.retired<0){anchors.slots.remember(entry.slot,entry.anchor);anchors.current=entry.anchor;}}if(!worldComponent(camera,entry.anchor,position,width,height,cfg.worldHeight,cfg.size,place))continue;}
  float scale=place.scale,center=place.x,top=place.y-entry.layout.height*scale*.5f;
@@ -333,13 +336,13 @@ void WINAPI render(IDirect3DDevice9* dev,const PresentInfo* present){
  auto camera=std::atomic_load(&source_camera::snapshot);const auto& gameFrame=*camera;CameraPose pose;
  bool cameraGood=usableCamera(gameFrame,now())&&cameraPose(gameFrame,pose);bool cameraValid=cfg.worldLyrics&&cameraGood;
  if(cfg.enabled&&cfg.worldLyrics&&cfg.debugOverlay&&!preview&&!wallMode){auto status=image(dev,cameraValid?std::string("GAME CAMERA: ACTIVE (experimental)"):std::string("GAME CAMERA: ")+source_camera::status()+" - screen fallback");draw(dev,status,16,cfg.demo?64.f:16.f,std::min(.65f,desc.Width*.9f/std::max(status.width,1)),.8f,cameraValid?0x99ffbb:0xffcc88);}
- if(!cfg.enabled&&!preview){}
+ if(!cfg.enabled&&!preview&&!followPositionPreview.load()){}
  else if(preview){if(wallPositionPreview.load())drawWallLayoutPreview(dev,gameFrame,cameraGood,pose,float(desc.Width),float(desc.Height));else drawPositionPreview(dev,gameFrame,cameraValid,pose,float(desc.Width),float(desc.Height));}
  else if(follow::useEntityRoute(*followState,gameFrame.epoch)){
  auto entities=std::atomic_load(&source_entities::followSnapshot);auto result=follow::resolve(*entities,followState->target,gameFrame.epoch,uint64_t(now()));
  if(cameraGood&&result.ready){auto target=follow::anchor(result,*followState);auto record=follow::find(*entities,follow::effectiveHandle(*entities,followState->target));
- if(followState->sample){peakEntries.clear();lyricLifecycle.reset();auto label=std::string(u8"实体持续跟随歌词 · ")+(record?record->className:std::string{});Placement marker;if(projectAnchor(gameFrame,target,float(desc.Width),float(desc.Height),cfg.worldHeight,cfg.size,marker)){auto im=image(dev,label);float scale=std::clamp(marker.scale,.5f,1.5f);styled(dev,im,marker.x-im.width*scale*.5f,marker.y-im.height*scale*.5f,scale,cfg.opacity,cfg.textColor);}}
- else if(display.lyrics)peakFrame(dev,*state,at,lyricPosition(position,cfg.demo?0:cfg.offset),true,gameFrame,pose,float(desc.Width),float(desc.Height),&target);
+ if(followState->sample||followPositionPreview.load()){peakEntries.clear();lyricLifecycle.reset();auto label=followPositionPreview.load()?std::string(u8"歌词 1 · 实体位置预览"):std::string(u8"实体持续跟随歌词 · ")+(record?record->className:std::string{});Placement marker;if(projectAnchor(gameFrame,target,float(desc.Width),float(desc.Height),cfg.worldHeight*followState->size,cfg.size,marker)){auto im=image(dev,label);float scale=marker.scale;styled(dev,im,marker.x-im.width*scale*.5f,marker.y-im.height*scale*.5f,scale,cfg.opacity,cfg.textColor);if(followPositionPreview.load()){auto translated=image(dev,u8"歌词翻译 · Translation");float ts=scale*.72f;styled(dev,translated,marker.x-translated.width*ts*.5f,marker.y+im.height*scale*.5f+8,ts,cfg.opacity,cfg.textColor);}}}
+ else if(display.lyrics)peakFrame(dev,*state,at,lyricPosition(position,cfg.demo?0:cfg.offset),true,gameFrame,pose,float(desc.Width),float(desc.Height),&target,followState->size);
  else{peakEntries.clear();lyricLifecycle.reset();}
  }else{peakEntries.clear();lyricLifecycle.reset();}
  }
@@ -467,9 +470,11 @@ const char* positionAxisMenu(const Config& c,int index,int axis){bool group=inde
  std::string rows;for(int choice=0;choice<5;++choice)rows+=item(choices[axis][choice],20000+index*1000+axis*100+choice);
  std::string value=positionValue(positionAxis(p,axis),axis<2);if(group){float lo=positionAxis(p,axis),hi=lo;for(int i=1;i<c.layout.lyricCount;++i){auto other=c.layout.lyrics[i];lo=std::min(lo,positionAxis(other,axis));hi=std::max(hi,positionAxis(other,axis));}value=positionValue(lo,axis<2)+" ~ "+positionValue(hi,axis<2);}
  return page((group?std::string(u8"全部歌词"):componentName(index))+" · "+names[axis]+": ["+value+"]",rows+item(group?u8"返回歌词列表":u8"返回此组件",group?2001:2100+index)+previewExitRows());}
-void setFollow(follow::Settings next){auto old=std::atomic_load(&followSettings);next.revision=old->revision+1;std::atomic_store(&followSettings,std::make_shared<const follow::Settings>(next));auto request=next.target;request.enabled=request.enabled&&next.enabled;std::atomic_store(&source_entities::followRequest,std::make_shared<const inventory::FollowRequest>(request));note("Entity follow enabled="+std::to_string(next.enabled)+" epoch="+std::to_string(next.target.epoch)+" handle="+std::to_string(next.target.handle)+" sample="+std::to_string(next.sample)+" offset="+std::to_string(next.offset.x)+","+std::to_string(next.offset.y)+","+std::to_string(next.offset.z));}
+void setFollow(follow::Settings next){auto old=std::atomic_load(&followSettings);next.revision=old->revision+1;std::atomic_store(&followSettings,std::make_shared<const follow::Settings>(next));auto request=next.target;request.enabled=request.enabled&&next.enabled;std::atomic_store(&source_entities::followRequest,std::make_shared<const inventory::FollowRequest>(request));note("Entity follow enabled="+std::to_string(next.enabled)+" epoch="+std::to_string(next.target.epoch)+" handle="+std::to_string(next.target.handle)+" sample="+std::to_string(next.sample)+" offset="+std::to_string(next.offset.x)+","+std::to_string(next.offset.y)+","+std::to_string(next.offset.z)+" size="+std::to_string(next.size));}
 const char* followMenu(){auto state=std::atomic_load(&followSettings);auto frame=std::atomic_load(&source_entities::followSnapshot);auto camera=std::atomic_load(&source_camera::snapshot);auto result=follow::resolve(*frame,state->target,camera->epoch,uint64_t(now()));std::string status=!state->enabled?u8"跟随未开启":!state->target.enabled?u8"请先锁定目标":result.status;if(state->enabled&&!std::atomic_load(&settings)->enabled)status=u8"歌词总开关已关闭";else if(state->enabled&&!usableCamera(*camera,uint64_t(now())))status=u8"等待有效游戏相机";if(!followNotice.empty()&&uint64_t(now())<followNoticeUntil)status=followNotice;auto target=follow::find(*frame,follow::effectiveHandle(*frame,state->target));if(target)status=target->className+" #"+std::to_string(target->index)+" · "+status;
- return page(u8"实体持续跟随歌词",item(menus::value(u8"跟随开关",on(state->enabled)),820)+item(u8"锁定准星附近物体（并开启）",821)+item(u8"切换下一个视野内目标",822)+item(menus::value(u8"目标筛选",follow::filterName(state->filter)),811)+item(menus::value(u8"内容",state->sample?u8"固定示例":u8"当前歌词"),823)+item(u8"局部位置偏移",812)+item(u8"清除当前目标",824)+item(menus::value(u8"状态",status),0)+item(u8"网络姿态；不含骨骼与墙体遮挡；本次会话生效",0));}
+ return page(u8"实体持续跟随歌词",item(menus::value(u8"跟随开关",on(state->enabled)),820)+item(u8"锁定准星附近物体（并开启）",821)+item(u8"切换下一个视野内目标",822)+item(menus::value(u8"目标筛选",follow::filterName(state->filter)),811)+item(menus::value(u8"内容",state->sample?u8"固定示例":u8"当前歌词"),823)+item(u8"位置与大小（固定预览）",812)+item(u8"清除当前目标",824)+item(menus::value(u8"状态",status),0)+item(u8"网络姿态；不含骨骼与墙体遮挡；本次会话生效",0));}
+const char* followLayoutMenu(){auto f=std::atomic_load(&followSettings);return page(u8"实体歌词位置 · 固定预览",item(menus::value(u8"左右",positionValue(f->offset.y)),813)+item(menus::value(u8"高度",positionValue(f->offset.z)),814)+item(menus::value(u8"前后偏移",positionValue(f->offset.x)),815)+item(menus::value(u8"大小",positionValue(f->size)+"x"),816)+item(u8"重置实体位置与大小",817)+item(u8"先锁定实体；调整沿实体局部坐标，本次会话有效",0));}
+const char* followLayoutAxisMenu(int axis){auto f=std::atomic_load(&followSettings);const char* names[]={u8"左右",u8"高度",u8"前后偏移",u8"大小"};const char* choices[][5]={{u8"向左 10",u8"向左 1",u8"向右 1",u8"向右 10",u8"恢复默认"},{u8"向上 10",u8"向上 1",u8"向下 1",u8"向下 10",u8"恢复默认"},{u8"向后 10",u8"向后 1",u8"向前 1",u8"向前 10",u8"恢复默认"},{"-0.25x","-0.05x","+0.05x","+0.25x",u8"恢复默认"}};std::string rows;for(int choice=0;choice<5;++choice)rows+=item(choices[axis][choice],8500+axis*10+choice);return page(menus::value(names[axis],positionValue(follow::layoutAxis(*f,axis))+(axis==3?"x":"")),rows);}
 void followAction(uintptr_t id){auto next=*std::atomic_load(&followSettings);followNotice.clear();followNoticeUntil=uint64_t(now())+2000;
  if(id==820)next.enabled=!next.enabled;
  else if(id==823)next.sample=!next.sample;
@@ -512,7 +517,10 @@ const char* menuActionImpl(void* argument){uintptr_t id=reinterpret_cast<uintptr
  if(id==847){followAction(id);if(!c.enabled){c.enabled=true;changeSettings(c);}return nullptr;}
  if(id==810)return followMenu();
  if(id==811){std::string rows;for(unsigned i=0;i<follow::FilterCount;++i)rows+=item(follow::filterName(follow::Filter(i)),825+i);return page(u8"跟随目标筛选",rows);}
- if(id==812){auto f=std::atomic_load(&followSettings);return page(u8"实体局部位置偏移",item("X -10",840)+item("X +10",841)+item("Y -10",842)+item("Y +10",843)+item("Z -10",844)+item("Z +10",845)+item(u8"重置为上方 32",846)+item(menus::value("X / Y / Z",positionValue(f->offset.x)+" / "+positionValue(f->offset.y)+" / "+positionValue(f->offset.z)),0));}
+ if(id==812)return followLayoutMenu();
+ if(id>=813&&id<=816)return followLayoutAxisMenu(int(id-813));
+ if(id==817||(id>=8500&&id<=8534)){auto f=*std::atomic_load(&followSettings);if(id==817){f.offset={0,0,32};f.size=1;}else{auto code=int(id-8500);follow::adjustLayout(f,code/10,code%10);}setFollow(f);return nullptr;}
+
  if((id>=820&&id<825+follow::FilterCount)||(id>=840&&id<=846)){followAction(id);return nullptr;}
  if(id==800){auto frame=std::atomic_load(&source_entities::snapshot);return page(u8"实体接口实验 · 只读诊断",item(menus::value(u8"定时采集",on(source_entities::enabled.load())),801)+item(u8"立即导出当前快照",802)+item(menus::value(u8"已识别实体",std::to_string(frame->records.size())),0)+item(menus::value(u8"扫描条目",std::to_string(frame->occupied)),0)+item(menus::value(u8"已写帧",std::to_string(source_entities::fileFrames.load())),0)+item(menus::value(u8"状态",frame->status),0)+item(u8"输出目录："+directory.u8string(),0)+item(u8"当前为网络坐标，不是骨骼或渲染姿态",0));}
  if(id==801){source_entities::enabled=!source_entities::enabled.load();if(source_entities::enabled.load())source_entities::resetRequested=true;return nullptr;}
@@ -611,12 +619,13 @@ const char* menuAction(void* argument){
 }
 std::string buildNativeMenu(uintptr_t id){
  source_entities::browseRequested=id==810||id==811;
+ followPositionPreview=id==812||(id>=813&&id<=816);
  if(!id)return rootMenu(false);
  if(id==24)return diagnosticMenu(false);
  auto result=menuActionImpl(reinterpret_cast<void*>(id));return result?result:std::string{};
 }
 void activateNativeMenu(uintptr_t id){menuAction(reinterpret_cast<void*>(id));}
-void closeNativeMenu(){positionPreview=false;wallPositionPreview=false;source_entities::browseRequested=false;}
+void closeNativeMenu(){followPositionPreview=false;positionPreview=false;wallPositionPreview=false;source_entities::browseRequested=false;}
 void updateHudAppearance(const hud::Appearance& appearance){std::lock_guard<std::mutex> lock(settingsMutex);auto c=*std::atomic_load(&settings);c.hud=appearance;changeSettings(c);}
 std::string nativeMenuNotice(){auto notice=std::atomic_load(&menuNotice);auto tick=uint64_t(now());return tick>=notice->tick&&tick-notice->tick<2000?notice->text:std::string{};}
 const char* openNativeMenu(void*){nativeHud.open();return nullptr;}

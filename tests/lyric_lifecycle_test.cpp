@@ -11,6 +11,10 @@ int main(){
  model.update("s",0,"old",3,1000,400,true);check(model.entries.size()==1&&model.entries[0].id!=first);
  model.update("s",1,"old",4,1000,400);check(model.entries.size()==1&&model.entries[0].index==1);
  model.update("s",2,"third",5,1000,400);model.update("s",3,"fourth",5.1,1000,400);check(model.entries.size()==2);model.update("new",0,"new song",6,1000,400);check(model.entries.size()==1&&model.entries[0].text=="new song");model.update("new",-1,"",7,1000,400);check(model.entries.empty());
+ // Entity attachment uses one slot even when ordinary lyrics retain several
+ // outgoing lines. Rapid changes must replace the sentence in the same frame.
+ LyricLifecycle attached;for(int i=0;i<12;++i){attached.update("entity",i,"line "+std::to_string(i),10+i*.01,0,0,false,1);check(attached.entries.size()==1&&attached.entries[0].index==i&&attached.entries[0].slot==0&&attached.entries[0].retired<0);}
+ attached.update("entity",-1,"",11,0,0,false,1);check(attached.entries.empty());
  // A software backbuffer reproduces the old failure: scene generation can stay
  // constant while the next song line changes. Every Present must be fresh.
  std::vector<int> back{7},saved,presented;int draws=0;
