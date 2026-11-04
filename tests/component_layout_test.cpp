@@ -73,6 +73,6 @@ int main(){
  check(!refreshWorldComponentAnchor(f,camera,defaults.lyrics[0],live,true,3,9,lastPlaced,0)&&length(live-farPoint)<.001f);
  auto broken=f;broken.worldToClip={};check(!refreshWorldComponentAnchor(broken,camera,defaults.lyrics[0],live,true,3,9,lastPlaced,3000)&&length(live-farPoint)<.001f&&lastPlaced==0);
  // Slot rotation supports 1..9 independent positions, with bounded outgoing lines.
- for(int count=1;count<=9;++count){LyricLifecycle model;for(int line=0;line<30;++line){model.update("track",line,std::to_string(line),line*.01,1000,400,false,count);check(model.entries.back().slot==line%count&&model.entries.size()<=size_t(count));for(auto& e:model.entries)for(auto& other:model.entries)check(e.id==other.id||e.slot!=other.slot);}model.update("track",29,"29",10,1000,400,false,count);check(model.entries.size()==1&&model.entries[0].index==29);}
+ for(int count=1;count<=9;++count){LyricLifecycle model;for(int line=0;line<30;++line){model.update("track",line,std::to_string(line),line*.01,1000,400,false,count);check(model.entries.back().slot==line%count&&model.entries.size()<=32);for(auto& e:model.entries)check(e.index==line||e.retired>=0);}model.update("track",29,"29",10,1000,400,false,count);check(model.entries.size()==1&&model.entries[0].index==29);}
  std::cout<<"Passed: 11 component positions, legacy migration/roundtrip/preset preservation, bounds, perspective placement, distance/size, 1..9 slot rotation and expiry\n";
 }

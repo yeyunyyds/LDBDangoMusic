@@ -3,6 +3,7 @@
 #include "component_layout.hpp"
 #include "hud_appearance.hpp"
 #include "wall_layout.hpp"
+#include "entity_auto_settings.hpp"
 #include <string>
 #include <stdexcept>
 #include <algorithm>
@@ -10,6 +11,7 @@
 #include <cmath>
 namespace dango {
 struct Config {
+ AutoFollowConfig autoFollow;bool entitySmooth=true,lyricMove=false,wallIndependentTiming=false;int moveCurve=0,moveMs=350;
  int port=23330,size=32;bool enabled=true,worldLyrics=false,worldTestAnchor=false;
  float worldDistance=200,worldSide=75,worldHeight=8;bool cameraDiagnostics=false,demo=true,translation=false,alternate=true;
  WallTextLayout wallLayout;
@@ -27,6 +29,7 @@ inline std::string colorText(uint32_t color){const char* digits="0123456789ABCDE
 inline Config decodeConfig(const nlohmann::json& j){
  if(!j.is_object())throw std::runtime_error("Config must be a JSON object");Config c;
 #define BOOL_FIELD(name,field,defaultValue) c.field=j.value(name,defaultValue)
+ BOOL_FIELD("entitySmooth",entitySmooth,true);BOOL_FIELD("lyricMove",lyricMove,false);BOOL_FIELD("wallIndependentTiming",wallIndependentTiming,false);
  BOOL_FIELD("enabled",enabled,true);BOOL_FIELD("worldLyrics",worldLyrics,false);BOOL_FIELD("worldTestAnchor",worldTestAnchor,false);BOOL_FIELD("cameraDiagnostics",cameraDiagnostics,false);BOOL_FIELD("demo",demo,true);BOOL_FIELD("translation",translation,false);BOOL_FIELD("alternate",alternate,true);BOOL_FIELD("outline",outline,false);BOOL_FIELD("glow",glow,true);BOOL_FIELD("pop",pop,true);BOOL_FIELD("wiggle",wiggle,true);BOOL_FIELD("keepAway",keepAway,true);BOOL_FIELD("debugOverlay",debugOverlay,false);BOOL_FIELD("showTitle",showTitle,false);BOOL_FIELD("showArtist",showArtist,false);
  BOOL_FIELD("progressiveReveal",progressiveReveal,true);BOOL_FIELD("reuseVisibleAnchor",reuseVisibleAnchor,true);
  BOOL_FIELD("wallReuse",wallReuse,false);BOOL_FIELD("wallFloorFollow",wallFloorFollow,false);
@@ -36,6 +39,7 @@ inline Config decodeConfig(const nlohmann::json& j){
 #undef BOOL_FIELD
  auto integer=[&](const char* key,int value,int lo,int hi){return std::clamp(j.value(key,value),lo,hi);};
  auto number=[&](const char* key,float value,float lo,float hi){float n=j.value(key,value);if(!std::isfinite(n))throw std::runtime_error("Non-finite setting");return std::clamp(n,lo,hi);};
+ if(j.contains("autoFollow"))c.autoFollow=readAutoFollow(j["autoFollow"]);c.moveCurve=integer("moveCurve",0,0,4);c.moveMs=integer("moveMs",350,100,2000);
  c.wallSurface=integer("wallSurface",0,0,1);if(j.contains("wallLayout"))c.wallLayout=readWallLayout(j.at("wallLayout"));
  c.wallSize=integer("wallSize",1,0,2);c.wallCapacity=integer("wallCapacity",6,2,8);c.wallLingerMs=integer("wallLingerMs",4000,0,15000);c.wallFadeMs=integer("wallFadeMs",1000,200,3000);c.wallRange=number("wallRange",600,160,1200);c.wallSpacing=number("wallSpacing",140,40,400);
  c.reuseDistanceFactor=number("reuseDistanceFactor",3,1,10);
@@ -48,6 +52,7 @@ inline Config decodeConfig(const nlohmann::json& j){
  c.textColor=parseColor(j.value("textColor",std::string("#F7E1D7")));c.accent=parseColor(j.value("accentColor",std::string("#F7E1D7")));return c;
 }
 inline nlohmann::json encodeConfig(const Config& c){return {
+ {"autoFollow",autoFollowJson(c.autoFollow)},{"entitySmooth",c.entitySmooth},{"lyricMove",c.lyricMove},{"moveCurve",c.moveCurve},{"moveMs",c.moveMs},{"wallIndependentTiming",c.wallIndependentTiming},
  {"wallFloorFollow",c.wallFloorFollow},{"wallReuse",c.wallReuse},{"wallSurface",c.wallSurface},{"wallLayout",wallLayoutJson(c.wallLayout)},
  {"hudAppearance",{{"preset",c.hud.preset},{"step",c.hud.step},{"opacity",c.hud.opacity},{"font",c.hud.font},{"x",c.hud.x},{"y",c.hud.y},{"centerY",c.hud.centerY},{"f10",c.hud.f10}}},{"wallFallback",c.wallFallback},{"wallEnabled",c.wallEnabled},{"wallAutomatic",c.wallAutomatic},{"wallLiveLyrics",c.wallLiveLyrics},{"wallSize",c.wallSize},{"wallCapacity",c.wallCapacity},{"wallLingerMs",c.wallLingerMs},{"wallFadeMs",c.wallFadeMs},{"wallRange",c.wallRange},{"wallSpacing",c.wallSpacing},{"fallbackReveal",c.fallbackReveal},{"wallBackdrop",c.wallBackdrop},{"wallDebug",c.wallDebug},{"progressiveReveal",c.progressiveReveal},{"reuseVisibleAnchor",c.reuseVisibleAnchor},{"reuseDistanceFactor",c.reuseDistanceFactor},{"lineWidthScale",c.lineWidthScale},{"defaultsVersion",2},{"layout",layoutJson(c.layout)},{"enabled",c.enabled},{"port",c.port},{"fontSize",c.size},{"worldLyrics",c.worldLyrics},{"worldTestAnchor",c.worldTestAnchor},{"worldDistance",c.worldDistance},{"worldSide",c.worldSide},{"worldHeight",c.worldHeight},{"cameraDiagnostics",c.cameraDiagnostics},{"demo",c.demo},{"translation",c.translation},{"alternate",c.alternate},{"verticalPosition",c.y},{"offsetMs",c.offset},{"outline",c.outline},{"glow",c.glow},{"glowStrength",c.glowStrength},{"glowRadius",c.glowRadius},{"opacity",c.opacity},{"maxWidth",c.width},{"transitionMs",c.transition},{"lingerMs",c.lingerMs},{"reanchorMs",c.reanchorMs},{"animationSpeed",c.animationSpeed},{"pop",c.pop},{"wiggle",c.wiggle},{"wiggleFrequency",c.wiggleFrequency},{"wiggleAmount",c.wiggleAmount},{"spreadDegrees",c.spread},{"keepAway",c.keepAway},{"debugOverlay",c.debugOverlay},{"textColor",colorText(c.textColor)},{"accentColor",colorText(c.accent)},{"showTitle",c.showTitle},{"showArtist",c.showArtist},{"presetId",c.presetId},{"displayMode","peak"}};}
 inline const char* presetName(int id){static const char* names[]={u8"暖白浮光",u8"轻柔舒缓",u8"霓虹粉",u8"冰蓝",u8"琥珀金",u8"简洁纯净"};return id>=0&&id<6?names[id]:u8"自定义";}

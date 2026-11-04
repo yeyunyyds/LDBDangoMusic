@@ -31,7 +31,7 @@ int main(){
  auto json=source_entities::jsonFrame(*frame);check(!json["model_lookup_available"].get<bool>()&&json["binding_checks"].is_array());
  check(json["pose_space"]=="network_raw"&&json["objects"][0]["origin"][2]==30);
  check(r.character==5&&r.health==100&&r.lifeState==0);check(r.worldModelIndex==42&&r.isCarryable&&*r.isCarryable&&r.effects==0);
- check(json["diagnostic_build"]==9&&json["objects"][0]["world_model_index"]==42&&json["objects"][0]["is_carryable"]==true);
+ check(json["diagnostic_build"]==10&&json["objects"][0]["world_model_index"]==42&&json["objects"][0]["is_carryable"]==true);
  check(r.parent==0xffffffffu&&r.parentAttachment==0&&r.weaponOwner==0xffffffffu);
  check(json["objects"][0]["weapon_owner_handle"]==0xffffffffu);
  source_entities::enabled=false;auto request=std::make_shared<const inventory::FollowRequest>(inventory::FollowRequest{true,7,0x9001});std::atomic_store(&source_entities::followRequest,request);camera.tick=1033;source_entities::onFrame(camera);auto selected=std::atomic_load(&source_entities::followSnapshot);check(selected->records.size()==1&&std::atomic_load(&source_entities::snapshot)->tick==1000);

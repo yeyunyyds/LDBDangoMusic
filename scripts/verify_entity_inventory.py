@@ -43,6 +43,8 @@ def verify(client, engine, replay=None):
     # Four-byte weapon world-model index and one-byte physical carryable flag.
     assert c.read(0x15ba0,12)==bytes.fromhex('6a006a006a04687409000068')
     assert c.read(0x864c8,12)==bytes.fromhex('6a016863090000689c715510')
+    # Zombie class storage is a four-byte integer in the profiled receive table.
+    assert c.read(0x2226c8,12)==bytes.fromhex('6a006a006a0468cc0b000068')
     # Receive proxy expands wire packing into the same 12-bit-index handle.
     assert c.read(0x18bfc2,15)==bytes.fromhex('c1f90bc1e10c25ff0700000bc8890a')
     def slot(name):

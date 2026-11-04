@@ -6,7 +6,7 @@ struct Options {
  bool automatic=true,live=true,reuse=false,fallback=true;int surface=0;int size=1,capacity=6,lingerMs=4000,fadeMs=1000;
  float range=600,spacing=140;
 };
-struct Ticket {uint64_t session=0,serial=0,tick=0;uint32_t epoch=0;bool active=false,place=true;uint64_t started=0;};
+struct Ticket {uint64_t session=0,serial=0,tick=0;uint32_t epoch=0;bool active=false,place=true;uint64_t started=0;bool retire=false;};
 struct Item {wall::Panel panel;unsigned id=0;bool visible=false,automatic=false;uint64_t token=0,session=0,born=0,visibleTick=0;int64_t retired=-1;};
 struct SentenceRoute {
  bool attached=false,fallback=false;
@@ -40,6 +40,7 @@ struct Scene {
  void clear(const Ticket& t){reuseAfter=0;items.clear();observed=handled=t.serial;}
  void observe(const Ticket& t,uint64_t now,uint32_t epoch,const Options& o){
  bool valid=fresh(t,now,epoch)&&o.live;
+ if(t.retire&&t.epoch==epoch&&session==t.session){for(auto& i:items)if(i.token&&i.retired<0)i.retired=int64_t(now);active=false;for(auto& i:items)if(i.token&&i.retired>=0&&alpha(i,now,o)<=0&&(!i.automatic||o.reuse)){i.token=0;i.retired=-1;}items.erase(std::remove_if(items.begin(),items.end(),[&](const Item& i){return i.automatic&&i.retired>=0&&alpha(i,now,o)<=0;}),items.end());return;}
  if(!valid||session!=t.session){
  items.erase(std::remove_if(items.begin(),items.end(),[](const Item& i){return i.automatic;}),items.end());
  for(auto& i:items){i.token=0;i.retired=-1;}observed=handled=0;reuseAfter=0;session=t.session;}
@@ -50,14 +51,16 @@ struct Scene {
  items.erase(std::remove_if(items.begin(),items.end(),[&](const Item& i){return i.automatic&&i.token==t.serial;}),items.end());
  for(auto& i:items)if(i.token==t.serial){i.token=0;i.retired=-1;}handled=t.serial;}
  if(valid&&observed!=t.serial){for(auto& i:items)if(i.token&&i.retired<0)i.retired=int64_t(now);observed=t.serial;}
- for(auto& i:items)if(i.token&&i.retired>=0&&alpha(i,now,o)<=0&&!i.automatic){i.token=0;i.retired=-1;}
+ for(auto& i:items)if(i.token&&i.retired>=0&&alpha(i,now,o)<=0&&(!i.automatic||o.reuse)){i.token=0;i.retired=-1;}
  items.erase(std::remove_if(items.begin(),items.end(),[&](const Item& i){return i.automatic&&i.retired>=0&&alpha(i,now,o)<=0;}),items.end());
- while(items.size()>size_t(o.capacity))items.erase(items.begin());
+ while(items.size()>size_t(o.capacity)){auto empty=std::find_if(items.begin(),items.end(),[](const Item& i){return !i.token;});if(empty==items.end())break;items.erase(empty);}
+ while(items.size()>32)items.erase(items.begin());
  }
  bool pending(const Ticket& t)const{return active&&t.place&&handled!=t.serial;}
  void assign(Item& item,const Ticket& t,uint64_t now){item.token=t.serial;item.session=t.session;item.born=now;item.retired=-1;handled=t.serial;}
  void add(const wall::Panel& panel,bool automatic,const Ticket& t,uint64_t now,const Options& o){
- while(items.size()>=size_t(std::max(1,o.capacity)))items.erase(items.begin());
+ while(items.size()>=size_t(std::max(1,o.capacity))){auto empty=std::find_if(items.begin(),items.end(),[](const Item& i){return !i.token;});if(empty==items.end())break;items.erase(empty);}
+ while(items.size()>=32)items.erase(items.begin());
  Item item;item.panel=panel;item.id=++sequence;item.automatic=automatic;item.visible=true;item.visibleTick=now;
  if(pending(t)){assign(item,t,now);rotation=unsigned(items.size()+1);}items.push_back(item);
  }
@@ -68,6 +71,7 @@ struct Scene {
  size_t start=0;while(start<items.size()&&items[start].id<=reuseAfter)++start;if(start==items.size())start=0;
  for(size_t n=0;n<items.size();++n){auto& item=items[(start+n)%items.size()];auto& p=item.panel;
  bool matching=o.surface==1?p.normal.z>=.5f:std::abs(p.normal.z)<=.5f;
+ if(item.token&&alpha(item,now,o)>0)continue;
  if(!matching||!item.visible||now<item.visibleTick||now-item.visibleTick>350||length(p.center-pose.eye)>o.range||!onScreen(p,camera,float(camera.width),float(camera.height)))continue;
  assign(item,t,now);reuseAfter=item.id;return true;
  }return false;
@@ -75,7 +79,7 @@ struct Scene {
  bool assignManual(const Ticket& t,uint64_t now){
  if(!pending(t)||items.empty())return false;
  for(size_t n=0;n<items.size();++n){size_t index=(rotation+n)%items.size();auto& i=items[index];
- if(!i.automatic&&i.visible&&now>=i.visibleTick&&now-i.visibleTick<=350){assign(i,t,now);rotation=unsigned((index+1)%items.size());return true;}}
+ if(!i.token&&!i.automatic&&i.visible&&now>=i.visibleTick&&now-i.visibleTick<=350){assign(i,t,now);rotation=unsigned((index+1)%items.size());return true;}}
  return false;
  }
 };

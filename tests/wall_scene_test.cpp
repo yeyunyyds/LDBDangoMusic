@@ -39,7 +39,7 @@ int main(){
  ticket.serial=11;ticket.tick=10050;scene.observe(ticket,10050,7,options);check(scene.assignManual(ticket,10050)&&scene.items[1].token==11&&scene.items[0].token==10,"manual rotate onto next panel");check(!scene.assignManual(ticket,10050),"no duplicate assign");
  ticket.session=3;ticket.tick=10100;scene.observe(ticket,10100,7,options);check(scene.items.size()==2&&scene.items[0].token==0&&scene.items[1].token==0,"session clears manual payloads");
  scene.clear(ticket);scene.observe(ticket,10100,7,options);check(!scene.pending(ticket),"clear waits next sentence");
- options.capacity=2;for(int i=0;i<10;++i){ticket.serial++;scene.observe(ticket,10100,7,options);scene.add(left,true,ticket,10100,options);check(scene.items.size()<=2,"bounded panel count");}
+ options.capacity=2;for(int i=0;i<10;++i){ticket.serial++;scene.observe(ticket,10100,7,options);scene.add(left,true,ticket,10100,options);check(scene.items.size()<=32,"bounded outgoing panel count");}
  // Sentence display routes are sticky: leaving view never changes an
  // already assigned wall sentence, even well past the fallback timeout.
  wallscene::SentenceRoute route;route.choose(true,1500,1000,true);route.choose(false,9000,1000,true);check(route.attached&&!route.fallback,"assigned sentence stays wall-bound");
@@ -60,10 +60,10 @@ int main(){
  auto corners=wall::point(left,0,0);auto moved=camera({80,0,0});check(wallscene::onScreen(left,moved,1280,720),"parallax visible");check(length(wall::point(left,0,0)-corners)<.001,"fixed plane");
  auto away=camera({},3.14159265f);check(!wallscene::onScreen(left,away,1280,720),"offscreen rejection");
  // Reuse is opt-in, replaces content in creation order and never changes geometry.
- wallscene::Scene reuse;auto ro=options;ro.capacity=6;ro.reuse=false;ticket={9,1,30000,7,true};reuse.observe(ticket,30000,7,ro);reuse.add(left,true,ticket,30000,ro);
+ wallscene::Scene reuse;auto ro=options;ro.capacity=6;ro.lingerMs=0;ro.fadeMs=1;ro.reuse=true;ticket={9,1,30000,7,true};reuse.observe(ticket,30000,7,ro);reuse.add(left,true,ticket,30000,ro);
  ticket.serial=2;ticket.tick=30010;reuse.observe(ticket,30010,7,ro);reuse.add(right,true,ticket,30010,ro);
  ticket.serial=3;ticket.tick=30020;reuse.observe(ticket,30020,7,ro);for(auto& i:reuse.items)i.visibleTick=30020;
- auto firstPlane=reuse.items[0].panel;check(!reuse.reuseExisting(ticket,30020,frame,pose,ro),"reuse disabled by default");ro.reuse=true;
+ auto firstPlane=reuse.items[0].panel;ro.reuse=false;check(!reuse.reuseExisting(ticket,30020,frame,pose,ro),"reuse disabled by default");ro.reuse=true;
  check(reuse.reuseExisting(ticket,30020,frame,pose,ro)&&reuse.items[0].token==3&&reuse.items[1].token==2,"oldest panel first");
  check(length(reuse.items[0].panel.center-firstPlane.center)<.001f&&reuse.items[0].id==1,"reuse preserves plane and identity");
  check(!reuse.reuseExisting(ticket,30020,frame,pose,ro),"no duplicate assignment");

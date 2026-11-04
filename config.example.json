@@ -147,5 +147,15 @@
       "size": 1,
       "depth": 0.1
     }
-  }
+  },
+  "autoFollow": {
+    "enabled": false,
+    "range": 1200,
+    "rules": []
+  },
+  "entitySmooth": true,
+  "lyricMove": false,
+  "moveCurve": 0,
+  "moveMs": 350,
+  "wallIndependentTiming": false
 }

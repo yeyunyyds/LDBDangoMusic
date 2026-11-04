@@ -52,6 +52,14 @@ int main(){
  menu(plugin,false);present();present();press('8');press('3');press('1');press('5');press('5');press('6');press('1');press('3');press('0');press('4');press('3');press('0');press('5');press('6');press('1');press('3');press('4');press('6');press('7');press('8');press('0');press('0');press('7');press('1');press('0');press('0');
  auto offCount=[&](){std::ifstream log(root/L"build/L4D2DangoMusic/L4D2DangoMusic.log");std::string line;unsigned count=0;while(std::getline(log,line))if(line.find("Entity follow enabled=0")!=std::string::npos)++count;return count;};
  auto offBefore=offCount();press('9');require(offCount()>offBefore,"Root return-to-normal action did not stop entity following");press(VK_ESCAPE);
+ // Automatic type rules use real paginated HUD controls and the same save path.
+ menu(plugin,false);present();present();press('8');press('5');press('2');press('1');press('0');press('9');
+ saved([](const auto& c){return c.at("autoFollow").value("enabled",false)&&c.at("autoFollow").at("rules")==nlohmann::json::array({"class:Tank"});});
+ press('7');press('8');press('9');saved([](const auto& c){return !c.at("autoFollow").value("enabled",true)&&c.at("autoFollow").at("rules").empty();});press(VK_ESCAPE);
+ // Independent default-on entity smoothing and default-off slot travel persist.
+ menu(plugin,false);present();present();press('5');press('9');press('1');press('2');press('3');press('2');press('0');press('0');press('0');press('7');
+ saved([](const auto& c){return c.value("lyricMove",false)&&!c.value("entitySmooth",true)&&c.value("moveCurve",-1)==1;});press(VK_ESCAPE);
+ menu(plugin,false);present();present();press('5');press('9');press('1');press('2');press('0');press('0');press('7');saved([](const auto& c){return !c.value("lyricMove",true)&&c.value("entitySmooth",false);});press(VK_ESCAPE);
  // Wall reuse, floor options and the fixed layout preview use real native keys.
  menu(plugin,false);present();present();press('6');press('7');press('8');press('4');press('5');press('3');press('3');press('1');press('3');press('6');
  saved([](const auto& c){return c.value("wallReuse",false)&&c.value("wallSurface",0)==1&&c.value("wallFloorFollow",false)&&std::abs(c.at("wallLayout").at("lyrics").at("x").template get<float>()-.51f)<.001f;});press(VK_ESCAPE);

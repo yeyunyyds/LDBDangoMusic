@@ -17,7 +17,7 @@ inline std::shared_ptr<const wallscene::Options> options=std::make_shared<wallsc
 inline std::shared_ptr<const wallscene::Ticket> ticket=std::make_shared<wallscene::Ticket>();
 inline wallscene::Scene scene;inline uint64_t nextSearch=0,searchToken=0;inline unsigned searchAttempt=0,visibilityCursor=0;
 inline void configure(const Config& c){
- wallscene::Options o;o.reuse=c.wallReuse;o.fallback=c.wallFallback;o.surface=c.wallSurface;o.automatic=c.wallAutomatic;o.live=c.wallLiveLyrics;o.size=c.wallSize;o.capacity=c.wallCapacity;o.lingerMs=c.wallLingerMs;o.fadeMs=c.wallFadeMs;o.range=c.wallRange;o.spacing=c.wallSpacing;
+ wallscene::Options o;o.reuse=c.wallReuse;o.fallback=c.wallFallback;o.surface=c.wallSurface;o.automatic=c.wallAutomatic;o.live=c.wallLiveLyrics;o.size=c.wallSize;o.capacity=c.wallCapacity;o.lingerMs=c.wallIndependentTiming?c.wallLingerMs:c.lingerMs;o.fadeMs=c.wallIndependentTiming?c.wallFadeMs:c.transition;o.range=c.wallRange;o.spacing=c.wallSpacing;
  auto old=std::atomic_load(&options);bool reset=old->automatic!=o.automatic||old->live!=o.live||old->surface!=o.surface;
  std::atomic_store(&options,std::make_shared<const wallscene::Options>(o));
  bool active=c.wallEnabled&&c.enabled;bool previous=enabled.exchange(active);if((active&&!previous)||reset)resetRequested=true;

@@ -32,3 +32,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Entity diagnostic producer mock failed' }
 if ($LASTEXITCODE -ne 0) { throw 'Gnome representation test build failed' }
 & ./build/gnome_follow_test.exe
 if ($LASTEXITCODE -ne 0) { throw 'Gnome representation tests failed' }
+
+& cl.exe /nologo /std:c++17 /EHsc /utf-8 /W4 /Isrc /Ivendor tests/entity_auto_motion_test.cpp /Fobuild/entity_auto_motion_test.obj /Febuild/entity_auto_motion_test.exe
+if ($LASTEXITCODE -ne 0) { throw 'Entity auto/motion build failed' }
+& ./build/entity_auto_motion_test.exe
+if ($LASTEXITCODE -ne 0) { throw 'Entity auto/motion tests failed' }

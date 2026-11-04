@@ -29,6 +29,8 @@
 #include "source_walls.hpp"
 #include "source_entities.hpp"
 #include "entity_follow.hpp"
+#include "entity_auto.hpp"
+#include "lyric_motion.hpp"
 #include "hud_menu_policy.hpp"
 #include "native_hud.hpp"
 #include "menu_pages.hpp"
@@ -36,10 +38,12 @@ static_assert(sizeof(void*)==4,"Pure L4N plugin must be x86");
 struct PresentInfo {bool is_swapchain_present=false;IDirect3DSwapChain9* swap_chain=nullptr;};
 namespace {
 using namespace dango;
-void captureSourceFeatures(const GameCameraFrame& frame){source_walls::onFrame(frame);source_entities::onFrame(frame);}
+void captureSourceFeatures(const GameCameraFrame& frame);
 hud::NativeHud nativeHud;
 std::shared_ptr<const follow::Settings> followSettings=std::make_shared<follow::Settings>();
 std::atomic<bool> followPositionPreview{false};
+autofollow::Selector autoSelector;std::vector<autofollow::Type> autoTypes=autofollow::catalogue();
+movement::Tracker entityTracker;
 std::string followNotice;uint64_t followNoticeUntil=0;
 uint64_t lastFollowRevision=0;
 std::string buildNativeMenu(uintptr_t);
@@ -59,7 +63,7 @@ std::filesystem::path directory;using LogFn=void(*)(int,const char*);LogFn logge
 constexpr int LDB_HOST_LOG_INFO=0,LDB_HOST_LOG_WARNING=1,LDB_HOST_LOG_ERROR=2;
 std::atomic<bool> positionPreview{false},wallPositionPreview{false},positionPreviewMotion{false};bool lastPositionPreview=false,lastWallMode=false,escapeHeld=false;uint64_t layoutGeneration=0;
 PlaybackDisplay playbackDisplay;
-PlaybackCursor playbackCursor;LyricLifecycle lyricLifecycle;std::atomic<int> visibleLyricIndex{-1};std::atomic<uint64_t> presentationCount{0},restoreErrors{0};
+PlaybackCursor playbackCursor;LyricLifecycle worldLyricLifecycle,entityLyricLifecycle;std::atomic<int> visibleLyricIndex{-1};std::atomic<uint64_t> presentationCount{0},restoreErrors{0};
 std::atomic<bool> stopping{false};std::thread worker;std::mutex sleepMutex;std::condition_variable wake;
 std::shared_ptr<const State> snapshot=std::make_shared<State>();
 bool presentLogged[2]={false,false};uint64_t reportedErrors=0;bool drewPixels=false;
@@ -149,34 +153,39 @@ void styled(IDirect3DDevice9* dev,Image im,float x,float y,float scale,float alp
  draw(dev,im,x,y,scale,alpha,color,rotation);
 }
 struct PeakEntry {
- uint64_t leaseId=0;Line line;peak::Animation animation,translated;peak::VisibleAnimation motion,translationMotion;peak::Layout layout,translationLayout;int index,slot=0;double born,retired=-1,lastPlaced;Vec3 anchor;uint32_t epoch;
+ uint64_t leaseId=0;Line line;peak::Animation animation,translated;peak::VisibleAnimation motion,translationMotion;peak::Layout layout,translationLayout;int index,slot=0,exitLinger=0,exitFade=1;double born,retired=-1,lastPlaced;movement::Travel travel;bool world=true;uint64_t measureRevision=0;Vec3 anchor;uint32_t epoch;
  PeakEntry(const Line& l,int64_t next,int i,double tick,Vec3 point,uint32_t e):line(l),animation(l,next),translated(peak::translationAnimation(animation,l.translation,next)),motion(animation.glyphs.size()),translationMotion(translated.glyphs.size()),index(i),born(tick),lastPlaced(tick),anchor(point),epoch(e){}
 };
-std::vector<std::unique_ptr<PeakEntry>> peakEntries;int peakIndex=-1;bool lastWorldMode=false;float lastWidth=0,lastHeight=0;
-void peakFrame(IDirect3DDevice9* dev,const State& state,int at,int64_t song,bool world,const GameCameraFrame& camera,CameraPose pose,float width,float height,const Vec3* attached=nullptr,float attachmentSize=1){
+std::vector<std::unique_ptr<PeakEntry>> worldPeakEntries,entityPeakEntries;float entityWidth=0,entityHeight=0;bool entityWorldMode=true;int peakIndex=-1;bool lastWorldMode=false;float lastWidth=0,lastHeight=0;
+void peakFrame(IDirect3DDevice9* dev,const State& state,int at,int64_t song,bool world,const GameCameraFrame& camera,CameraPose pose,float width,float height,const Vec3* attached=nullptr,float attachmentSize=1,bool outgoingOnly=false){
+ auto& peakEntries=attached?entityPeakEntries:worldPeakEntries;auto& lifecycle=attached?entityLyricLifecycle:worldLyricLifecycle;
+ auto& worldMode=attached?entityWorldMode:lastWorldMode;auto& oldWidth=attached?entityWidth:lastWidth;auto& oldHeight=attached?entityHeight:lastHeight;
  double clock=now()/1000.;
- bool contextChanged=lastWorldMode!=world||lastWidth!=width||lastHeight!=height||(!peakEntries.empty()&&world&&peakEntries.back()->epoch!=camera.epoch);
- lastWorldMode=world;lastWidth=width;lastHeight=height;
- if(contextChanged){lyricLifecycle.reset();peakEntries.clear();}
+ bool contextChanged=worldMode!=world||oldWidth!=width||oldHeight!=height||(!peakEntries.empty()&&world&&peakEntries.back()->epoch!=camera.epoch);
+ worldMode=world;oldWidth=width;oldHeight=height;
+ if(contextChanged){lifecycle.reset();peakEntries.clear();}
  std::string text=at>=0?state.timeline[at].text:std::string{};
  // An attached target is a single subtitle surface: replace its current
  // sentence immediately instead of piling outgoing leases onto the same anchor.
- lyricLifecycle.update(state.key,at,text,clock,attached?0:cfg.lingerMs,attached?0:cfg.transition,false,attached?1:cfg.layout.lyricCount);
- peakEntries.erase(std::remove_if(peakEntries.begin(),peakEntries.end(),[&](auto& entry){return std::none_of(lyricLifecycle.entries.begin(),lyricLifecycle.entries.end(),[&](auto& lease){return lease.id==entry->leaseId;});}),peakEntries.end());
- for(auto& lease:lyricLifecycle.entries){auto existing=std::find_if(peakEntries.begin(),peakEntries.end(),[&](auto& e){return e->leaseId==lease.id;});
- if(existing!=peakEntries.end()){(*existing)->retired=lease.retired;continue;}
+ if(outgoingOnly)lifecycle.expire(clock);else lifecycle.update(state.key,at,text,clock,attached?0:cfg.lingerMs,attached?0:cfg.transition,false,attached?1:cfg.layout.lyricCount,attached!=nullptr);
+ Vec3 previousPoint{};bool previousReady=false;for(auto it=peakEntries.rbegin();it!=peakEntries.rend();++it)if((*it)->retired<0){previousPoint=(*it)->travel.active?(*it)->travel.at(clock,cfg.moveMs/1000.f,cfg.moveCurve):(*it)->world?(*it)->anchor:Vec3{cfg.layout.lyrics[(*it)->slot].x,cfg.layout.lyrics[(*it)->slot].y,0};previousReady=true;break;}
+ peakEntries.erase(std::remove_if(peakEntries.begin(),peakEntries.end(),[&](auto& entry){return std::none_of(lifecycle.entries.begin(),lifecycle.entries.end(),[&](auto& lease){return lease.id==entry->leaseId;});}),peakEntries.end());
+ for(auto& lease:lifecycle.entries){auto existing=std::find_if(peakEntries.begin(),peakEntries.end(),[&](auto& e){return e->leaseId==lease.id;});
+ if(existing!=peakEntries.end()){(*existing)->retired=lease.retired;(*existing)->exitLinger=lease.lingerMs;(*existing)->exitFade=lease.fadeMs;continue;}
  auto& line=state.timeline[lease.index];auto next=lease.index+1<int(state.timeline.size())?state.timeline[lease.index+1].start:line.start+5000;
- auto entry=std::make_unique<PeakEntry>(line,next,lease.index,clock,world?(attached?*attached:anchors.current):Vec3{},camera.epoch);entry->leaseId=lease.id;entry->retired=lease.retired;entry->slot=lease.slot;
+ auto entry=std::make_unique<PeakEntry>(line,next,lease.index,clock,world?(attached?*attached:anchors.current):Vec3{},camera.epoch);entry->leaseId=lease.id;entry->retired=lease.retired;entry->exitLinger=lease.lingerMs;entry->exitFade=lease.fadeMs;entry->slot=lease.slot;entry->world=world;
  if(world&&!attached&&cfg.keepAway){entry->anchor=peak::keepDistance(entry->anchor,pose,cfg.layout.lyrics[lease.slot].distance);if(lease.retired<0){anchors.slots.remember(lease.slot,entry->anchor);anchors.current=entry->anchor;}}
  auto position=attached?ComponentPosition{.5f,.44f,200,attachmentSize}:cfg.layout.lyrics[lease.slot];auto initial=screenComponent(position,width,height,cfg.size);if(world)worldComponent(camera,entry->anchor,position,width,height,cfg.worldHeight,cfg.size,initial);float maxPixels=width*cfg.width*cfg.lineWidthScale/std::max(initial.scale,.02f);
- entry->layout=peak::layout(entry->animation.glyphs,[&](const std::string& glyph){return image(dev,glyph).advance;},maxPixels,cfg.size*1.35f);entry->translationLayout=peak::layout(entry->translated.glyphs,[&](const std::string& glyph){return image(dev,glyph).advance;},maxPixels/.72f,cfg.size*1.35f);peakEntries.push_back(std::move(entry));}
+ entry->layout=peak::layout(entry->animation.glyphs,[&](const std::string& glyph){return image(dev,glyph).advance;},maxPixels,cfg.size*1.35f);entry->translationLayout=peak::layout(entry->translated.glyphs,[&](const std::string& glyph){return image(dev,glyph).advance;},maxPixels/.72f,cfg.size*1.35f);entry->measureRevision=layoutGeneration;if(!attached&&cfg.lyricMove&&previousReady){Vec3 destination=world?entry->anchor:Vec3{position.x,position.y,0};entry->travel.begin(previousPoint,destination,clock);}peakEntries.push_back(std::move(entry));}
  visibleLyricIndex=at;
- for(size_t i=0;i<peakEntries.size();){auto& entry=*peakEntries[i];ExitFrame life;if(entry.retired>=0)life=exitFrame((clock-entry.retired)*1000,cfg.lingerMs,cfg.transition);
+ for(size_t i=0;i<peakEntries.size();){auto& entry=*peakEntries[i];ExitFrame life;if(entry.retired>=0)life=exitFrame((clock-entry.retired)*1000,entry.exitLinger,entry.exitFade);
  if(life.done){peakEntries.erase(peakEntries.begin()+i);continue;}++i;
  auto position=attached?ComponentPosition{.5f,.44f,200,attachmentSize}:cfg.layout.lyrics[entry.slot];Placement place=screenComponent(position,width,height,cfg.size);
+ if(!attached&&entry.travel.active){if(entry.retired<0)entry.travel.to=world?entry.anchor:Vec3{position.x,position.y,0};auto moving=entry.travel.at(clock,cfg.moveMs/1000.f,cfg.moveCurve);if(!world){place.x=moving.x*width;place.y=moving.y*height;}}
  if(world){if(attached){entry.anchor=*attached;}
  if(!attached&&entry.retired<0&&refreshWorldComponentAnchor(camera,pose,position,entry.anchor,cfg.reuseVisibleAnchor,cfg.reuseDistanceFactor,clock,entry.lastPlaced,cfg.reanchorMs)){anchors.slots.remember(entry.slot,entry.anchor);anchors.current=entry.anchor;}
- if(!attached&&cfg.keepAway){entry.anchor=peak::keepDistance(entry.anchor,pose,position.distance);if(entry.retired<0){anchors.slots.remember(entry.slot,entry.anchor);anchors.current=entry.anchor;}}if(!worldComponent(camera,entry.anchor,position,width,height,cfg.worldHeight,cfg.size,place))continue;}
+ if(!attached&&cfg.keepAway){entry.anchor=peak::keepDistance(entry.anchor,pose,position.distance);if(entry.retired<0){anchors.slots.remember(entry.slot,entry.anchor);anchors.current=entry.anchor;}}if(!worldComponent(camera,(!attached&&entry.travel.active)?entry.travel.at(clock,cfg.moveMs/1000.f,cfg.moveCurve):entry.anchor,position,width,height,cfg.worldHeight,cfg.size,place))continue;}
+ if(entry.measureRevision!=layoutGeneration){float maxPixels=width*cfg.width*cfg.lineWidthScale/std::max(place.scale,.02f);entry.layout=peak::layout(entry.animation.glyphs,[&](const std::string& glyph){return image(dev,glyph).advance;},maxPixels,cfg.size*1.35f);entry.translationLayout=peak::layout(entry.translated.glyphs,[&](const std::string& glyph){return image(dev,glyph).advance;},maxPixels/.72f,cfg.size*1.35f);entry.measureRevision=layoutGeneration;}
  float scale=place.scale,center=place.x,top=place.y-entry.layout.height*scale*.5f;
  top-=life.lift*(world?20.f*scale*cfg.size/cfg.worldHeight:height*.025f);
  for(auto& glyph:entry.layout.glyphs){auto frame=peak::revealFrame(entry.motion,entry.animation,glyph.index,song,clock,cfg.animationSpeed,cfg.progressiveReveal,cfg.pop,cfg.wiggle,cfg.wiggleFrequency,cfg.wiggleAmount,cfg.fallbackReveal);if(frame.alpha<=0)continue;
@@ -228,9 +237,10 @@ struct WallSentence {
  WallSentence(const Line& line,int64_t next,const State& state):original(line,next),translated(peak::translationAnimation(original,line.translation,next)),title(state.title),artist(state.artist){}
 };
 struct WallTextState {
+ uint64_t suspendedAt=0;
  std::string key;uint64_t generation=0,session=1,serial=0,current=0,started=0;uint32_t epoch=0;int index=-1;wallscene::SentenceRoute route;
  std::map<uint64_t,std::unique_ptr<WallSentence>> texts;
- void reset(){route={};key.clear();index=-1;current=0;texts.clear();++session;source_walls::submit({session,0,uint64_t(now()),epoch,false});}
+ void reset(){suspendedAt=0;route={};key.clear();index=-1;current=0;texts.clear();++session;source_walls::submit({session,0,uint64_t(now()),epoch,false});}
  void select(const State& music,const PlaybackDisplayFrame& display,int at,const GameCameraFrame& camera){
  bool active=display.lyrics&&at>=0&&at<int(music.timeline.size())&&cfg.wallLiveLyrics;
  if(!active){if(index>=0)reset();source_walls::submit({session,0,uint64_t(now()),camera.epoch,false});return;}
@@ -272,22 +282,23 @@ void drawWallLayoutPreview(IDirect3DDevice9* dev,GameCameraFrame camera,bool val
  if(cfg.wallBackdrop)wallQuad(dev,panel,camera,width,height,Image{},0xb018202c);
  drawWallContents(dev,panel,camera,width,height,*sample,5000,now()/1000.,1,true);
 }
-bool drawWallExperiment(IDirect3DDevice9* dev,const GameCameraFrame& camera,float width,float height,const State& music,const PlaybackDisplayFrame& display,int at){
- wallTextState.select(music,display,at,camera);auto state=std::atomic_load(&source_walls::snapshot);auto options=std::atomic_load(&source_walls::options);
+bool drawWallExperiment(IDirect3DDevice9* dev,const GameCameraFrame& camera,float width,float height,const State& music,const PlaybackDisplayFrame& display,int at,bool outgoingOnly=false){
+ if(outgoingOnly){if(wallTextState.texts.empty())return false;if(!wallTextState.suspendedAt)wallTextState.suspendedAt=uint64_t(now());source_walls::submit({wallTextState.session,wallTextState.current,uint64_t(now()),camera.epoch,false,false,wallTextState.started,true});}
+ else{if(wallTextState.suspendedAt){wallTextState.suspendedAt=0;wallTextState.index=-1;wallTextState.route={};}wallTextState.select(music,display,at,camera);}auto state=std::atomic_load(&source_walls::snapshot);auto options=std::atomic_load(&source_walls::options);
  if(cfg.wallDebug){auto message=state->tick?state->message:std::string("Waiting for Source callback: ")+source_camera::status();auto banner=image(dev,"WALL | F8: place | "+message+" | panels="+std::to_string(state->panels.size()));draw(dev,banner,16,16,std::min(.6f,width*.95f/std::max(banner.width,1)),1.f,0xffcc88);}
  bool live=cfg.wallLiveLyrics,currentVisible=false;uint64_t tick=uint64_t(now());
  bool assigned=state->epoch==camera.epoch&&tick>=state->tick&&tick-state->tick<=350&&std::any_of(state->panels.begin(),state->panels.end(),[&](const auto& item){return item.token==wallTextState.current&&item.session==wallTextState.session;});
- wallTextState.route.choose(assigned,tick,wallTextState.started,cfg.wallFallback);
- if(wallTextState.route.fallback&&display.lyrics&&live)source_walls::submit({wallTextState.session,wallTextState.current,tick,camera.epoch,true,false,wallTextState.started});
+ if(!outgoingOnly)wallTextState.route.choose(assigned,tick,wallTextState.started,cfg.wallFallback);
+ if(!outgoingOnly&&wallTextState.route.fallback&&display.lyrics&&live)source_walls::submit({wallTextState.session,wallTextState.current,tick,camera.epoch,true,false,wallTextState.started});
  if(!usableCamera(camera,tick)||state->epoch!=camera.epoch||tick<state->tick||tick-state->tick>350||source_walls::clearRequested.load())return false;
  for(auto& item:state->panels){if(!item.visible||tick<item.visibleTick||tick-item.visibleTick>350)continue;const auto& panel=item.panel;
  WallSentence* sentence=nullptr;float opacity=1;
- if(live){if(wallTextState.route.fallback&&item.token==wallTextState.current)continue;auto text=wallTextState.texts.find(item.token);if(!display.lyrics||item.session!=wallTextState.session||text==wallTextState.texts.end())continue;sentence=text->second.get();opacity=wallscene::alpha(item,tick,*options);if(opacity<=0)continue;}
+ if(live){if(!outgoingOnly&&wallTextState.route.fallback&&item.token==wallTextState.current)continue;auto text=wallTextState.texts.find(item.token);if(!display.lyrics||item.session!=wallTextState.session||text==wallTextState.texts.end())continue;sentence=text->second.get();auto fading=item;if(outgoingOnly&&fading.retired<0)fading.retired=int64_t(wallTextState.suspendedAt);opacity=wallscene::alpha(fading,tick,*options);if(opacity<=0)continue;}
  if(!wallscene::onScreen(panel,camera,width,height))continue;
  if(live&&item.token==wallTextState.current)currentVisible=true;
  if(cfg.wallBackdrop)wallQuad(dev,panel,camera,width,height,Image{},(DWORD(176*opacity)<<24)|0x18202c);
  if(cfg.wallDebug)wallText(dev,panel,camera,width,height,"WALL PANEL "+std::to_string(item.id),.4f,.12f,(DWORD(255*opacity)<<24)|0x99ccff);
- if(!live){wallText(dev,panel,camera,width,height,(cfg.wallSurface?u8"固定在地面上的歌词挂画":u8"固定在墙上的歌词挂画"),0,.54f,0xff000000u|(cfg.textColor&0xffffff));continue;}
+ if(!live){if(outgoingOnly)continue;wallText(dev,panel,camera,width,height,(cfg.wallSurface?u8"固定在地面上的歌词挂画":u8"固定在墙上的歌词挂画"),0,.54f,0xff000000u|(cfg.textColor&0xffffff));continue;}
  CameraPose textView;if(!cameraPose(camera,textView))continue;auto textPanel=wall::floorTextFacing(panel,textView,cfg.wallFloorFollow);
  drawWallContents(dev,textPanel,camera,width,height,*sentence,lyricPosition(display.position,cfg.demo?0:cfg.offset),now()/1000.,opacity);
  }
@@ -306,16 +317,16 @@ void WINAPI render(IDirect3DDevice9* dev,const PresentInfo* present){
  if(!dev||!present)return;
  bool preview=positionPreview.load()||wallPositionPreview.load();bool escapeDown=(GetAsyncKeyState(VK_ESCAPE)&0x8000)!=0;if(preview&&!nativeHud.isOpen()&&escapeDown&&!escapeHeld){positionPreview=false;wallPositionPreview=false;preview=false;}escapeHeld=escapeDown;
  auto currentSettings=std::atomic_load(&settings);cfg=*currentSettings;bool wallMode=source_walls::enabled.load();auto notice=std::atomic_load(&menuNotice);bool showNotice=!notice->text.empty()&&uint64_t(now())>=notice->tick&&uint64_t(now())-notice->tick<2000;if(!cfg.enabled&&!preview&&!showNotice&&!nativeHud.isOpen())return;
- if(lastWallMode!=wallMode){wallTextState.reset();lastWallMode=wallMode;peakEntries.clear();lyricLifecycle.reset();anchors.reset();++layoutGeneration;}
- if(lastPositionPreview!=preview){wallTextState.reset();++layoutGeneration;peakEntries.clear();lyricLifecycle.reset();anchors.reset();playbackCursor={};lastPositionPreview=preview;}
- auto followState=std::atomic_load(&followSettings);if(lastFollowRevision!=followState->revision){wallTextState.reset();peakEntries.clear();lyricLifecycle.reset();anchors.reset();lastFollowRevision=followState->revision;}
- if(renderedSettings!=currentSettings){wallTextState.reset();clear();peakEntries.clear();peakIndex=-1;lyricLifecycle.reset();anchors.reset();renderedSettings=currentSettings;}
+ if(lastWallMode!=wallMode){if(!wallMode)wallTextState.reset();lastWallMode=wallMode;++layoutGeneration;}
+ if(lastPositionPreview!=preview){wallTextState.reset();++layoutGeneration;worldPeakEntries.clear();worldLyricLifecycle.reset();anchors.reset();playbackCursor={};lastPositionPreview=preview;}
+ auto followState=std::atomic_load(&followSettings);if(lastFollowRevision!=followState->revision){entityPeakEntries.clear();entityLyricLifecycle.reset();lastFollowRevision=followState->revision;}
+ if(renderedSettings!=currentSettings){clear();++layoutGeneration;renderedSettings=currentSettings;}
  captureCamera(dev,present);
  const unsigned path=present->is_swapchain_present?1:0;
  if(!presentLogged[path]){presentLogged[path]=true;note(std::string("L4D2DangoMusic first Present path=")+(path?"SwapChain":"Device")+(present->swap_chain?" current-chain=yes":" current-chain=no"));}
  try {if(cache.size()>256)clear();auto state=std::atomic_load(&snapshot);auto display=playbackDisplay.select(*state,now());
- if(display.reset){wallTextState.reset();visibleLyricIndex=-1;++layoutGeneration;peakEntries.clear();lyricLifecycle.reset();anchors.reset();playbackCursor={};}
- auto cursor=preview?ClockSelection{}:playbackCursor.select(state->key,display.position,state->playing);auto position=cursor.position;if(cursor.seek){wallTextState.reset();peakEntries.clear();lyricLifecycle.reset();anchors.reset();}auto at=position<0?-1:indexAt(state->timeline,lyricPosition(position,cfg.demo?0:cfg.offset));
+ if(display.reset){entityPeakEntries.clear();entityLyricLifecycle.reset();entityTracker.reset();wallTextState.reset();visibleLyricIndex=-1;++layoutGeneration;worldPeakEntries.clear();worldLyricLifecycle.reset();anchors.reset();playbackCursor={};}
+ auto cursor=preview?ClockSelection{}:playbackCursor.select(state->key,display.position,state->playing);auto position=cursor.position;if(cursor.seek){entityPeakEntries.clear();entityLyricLifecycle.reset();entityTracker.reset();wallTextState.reset();worldPeakEntries.clear();worldLyricLifecycle.reset();anchors.reset();}auto at=position<0?-1:indexAt(state->timeline,lyricPosition(position,cfg.demo?0:cfg.offset));
  std::string text=at<0?state->message:state->timeline[at].text;
  DrawGuard guard(dev);auto& target=guard.target;auto& depth=guard.depth;auto& back=guard.back;auto& block=guard.block;
  if(!checked(dev->CreateStateBlock(D3DSBT_ALL,&block),0,"CreateStateBlock"))return;
@@ -335,28 +346,34 @@ void WINAPI render(IDirect3DDevice9* dev,const PresentInfo* present){
  if(cfg.enabled&&cfg.demo&&!preview&&!wallMode){auto banner=image(dev,"L4D2DangoMusic 0.9.4 DEMO - "+std::string(path?"SwapChain":"Device"));draw(dev,banner,16,16,std::min(1.f,desc.Width*.9f/std::max(banner.width,1)),1.f);}
  auto camera=std::atomic_load(&source_camera::snapshot);const auto& gameFrame=*camera;CameraPose pose;
  bool cameraGood=usableCamera(gameFrame,now())&&cameraPose(gameFrame,pose);bool cameraValid=cfg.worldLyrics&&cameraGood;
+ auto chosenFrame=std::atomic_load(&source_entities::followSnapshot);auto chosenRequest=followState->target;follow::Pose chosen;bool automaticChosen=false;
+ if(followState->enabled&&chosenRequest.enabled)chosen=follow::resolve(*chosenFrame,chosenRequest,gameFrame.epoch,uint64_t(now()));
+ if(chosen.ready){auto actor=follow::find(*chosenFrame,follow::effectiveHandle(*chosenFrame,chosenRequest));if(actor&&!autofollow::alive(*actor))chosen.ready=false;}
+ if(!chosen.ready&&cfg.autoFollow.enabled){auto automatic=std::atomic_load(&source_entities::automaticRequest);chosenRequest=*automatic;chosenFrame=std::atomic_load(&source_entities::automaticSnapshot);chosen=follow::resolve(*chosenFrame,chosenRequest,gameFrame.epoch,uint64_t(now()));if(!chosen.ready){auto full=std::atomic_load(&source_entities::snapshot);if(full->epoch==gameFrame.epoch&&uint64_t(now())>=full->tick&&uint64_t(now())-full->tick<=600&&automatic->enabled){chosen=follow::pose(*full,automatic->handle);chosenFrame=full;}}automaticChosen=chosen.ready;}
+ if(chosen.ready){auto actor=follow::find(*chosenFrame,follow::effectiveHandle(*chosenFrame,chosenRequest));if(actor&&!autofollow::alive(*actor))chosen.ready=false;}
+ bool entityValid=cameraGood&&chosen.ready;int route=entityValid?2:wallMode?1:0;static int previousRoute=0;bool worldDrawn=false;
+ if(!preview&&route!=previousRoute){note(std::string("Lyric route: ")+(route==2?"entity":route==1?"wall":"world"));if(previousRoute==0)worldLyricLifecycle.retire(now()/1000.,cfg.lingerMs,cfg.transition);if(route!=2){entityPeakEntries.clear();entityLyricLifecycle.reset();entityTracker.reset();}previousRoute=route;}
  if(cfg.enabled&&cfg.worldLyrics&&cfg.debugOverlay&&!preview&&!wallMode){auto status=image(dev,cameraValid?std::string("GAME CAMERA: ACTIVE (experimental)"):std::string("GAME CAMERA: ")+source_camera::status()+" - screen fallback");draw(dev,status,16,cfg.demo?64.f:16.f,std::min(.65f,desc.Width*.9f/std::max(status.width,1)),.8f,cameraValid?0x99ffbb:0xffcc88);}
  if(!cfg.enabled&&!preview&&!followPositionPreview.load()){}
  else if(preview){if(wallPositionPreview.load())drawWallLayoutPreview(dev,gameFrame,cameraGood,pose,float(desc.Width),float(desc.Height));else drawPositionPreview(dev,gameFrame,cameraValid,pose,float(desc.Width),float(desc.Height));}
- else if(follow::useEntityRoute(*followState,gameFrame.epoch)){
- auto entities=std::atomic_load(&source_entities::followSnapshot);auto result=follow::resolve(*entities,followState->target,gameFrame.epoch,uint64_t(now()));
- if(cameraGood&&result.ready){auto target=follow::animatedAnchor(result,*followState,now()/1000.);auto record=follow::find(*entities,follow::effectiveHandle(*entities,followState->target));
- if(followState->sample||followPositionPreview.load()){peakEntries.clear();lyricLifecycle.reset();auto label=followPositionPreview.load()?std::string(u8"歌词 1 · 实体位置预览"):std::string(u8"实体持续跟随歌词 · ")+(record?record->className:std::string{});Placement marker;if(projectAnchor(gameFrame,target,float(desc.Width),float(desc.Height),cfg.worldHeight*followState->size,cfg.size,marker)){auto im=image(dev,label);float scale=marker.scale;styled(dev,im,marker.x-im.width*scale*.5f,marker.y-im.height*scale*.5f,scale,cfg.opacity,cfg.textColor);if(followPositionPreview.load()){auto translated=image(dev,u8"歌词翻译 · Translation");float ts=scale*.72f;styled(dev,translated,marker.x-translated.width*ts*.5f,marker.y+im.height*scale*.5f+8,ts,cfg.opacity,cfg.textColor);}}}
+ else if(entityValid){
+ auto id=follow::effectiveHandle(*chosenFrame,chosenRequest);auto record=follow::find(*chosenFrame,id);auto raw=follow::anchor(chosen,*followState);if(automaticChosen&&record)raw.z+=autofollow::headLift(*record);auto target=entityTracker.select(raw,gameFrame.epoch,id,now()/1000.,cfg.entitySmooth,cfg.moveMs/1000.f,cfg.moveCurve);target.z+=follow::bobOffset(*followState,now()/1000.);
+ if(followState->sample||followPositionPreview.load()){entityPeakEntries.clear();entityLyricLifecycle.reset();auto label=followPositionPreview.load()?std::string(u8"歌词 1 · 实体位置预览"):std::string(u8"实体持续跟随歌词 · ")+(record?record->className:std::string{});Placement marker;if(projectAnchor(gameFrame,target,float(desc.Width),float(desc.Height),cfg.worldHeight*followState->size,cfg.size,marker)){auto im=image(dev,label);float scale=marker.scale;styled(dev,im,marker.x-im.width*scale*.5f,marker.y-im.height*scale*.5f,scale,cfg.opacity,cfg.textColor);if(followPositionPreview.load()){auto translated=image(dev,u8"歌词翻译 · Translation");float ts=scale*.72f;styled(dev,translated,marker.x-translated.width*ts*.5f,marker.y+im.height*scale*.5f+8,ts,cfg.opacity,cfg.textColor);}}}
  else if(display.lyrics)peakFrame(dev,*state,at,lyricPosition(position,cfg.demo?0:cfg.offset),true,gameFrame,pose,float(desc.Width),float(desc.Height),&target,followState->size);
- else{peakEntries.clear();lyricLifecycle.reset();}
- }else{peakEntries.clear();lyricLifecycle.reset();}
+ else{entityPeakEntries.clear();entityLyricLifecycle.reset();}
  }
  else if(wallMode){drawWallExperiment(dev,gameFrame,float(desc.Width),float(desc.Height),*state,display,at);
- if(cfg.wallLiveLyrics&&display.lyrics&&wallTextState.route.fallback){if(cameraGood)anchors.update(gameFrame,pose,state->key,at);else anchors.reset();peakFrame(dev,*state,at,lyricPosition(position,cfg.demo?0:cfg.offset),cameraGood,gameFrame,pose,float(desc.Width),float(desc.Height));}
- else{peakEntries.clear();lyricLifecycle.reset();}}
+ if(cfg.wallLiveLyrics&&display.lyrics&&wallTextState.route.fallback){worldDrawn=true;if(cameraGood)anchors.update(gameFrame,pose,state->key,at);else anchors.reset();peakFrame(dev,*state,at,lyricPosition(position,cfg.demo?0:cfg.offset),cameraGood,gameFrame,pose,float(desc.Width),float(desc.Height));}
+ else if(!display.lyrics){worldPeakEntries.clear();worldLyricLifecycle.reset();}}
 
  else {
  if(!cameraValid)anchors.reset();else anchors.update(gameFrame,pose,state->key,at);
  if(cameraValid&&cfg.worldTestAnchor){Placement test;if(projectAnchor(gameFrame,anchors.test,float(desc.Width),float(desc.Height),cfg.worldHeight,cfg.size,test)){auto im=image(dev,"WORLD ANCHOR +");styled(dev,im,test.x-im.width*test.scale*.5f,test.y,test.scale,.9f,0x99ffbb);}}
  if(display.metadata)drawSongInfo(dev,*state,gameFrame,cameraValid,pose,float(desc.Width),float(desc.Height));
- if(display.lyrics)peakFrame(dev,*state,at,lyricPosition(position,cfg.demo?0:cfg.offset),cameraValid,gameFrame,pose,float(desc.Width),float(desc.Height));
+ if(display.lyrics){worldDrawn=true;peakFrame(dev,*state,at,lyricPosition(position,cfg.demo?0:cfg.offset),cameraValid,gameFrame,pose,float(desc.Width),float(desc.Height));}
  if(at<0&&cfg.debugOverlay){auto im=image(dev,text);styled(dev,im,16,96,.65f,.7f,cfg.textColor);}
  }
+ if(!preview&&display.lyrics){if(!worldDrawn&&!worldPeakEntries.empty()){worldLyricLifecycle.retire(now()/1000.,cfg.lingerMs,cfg.transition);peakFrame(dev,*state,-1,lyricPosition(position,cfg.demo?0:cfg.offset),lastWorldMode,gameFrame,pose,float(desc.Width),float(desc.Height),nullptr,1,true);}if(route!=1&&!wallTextState.texts.empty())drawWallExperiment(dev,gameFrame,float(desc.Width),float(desc.Height),*state,display,at,true);}
  if(showNotice&&!nativeHud.isOpen()){auto im=image(dev,notice->text);float scale=std::min(.65f,desc.Width*.8f/std::max(im.width,1));draw(dev,im,(desc.Width-im.width*scale)*.5f,desc.Height*.88f,scale,1,0x99ffcc);}
  nativeHud.frame(dev,float(desc.Width),float(desc.Height));
  dev->EndScene();guard.scene=false;}
@@ -371,10 +388,10 @@ bool load(const std::filesystem::path& pluginDirectory){try{directory=pluginDire
  note("L4D2DangoMusic 0.9.4 config="+path.u8string()+" mode="+(cfg.demo?"DEMO":"BLF/LX")+" port="+std::to_string(cfg.port)+" offsetMs="+std::to_string(cfg.offset)+" displayMode="+cfg.mode);
  stopping=false;worker=std::thread(run);return TRUE;}catch(const std::exception& e){if(logger)logger(LDB_HOST_LOG_ERROR,e.what());return FALSE;}catch(...){return FALSE;}}
 void releasePresentationBackup();
-void WINAPI created(IDirect3DDevice9*){nativeHud.release();wallTextState.reset();++deviceGeneration;releasePresentationBackup();anchors.reset();peakEntries.clear();peakIndex=-1;lyricLifecycle.reset();clear();reportedErrors=0;drewPixels=false;note("L4D2DangoMusic device lifecycle: created/destroyed; textures cleared");}
-void WINAPI beforeReset(IDirect3DDevice9*,const D3DPRESENT_PARAMETERS*,BOOL){nativeHud.beforeReset();wallTextState.reset();releasePresentationBackup();anchors.reset();peakEntries.clear();peakIndex=-1;lyricLifecycle.reset();clear();}
+void WINAPI created(IDirect3DDevice9*){nativeHud.release();wallTextState.reset();++deviceGeneration;releasePresentationBackup();anchors.reset();worldPeakEntries.clear();peakIndex=-1;worldLyricLifecycle.reset();clear();reportedErrors=0;drewPixels=false;note("L4D2DangoMusic device lifecycle: created/destroyed; textures cleared");}
+void WINAPI beforeReset(IDirect3DDevice9*,const D3DPRESENT_PARAMETERS*,BOOL){nativeHud.beforeReset();wallTextState.reset();releasePresentationBackup();anchors.reset();worldPeakEntries.clear();peakIndex=-1;worldLyricLifecycle.reset();clear();}
 void WINAPI afterReset(IDirect3DDevice9*,HRESULT hr,BOOL){nativeHud.afterReset(hr);++deviceGeneration;reportedErrors=0;checked(hr,5,"Reset");note("L4D2DangoMusic Reset completed; textures will rebuild");}
-void WINAPI shutdown(){nativeHud.shutdown();source_camera::frameListener=nullptr;source_walls::stop();source_entities::enabled=false;source_entities::browseRequested=false;std::atomic_store(&source_entities::followRequest,std::make_shared<const inventory::FollowRequest>());stopping=true;wake.notify_all();if(worker.joinable())worker.join();releasePresentationBackup();clear();}
+void WINAPI shutdown(){nativeHud.shutdown();source_camera::frameListener=nullptr;source_walls::stop();source_entities::enabled=false;source_entities::browseRequested=false;source_entities::autoRequested=false;std::atomic_store(&source_entities::automaticRequest,std::make_shared<const inventory::FollowRequest>());std::atomic_store(&source_entities::followRequest,std::make_shared<const inventory::FollowRequest>());stopping=true;wake.notify_all();if(worker.joinable())worker.join();releasePresentationBackup();clear();}
 }
 namespace {
 struct PresentationBackup {
@@ -432,7 +449,7 @@ HRESULT WINAPI resetEx(IDirect3DDevice9Ex* device,D3DPRESENT_PARAMETERS* params,
 std::string menuText;
 const char* menuAction(void*);
 std::string escaped(std::string s){std::string out;for(char c:s){if(c=='"'||c=='\\')out+='\\';if(c!='\r'&&c!='\n')out+=c;}return out;}
-std::string item(const std::string& label,uintptr_t id){if(label.rfind(u8"返回",0)==0)return {};char callback[32],data[32];std::snprintf(callback,sizeof(callback),"0x%lx",static_cast<unsigned long>(reinterpret_cast<uintptr_t>(&menuAction)));std::snprintf(data,sizeof(data),"0x%lx",static_cast<unsigned long>(id));return "\""+escaped(label)+"\" { \"callback\" \""+callback+"\" \"user_data\" \""+data+"\" }\n";}
+std::string item(const std::string& label,uintptr_t id){if(label.rfind(u8"返回",0)==0&&id!=847)return {};char callback[32],data[32];std::snprintf(callback,sizeof(callback),"0x%lx",static_cast<unsigned long>(reinterpret_cast<uintptr_t>(&menuAction)));std::snprintf(data,sizeof(data),"0x%lx",static_cast<unsigned long>(id));return "\""+escaped(label)+"\" { \"callback\" \""+callback+"\" \"user_data\" \""+data+"\" }\n";}
 const char* page(const std::string& title,const std::string& rows){menuText="\""+escaped(title)+"\" {\n"+rows+"}\n";return menuText.c_str();}
 const char* menuPage(const hud::Document& doc){std::string rows;for(auto& row:doc.rows)rows+=item(row.label,row.action);return page(doc.title,rows);}
 std::vector<std::string> relatedModules(){std::vector<std::string> paths;HANDLE snapshot=CreateToolhelp32Snapshot(TH32CS_SNAPMODULE|TH32CS_SNAPMODULE32,GetCurrentProcessId());if(snapshot==INVALID_HANDLE_VALUE)return paths;MODULEENTRY32W entry{};entry.dwSize=sizeof(entry);
@@ -456,7 +473,7 @@ const char* displayMenu(const Config& c){return menuPage(menus::display(c));}
 const char* colorMenu(const Config& c){return menuPage(menus::colors(c));}
 const char* animationMenu(const Config& c){return menuPage(menus::animation(c));}
 const char* wallMenu(){auto c=*std::atomic_load(&settings);auto state=std::atomic_load(&source_walls::snapshot);return menuPage(menus::wall(c,state->message));}
-const char* wallOptionsMenu(){auto c=*std::atomic_load(&settings);const char* sizes[]={u8"小80×28",u8"中120×40",u8"大180×60"};return page(u8"场景挂画参数",item(std::string(u8"新挂画尺寸：")+sizes[c.wallSize]+u8"（循环切换）",712)+item(u8"最多挂画："+std::to_string(c.wallCapacity)+u8"（2/4/6/8）",713)+item(u8"搜索距离："+std::to_string(int(c.wallRange))+u8"（300/600/900）",714)+item(u8"最小间距："+std::to_string(int(c.wallSpacing))+u8"（80/140/220）",715)+item(u8"旧句额外停留："+std::to_string(c.wallLingerMs)+u8"ms（0/2000/4000/8000）",716)+item(u8"淡出时间："+std::to_string(c.wallFadeMs)+u8"ms（500/1000/2000）",717)+item(u8"返回场景挂画",30));}
+const char* wallOptionsMenu(){auto c=*std::atomic_load(&settings);const char* sizes[]={u8"小80×28",u8"中120×40",u8"大180×60"};return page(u8"场景挂画参数",item(std::string(u8"新挂画尺寸：")+sizes[c.wallSize]+u8"（循环切换）",712)+item(u8"最多挂画："+std::to_string(c.wallCapacity)+u8"（2/4/6/8）",713)+item(u8"搜索距离："+std::to_string(int(c.wallRange))+u8"（300/600/900）",714)+item(u8"最小间距："+std::to_string(int(c.wallSpacing))+u8"（80/140/220）",715)+item(u8"旧句额外停留："+std::to_string(c.wallIndependentTiming?c.wallLingerMs:c.lingerMs)+u8"ms（点击使用独立设置）",716)+item(u8"淡出时间："+std::to_string(c.wallIndependentTiming?c.wallFadeMs:c.transition)+u8"ms（点击使用独立设置）",717)+item(menus::value(u8"挂画独立停留与退场",on(c.wallIndependentTiming)),727)+item(u8"返回场景挂画",30));}
 std::string componentName(int index){return index==0?u8"歌名":index==1?u8"作者":u8"歌词 "+std::to_string(index-1);}
 std::string previewExitRows(){return item(u8"动画预览："+on(positionPreviewMotion.load()),2006)+item(u8"保存设置并结束预览",2098)+item(u8"结束预览，暂不保存",2099);}
 const char* positionHome(const Config& c){return page(u8"位置调节 · 固定预览",item(u8"歌词位置与数量（"+std::to_string(c.layout.lyricCount)+u8" 个位置）",2001)+item(u8"歌名：高度、远近与大小",2100)+item(u8"作者：高度、远近与大小",2101)+item(u8"全部组件位置重置",2004)+previewExitRows());}
@@ -472,10 +489,15 @@ const char* positionAxisMenu(const Config& c,int index,int axis){bool group=inde
  return page((group?std::string(u8"全部歌词"):componentName(index))+" · "+names[axis]+": ["+value+"]",rows+item(group?u8"返回歌词列表":u8"返回此组件",group?2001:2100+index)+previewExitRows());}
 void setFollow(follow::Settings next){auto old=std::atomic_load(&followSettings);next.revision=old->revision+1;std::atomic_store(&followSettings,std::make_shared<const follow::Settings>(next));auto request=next.target;request.enabled=request.enabled&&next.enabled;std::atomic_store(&source_entities::followRequest,std::make_shared<const inventory::FollowRequest>(request));note("Entity follow enabled="+std::to_string(next.enabled)+" epoch="+std::to_string(next.target.epoch)+" handle="+std::to_string(next.target.handle)+" sample="+std::to_string(next.sample)+" offset="+std::to_string(next.offset.x)+","+std::to_string(next.offset.y)+","+std::to_string(next.offset.z)+" size="+std::to_string(next.size)+" bob="+std::to_string(next.bobEnabled)+" period="+std::to_string(next.bobPeriod)+" amplitude="+std::to_string(next.bobAmplitude));}
 const char* followMenu(){auto state=std::atomic_load(&followSettings);auto frame=std::atomic_load(&source_entities::followSnapshot);auto camera=std::atomic_load(&source_camera::snapshot);auto result=follow::resolve(*frame,state->target,camera->epoch,uint64_t(now()));std::string status=!state->enabled?u8"跟随未开启":!state->target.enabled?u8"请先锁定目标":result.status;if(state->enabled&&!std::atomic_load(&settings)->enabled)status=u8"歌词总开关已关闭";else if(state->enabled&&!usableCamera(*camera,uint64_t(now())))status=u8"等待有效游戏相机";if(!followNotice.empty()&&uint64_t(now())<followNoticeUntil)status=followNotice;auto target=follow::find(*frame,follow::effectiveHandle(*frame,state->target));if(target)status=target->className+" #"+std::to_string(target->index)+" · "+status;
- return page(u8"实体持续跟随歌词",item(menus::value(u8"跟随开关",on(state->enabled)),820)+item(u8"锁定准星附近物体（并开启）",821)+item(u8"切换下一个视野内目标",822)+item(menus::value(u8"目标筛选",follow::filterName(state->filter)),811)+item(menus::value(u8"内容",state->sample?u8"固定示例":u8"当前歌词"),823)+item(u8"位置与大小（固定预览）",812)+item(u8"清除当前目标",824)+item(menus::value(u8"状态",status),0)+item(u8"网络姿态；不含骨骼与墙体遮挡；本次会话生效",0));}
-const char* followLayoutMenu(){auto f=std::atomic_load(&followSettings);return page(u8"实体歌词位置 · 固定预览",item(menus::value(u8"左右",positionValue(f->offset.y)),813)+item(menus::value(u8"高度",positionValue(f->offset.z)),814)+item(menus::value(u8"前后偏移",positionValue(f->offset.x)),815)+item(menus::value(u8"大小",positionValue(f->size)+"x"),816)+item(u8"重置实体位置与大小",817)+item(menus::value(u8"整句上下往复",on(f->bobEnabled)),818)+item(u8"先锁定实体；调整沿实体局部坐标，本次会话有效",0));}
+ return page(u8"实体持续跟随歌词",item(menus::value(u8"手动跟随开关",on(state->enabled)),820)+item(u8"锁定准星附近物体（并开启）",821)+item(u8"切换下一个视野内目标",822)+item(menus::value(u8"目标筛选",follow::filterName(state->filter)),811)+item(menus::value(u8"内容",state->sample?u8"固定示例":u8"当前歌词"),823)+item(u8"位置与大小（固定预览）",812)+item(u8"清除当前目标",824)+item(menus::value(u8"状态",status),0)+item(u8"自动实体追踪（永久规则）",870));}
+const char* followLayoutMenu(){auto f=std::atomic_load(&followSettings);return page(u8"实体歌词位置 · 固定预览",item(menus::value(u8"左右",positionValue(f->offset.y)),813)+item(menus::value(u8"高度",positionValue(f->offset.z)),814)+item(menus::value(u8"前后偏移",positionValue(f->offset.x)),815)+item(menus::value(u8"大小",positionValue(f->size)+"x"),816)+item(u8"重置实体位置与大小",817)+item(menus::value(u8"整句上下往复",on(f->bobEnabled)),818)+item(u8"先锁定实体；调整沿实体局部坐标，本次会话有效",0)+item(menus::value(u8"实体移动平滑",on(std::atomic_load(&settings)->entitySmooth)),110010)+item(u8"移动动画预设与耗时",819));}
 const char* followLayoutAxisMenu(int axis){auto f=std::atomic_load(&followSettings);const char* names[]={u8"左右",u8"高度",u8"前后偏移",u8"大小"};const char* choices[][5]={{u8"向左 10",u8"向左 1",u8"向右 1",u8"向右 10",u8"恢复默认"},{u8"向上 10",u8"向上 1",u8"向下 1",u8"向下 10",u8"恢复默认"},{u8"向后 10",u8"向后 1",u8"向前 1",u8"向前 10",u8"恢复默认"},{"-0.25x","-0.05x","+0.05x","+0.25x",u8"恢复默认"}};std::string rows;for(int choice=0;choice<5;++choice)rows+=item(choices[axis][choice],8500+axis*10+choice);return page(menus::value(names[axis],positionValue(follow::layoutAxis(*f,axis))+(axis==3?"x":"")),rows);}
 const char* followBobMenu(){auto f=std::atomic_load(&followSettings);return page(u8"实体歌词 · 整句上下往复",item(menus::value(u8"运动开关",on(f->bobEnabled)),8600)+item(menus::value(u8"完整周期",positionValue(f->bobPeriod)+u8" 秒"),0)+item(u8"周期 -0.1 秒",8601)+item(u8"周期 +0.1 秒",8602)+item(menus::value(u8"上下各移动",positionValue(f->bobAmplitude)+u8" 游戏单位"),0)+item(u8"幅度 -0.1",8603)+item(u8"幅度 +0.1",8604)+item(u8"恢复默认（关闭，0.5秒，幅度1）",8605));}
+const char* movementMenu(const Config& c){return page(u8"歌词移动与实体平滑",item(menus::value(u8"全局换句位置移动",on(c.lyricMove)),110011)+item(menus::value(u8"实体移动平滑",on(c.entitySmooth)),110010)+item(menus::value(u8"移动曲线",movement::name(c.moveCurve)),879)+item(menus::value(u8"移动耗时",std::to_string(c.moveMs)+"ms"),0)+item(u8"耗时 -0.1秒",110013)+item(u8"耗时 +0.1秒",110014));}
+std::string aimedAutoKey(){auto f=std::atomic_load(&source_entities::snapshot);auto camera=std::atomic_load(&source_camera::snapshot);CameraPose eye;if(!usableCamera(*camera,uint64_t(now()))||!cameraPose(*camera,eye))return {};auto r=autofollow::aimed(*f,*camera,eye,uint64_t(now()));return r?autofollow::semanticKey(*r):std::string{};}
+const char* automaticMenu(const Config& c){return page(u8"自动实体追踪 · 永久规则",item(menus::value(u8"自动追踪总开关",on(c.autoFollow.enabled)),110000)+item(u8"特殊感染者",871)+item(u8"队友与角色",872)+item(u8"武器与物品",873)+item(u8"其他实体",874)+item(u8"瞄准识别并设置类型",875)+item(u8"全部已列类型开启",110001)+item(u8"全部类型关闭",110002)+item(menus::saveLabel(c,std::atomic_load(&savedSettings)?*std::atomic_load(&savedSettings):Config{},saveState.load()==1,saveState.load()<0,bool(std::atomic_load(&savedSettings)))+u8"（跨游戏保留规则）",18));}
+const char* automaticAimMenu(const Config& c){auto key=aimedAutoKey();std::string label=key.empty()?u8"未识别，请对准实体并稍等":key;for(const auto& type:autoTypes)if(type.key==key){label=type.label;break;}return page(u8"瞄准类型 · 自动追踪",item(menus::value(u8"准星实体类型",label),0)+item(menus::value(u8"该类型自动追踪",on(!key.empty()&&autoRule(c.autoFollow,key))),0)+item(u8"开启此类型（并开启自动追踪）",110005)+item(u8"关闭此类型",110006)+item(menus::value(u8"检测范围",positionValue(c.autoFollow.range)),0)+item(u8"范围 -100",110003)+item(u8"范围 +100",110004));}
+const char* automaticCategoryMenu(const Config& c,int group){auto f=std::atomic_load(&source_entities::snapshot);autofollow::discover(autoTypes,*f,c.autoFollow);const char* names[]={u8"特殊感染者",u8"队友与角色",u8"武器与物品",u8"其他实体"};std::string rows;for(size_t i=0;i<autoTypes.size();++i)if(autoTypes[i].group==group)rows+=item(menus::value(autoTypes[i].label,on(autoRule(c.autoFollow,autoTypes[i].key))),100000+i);return page(names[group],rows);}
 void followAction(uintptr_t id){auto next=*std::atomic_load(&followSettings);followNotice.clear();followNoticeUntil=uint64_t(now())+2000;
  if(id==820)next.enabled=!next.enabled;
  else if(id==823)next.sample=!next.sample;
@@ -515,7 +537,26 @@ const char* menuActionImpl(void* argument){uintptr_t id=reinterpret_cast<uintptr
  if(id>=3000&&id<=3103){int index=int(id-3000)/10,axis=int(id-3000)%10;if(index>=2+MaxLyricSlots||axis>3)return nullptr;positionPreview=true;return positionAxisMenu(c,index,axis);}
  if(id>=20000&&id<=31304){int code=int(id-20000),index=code/1000,axis=code%1000/100,choice=code%100;if(index>2+MaxLyricSlots||axis>3||choice>4)return nullptr;positionPreview=true;if(index==2+MaxLyricSlots)adjustLyricGroup(c.layout,axis,choice);else adjustPosition(c.layout,index,axis,choice);changeSettings(c);return positionAxisMenu(c,index,axis);}
  positionPreview=false;
- if(id==847){followAction(id);if(!c.enabled){c.enabled=true;changeSettings(c);}return nullptr;}
+ if(id==847){followAction(id);c.autoFollow.enabled=false;c.enabled=true;changeSettings(c);return nullptr;}
+ if(id==819)return movementMenu(c);
+ if(id==879){std::string rows;for(int i=0;i<5;++i)rows+=item(movement::name(i),110020+i);return page(u8"移动曲线预设",rows);}
+ if(id==870)return automaticMenu(c);
+ if(id>=871&&id<=874)return automaticCategoryMenu(c,int(id-871));
+ if(id==875)return automaticAimMenu(c);
+ if(id>=100000&&id<100512){size_t index=id-100000;if(index<autoTypes.size()){auto key=autoTypes[index].key;bool enable=!autoRule(c.autoFollow,key);setAutoRule(c.autoFollow,key,enable);if(enable)c.autoFollow.enabled=true;changeSettings(c);}return nullptr;}
+ if(id>=110000&&id<=110024){
+ if(id==110000)c.autoFollow.enabled=!c.autoFollow.enabled;
+ else if(id==110001){autofollow::discover(autoTypes,*std::atomic_load(&source_entities::snapshot),c.autoFollow);c.autoFollow.rules.clear();for(const auto& type:autoTypes)setAutoRule(c.autoFollow,type.key,true);c.autoFollow.enabled=true;}
+ else if(id==110002){c.autoFollow.rules.clear();c.autoFollow.enabled=false;}
+ else if(id==110003||id==110004)c.autoFollow.range=std::clamp(c.autoFollow.range+(id==110003?-100.f:100.f),100.f,4000.f);
+ else if(id==110005||id==110006){auto key=aimedAutoKey();if(key.empty())return nullptr;setAutoRule(c.autoFollow,key,id==110005);if(id==110005)c.autoFollow.enabled=true;}
+ else if(id==110010)c.entitySmooth=!c.entitySmooth;
+ else if(id==110011)c.lyricMove=!c.lyricMove;
+ else if(id==110013||id==110014)c.moveMs=std::clamp(c.moveMs+(id==110013?-100:100),100,2000);
+ else if(id>=110020)c.moveCurve=int(id-110020);
+ else return nullptr;
+ changeSettings(c);return nullptr;
+ }
  if(id==810)return followMenu();
  if(id==811){std::string rows;for(unsigned i=0;i<follow::FilterCount;++i)rows+=item(follow::filterName(follow::Filter(i)),825+i);return page(u8"跟随目标筛选",rows);}
  if(id==812)return followLayoutMenu();
@@ -528,6 +569,7 @@ const char* menuActionImpl(void* argument){uintptr_t id=reinterpret_cast<uintptr
  if(id==800){auto frame=std::atomic_load(&source_entities::snapshot);return page(u8"实体接口实验 · 只读诊断",item(menus::value(u8"定时采集",on(source_entities::enabled.load())),801)+item(u8"立即导出当前快照",802)+item(menus::value(u8"已识别实体",std::to_string(frame->records.size())),0)+item(menus::value(u8"扫描条目",std::to_string(frame->occupied)),0)+item(menus::value(u8"已写帧",std::to_string(source_entities::fileFrames.load())),0)+item(menus::value(u8"状态",frame->status),0)+item(u8"输出目录："+directory.u8string(),0)+item(u8"当前为网络坐标，不是骨骼或渲染姿态",0));}
  if(id==801){source_entities::enabled=!source_entities::enabled.load();if(source_entities::enabled.load())source_entities::resetRequested=true;return nullptr;}
  if(id==802){source_entities::dumpRequested=true;wake.notify_all();return nullptr;}
+ if(id==727){c.wallIndependentTiming=!c.wallIndependentTiming;changeSettings(c);return wallOptionsMenu();}
  if(id==726){c.wallFloorFollow=!c.wallFloorFollow;changeSettings(c);return menuPage(menus::wallAppearance(c));}
  if(id==30)return wallMenu();
  if(id==711)return wallOptionsMenu();
@@ -545,10 +587,10 @@ const char* menuActionImpl(void* argument){uintptr_t id=reinterpret_cast<uintptr
  else if(id==713)c.wallCapacity=c.wallCapacity>=8?2:(c.wallCapacity/2+1)*2;
  else if(id==714)c.wallRange=c.wallRange<600?600:c.wallRange<900?900:300;
  else if(id==715)c.wallSpacing=c.wallSpacing<140?140:c.wallSpacing<220?220:80;
- else if(id==716)c.wallLingerMs=c.wallLingerMs<2000?2000:c.wallLingerMs<4000?4000:c.wallLingerMs<8000?8000:0;
+ else if(id==716){if(!c.wallIndependentTiming){c.wallLingerMs=c.lingerMs;c.wallFadeMs=c.transition;}c.wallIndependentTiming=true;c.wallLingerMs=c.wallLingerMs<2000?2000:c.wallLingerMs<4000?4000:c.wallLingerMs<8000?8000:0;}
  else if(id==718)c.wallReuse=!c.wallReuse;
  else if(id==719)c.wallSurface=1-c.wallSurface;
- else if(id==717)c.wallFadeMs=c.wallFadeMs<1000?1000:c.wallFadeMs<2000?2000:500;
+ else if(id==717){if(!c.wallIndependentTiming){c.wallLingerMs=c.lingerMs;c.wallFadeMs=c.transition;}c.wallIndependentTiming=true;c.wallFadeMs=c.wallFadeMs<1000?1000:c.wallFadeMs<2000?2000:500;}
  changeSettings(c);return id>=712&&id<=717?wallOptionsMenu():wallMenu();}
  if(id==24)return diagnosticMenu();
  if(id==20)return displayMenu(c);
@@ -621,7 +663,7 @@ const char* menuAction(void* argument){
  return hud::callbackResult(id,result);
 }
 std::string buildNativeMenu(uintptr_t id){
- source_entities::browseRequested=id==810||id==811;
+ source_entities::browseRequested=id==810||id==811||(id>=870&&id<=875);
  followPositionPreview=id==812||id==818||(id>=813&&id<=816);
  if(!id)return rootMenu(false);
  if(id==24)return diagnosticMenu(false);
@@ -633,8 +675,16 @@ void updateHudAppearance(const hud::Appearance& appearance){std::lock_guard<std:
 std::string nativeMenuNotice(){auto notice=std::atomic_load(&menuNotice);auto tick=uint64_t(now());return tick>=notice->tick&&tick-notice->tick<2000?notice->text:std::string{};}
 const char* openNativeMenu(void*){nativeHud.open();return nullptr;}
 const char* nativeEntryMenu(){static std::string entry;char callback[32];std::snprintf(callback,sizeof(callback),"0x%lx",static_cast<unsigned long>(reinterpret_cast<uintptr_t>(&openNativeMenu)));entry="\"L4D2DangoMusic\" { \"打开歌词控制面板\" { \"callback\" \""+std::string(callback)+"\" \"user_data\" \"0x0\" } }";return entry.c_str();}
-const char* rootMenu(bool title){if(title)return "L4D2DangoMusic 0.9.4";positionPreview=false;wallPositionPreview=false;auto c=*std::atomic_load(&settings);auto saved=std::atomic_load(&savedSettings);auto state=saveState.load();bool saving=state==1||bool(std::atomic_load(&pendingSave));return menuPage(menus::root(c,menus::saveLabel(c,saved?*saved:Config{},saving,state<0,bool(saved)),std::atomic_load(&followSettings)->enabled));}
+const char* rootMenu(bool title){if(title)return "L4D2DangoMusic 0.9.4";positionPreview=false;wallPositionPreview=false;auto c=*std::atomic_load(&settings);auto saved=std::atomic_load(&savedSettings);auto state=saveState.load();bool saving=state==1||bool(std::atomic_load(&pendingSave));return menuPage(menus::root(c,menus::saveLabel(c,saved?*saved:Config{},saving,state<0,bool(saved)),(std::atomic_load(&followSettings)->enabled||c.autoFollow.enabled)));}
 
+void captureSourceFeatures(const GameCameraFrame& frame){
+ auto config=std::atomic_load(&settings);bool automatic=config->enabled&&config->autoFollow.enabled&&!config->autoFollow.rules.empty();source_entities::autoRequested=automatic;
+ CameraPose view;static std::shared_ptr<const Config> previousConfig;static uint64_t previousTick=0;static uint32_t previousEpoch=0;static inventory::FollowRequest cached;
+ if(!automatic){cached={};previousConfig.reset();}else if(cameraPose(frame,view)){auto inventory=std::atomic_load(&source_entities::snapshot);if(previousConfig!=config||previousTick!=inventory->tick||previousEpoch!=frame.epoch){cached=autoSelector.choose(*inventory,config->autoFollow,view,frame.epoch,frame.tick);previousConfig=config;previousTick=inventory->tick;previousEpoch=frame.epoch;}if(frame.tick<inventory->tick||frame.tick-inventory->tick>600)cached={};}
+ inventory::FollowRequest request=cached;
+ auto old=std::atomic_load(&source_entities::automaticRequest);if(old->enabled!=request.enabled||old->handle!=request.handle||old->epoch!=request.epoch)std::atomic_store(&source_entities::automaticRequest,std::make_shared<const inventory::FollowRequest>(request));
+ source_walls::onFrame(frame);source_entities::onFrame(frame);
+}
 class LyricsPlugin final:public IL4NPlugin {
  bool started=false,attempted=false,duplicate=false;HANDLE renderOwner=nullptr;
 public:
