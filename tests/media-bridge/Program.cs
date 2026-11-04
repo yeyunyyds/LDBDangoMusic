@@ -21,6 +21,7 @@ foreach(var source in new[]{"netease","qq","kugou","lrclib"})
  Check(handler.Requests>0,source+" requests");
 }
 Check(Protocol.Matches("CloudMusic.exe",3)&&!Protocol.Matches("QQMusic.exe",3),"Netease filter");
+Check(Protocol.Matches("Netease.CloudMusic_123!App",3)&&Protocol.Matches("cloud-music.exe",3)&&Protocol.Matches("music.163.com",3),"Netease SMTC identifier variants");
 Check(Protocol.Matches("QQMusic.exe",4)&&Protocol.Matches("KugouMusic.exe",5),"QQ/Kugou filters");
 Check(!Protocol.Matches("left4dead2.exe",0),"game excluded");
 Check(Protocol.Key("a","t","r",30)!=Protocol.Key("b","t","r",30),"source identity");

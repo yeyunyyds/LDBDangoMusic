@@ -1,3 +1,4 @@
+param([switch]$NativeNetEase)
 $ErrorActionPreference = 'Stop'
 Set-Location (Join-Path $PSScriptRoot '..')
 New-Item -ItemType Directory -Force build | Out-Null
@@ -43,5 +44,12 @@ if ($LASTEXITCODE -ne 0) { throw 'Menu visual build failed' }
 & ./build/menu_visual_test.exe
 if ($LASTEXITCODE -ne 0) { throw 'Menu visual tests failed' }
 
-& dotnet publish media-bridge/DangoMediaBridge.csproj -c Release -o build/media-bridge
-if ($LASTEXITCODE -ne 0) { throw 'Windows media bridge build failed' }
+if (!$NativeNetEase) {
+    & dotnet publish media-bridge/DangoMediaBridge.csproj -c Release -o build/media-bridge
+    if ($LASTEXITCODE -ne 0) { throw 'Windows media bridge build failed' }
+}
+
+& cl.exe /nologo /std:c++17 /EHsc /utf-8 /W4 /Isrc /Ivendor tests/netease_elog_test.cpp /Fobuild/netease_elog_test.obj /Febuild/netease_elog_test.exe
+if ($LASTEXITCODE -ne 0) { throw 'NetEase elog tests build failed' }
+& ./build/netease_elog_test.exe
+if ($LASTEXITCODE -ne 0) { throw 'NetEase elog tests failed' }

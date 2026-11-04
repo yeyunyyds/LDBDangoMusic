@@ -20,7 +20,7 @@ long generation = 0, retryAt = 0;
 Task<List<LrcLine>?>? search = null;
 string searchKey = "";
 List<LrcLine> lyrics = new();
-string message = "Waiting for Windows media session";
+string message = "Waiting for Windows media session", lastInventory = "";
 GlobalSystemMediaTransportControlsSessionManager? manager = null;
 Log("Bridge started; Windows SMTC, Netease/QQ/Kugou/LRCLIB; parent=" + parentId);
 while (ParentAlive())
@@ -29,14 +29,19 @@ while (ParentAlive())
     {
         manager ??= await GlobalSystemMediaTransportControlsSessionManager.RequestAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(3));
         int source = Source();
-        var sessions = manager.GetSessions().Where(s => Protocol.Matches(s.SourceAppUserModelId, source)).ToList();
+        var allSessions = manager.GetSessions().Take(32).ToList();
+        var availableSources = allSessions.Select(s => s.SourceAppUserModelId).ToArray();
+        string inventory = "source=" + source + " sessions=" + (availableSources.Length == 0 ? "<none>" : string.Join(" | ", availableSources));
+        if (inventory != lastInventory) { lastInventory = inventory; Log("SMTC " + inventory); }
+        var sessions = allSessions.Where(s => Protocol.Matches(s.SourceAppUserModelId, source)).ToList();
         var session = sessions.FirstOrDefault(s => s.GetPlaybackInfo().PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing)
             ?? sessions.FirstOrDefault(s => s.SourceAppUserModelId == app)
             ?? sessions.FirstOrDefault();
         if (session == null)
         {
             if (key != "") { key = ""; lyrics.Clear(); service.Cancel(); search = null; generation++; Log("Media session closed; lyrics cleared"); }
-            Protocol.Write(output, new { schema = 1, parent = parentId, selection = source, tick = Environment.TickCount64, status = "stopped", name = "", singer = "", duration = 0, progress = 0, sourceId = "", generation, message = "No compatible SMTC session", lines = Array.Empty<object>() });
+            string reason = availableSources.Length == 0 ? "No Windows media sessions (SMTC); enable system media controls in the player" : "No matching player; available: " + string.Join(", ", availableSources.Take(4));
+            Protocol.Write(output, new { schema = 1, parent = parentId, selection = source, tick = Environment.TickCount64, status = "stopped", name = "", singer = "", duration = 0, progress = 0, sourceId = "", generation, message = reason, availableSources, lines = Array.Empty<object>() });
             await Task.Delay(250); continue;
         }
         var props = await session.TryGetMediaPropertiesAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(2));
@@ -65,7 +70,7 @@ while (ParentAlive())
         }
         if (!string.IsNullOrWhiteSpace(title) && duration > 0 && lyrics.Count == 0 && search == null && Environment.TickCount64 >= retryAt)
         { searchKey = key; search = service.SearchAsync(title, artist, TimeSpan.FromSeconds(duration)); }
-        Protocol.Write(output, new { schema = 1, parent = parentId, selection = source, tick = Environment.TickCount64, status = playing ? "playing" : "paused", name = title, singer = artist, duration, progress = position, playbackRate = rate, sourceId = app, generation, message, lines = Protocol.Lines(lyrics) });
+        Protocol.Write(output, new { schema = 1, parent = parentId, selection = source, tick = Environment.TickCount64, status = playing ? "playing" : "paused", name = title, singer = artist, duration, progress = position, playbackRate = rate, sourceId = app, generation, message, availableSources, lines = Protocol.Lines(lyrics) });
     }
     catch (Exception e)
     {

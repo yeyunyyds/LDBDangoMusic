@@ -25,6 +25,7 @@
 #include "lyric_lifecycle.hpp"
 #include "player_session.hpp"
 #include "media_bridge.hpp"
+#include "netease_native.hpp"
 #include "camera_diagnostics.hpp"
 #include "source_camera.hpp"
 #include "source_walls.hpp"
@@ -112,7 +113,7 @@ nlohmann::json get(const wchar_t* path,size_t limit){
 }
 constexpr auto statusPath=L"/status?filter=status,name,singer,duration,progress,playbackRate";
 void run() noexcept {
- try {cfg=*std::atomic_load(&settings);CameraWriter cameraWriter;PlayerSession player;media::Bridge mediaBridge;int activeSource=-1;bool useMedia=false;int64_t nextLxProbe=0;auto demoStart=now();
+ try {cfg=*std::atomic_load(&settings);CameraWriter cameraWriter;PlayerSession player;media::Bridge mediaBridge;netease::Native neteaseNative(&stopping,note);int activeSource=-1;bool useMedia=false;int64_t nextLxProbe=0;auto demoStart=now();
  while(!stopping||std::atomic_load(&pendingSave)){
  cfg=*std::atomic_load(&settings);
  if(activeSource!=cfg.musicSource){activeSource=cfg.musicSource;useMedia=cfg.musicSource>=2;nextLxProbe=0;player=PlayerSession{};publish(player.disconnect(now()));}
@@ -125,7 +126,8 @@ void run() noexcept {
   try{probed=status(get(statusPath,65536),now());haveProbe=true;if(useMedia){player=PlayerSession{};useMedia=false;note("Music source: LX local API");}}
   catch(...){if(cfg.musicSource==1)throw;if(!useMedia){player=PlayerSession{};useMedia=true;note("LX unavailable; falling back to Windows media session");}nextLxProbe=now()+5000;}
  }
- if(useMedia){mediaBridge.ensure(directory,cfg.musicSource,now());player.poll([&](){return mediaBridge.status(now());},[&](){return mediaBridge.lyrics(now());},[](){return now();},[](State state){if(state.message=="Connected to BLF / LX")state.message="Synchronized lyrics ready";state.message="Windows media: "+state.message;publish(std::move(state));});}
+ if(cfg.musicSource==3){player.poll([&](){return neteaseNative.status();},[&](){return neteaseNative.lyrics();},[](){return now();},[](State state){if(state.message=="Connected to BLF / LX")state.message="Netease native lyrics ready";publish(std::move(state));});}
+ else if(useMedia){mediaBridge.ensure(directory,cfg.musicSource,now());player.poll([&](){return mediaBridge.status(now());},[&](){return mediaBridge.lyrics(now());},[](){return now();},[](State state){if(state.message=="Connected to BLF / LX")state.message="Synchronized lyrics ready";state.message="Windows media: "+state.message;publish(std::move(state));});}
  else {player.poll([&](){if(haveProbe){haveProbe=false;return probed;}return status(get(statusPath,65536),now());},[](){return peak::splitTimeline(lyrics(get(L"/lyric-all",2*1024*1024)));},[](){return now();},[](State state){publish(std::move(state));});}
  }
  if(cfg.demo)publish(std::move(s));

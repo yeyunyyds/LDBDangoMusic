@@ -11,6 +11,7 @@ int main(){
  auto reject=[&](auto fn){bool rejected=false;try{fn();}catch(...){rejected=true;}assert(rejected);};
  reject([&]{media::readStatus(j,4001,123);});reject([&]{media::readStatus(j,999,123);});reject([&]{media::readStatus(j,1100,124);});
  auto bad=j;bad["lines"][0]["words"][0]["duration"]=-1;reject([&]{media::readLyrics(bad);});
+ auto missing=j;missing["status"]="stopped";missing["name"]="";missing["message"]="No Windows media sessions (SMTC)";PlayerSession diagnosticSession;assert(diagnosticSession.observe(media::readStatus(missing,1100,123)).message=="No Windows media sessions (SMTC)");
  auto changed=j;changed["sourceId"]="qqmusic";assert(media::readStatus(changed,1100,123).key!=s.key);
  PlayerSession session;session.observe(s);session.timeline=lines;auto paused=s;paused.playing=false;assert(session.observe(paused).timeline.empty());assert(session.disconnect(1200).timeline.empty());
  Config c;assert(c.musicSource==0);c.musicSource=3;assert(decodeConfig(encodeConfig(c)).musicSource==3);assert(decodeConfig(nlohmann::json::object()).musicSource==0);

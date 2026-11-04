@@ -62,3 +62,12 @@ Windows media / online lyric adapter:
 - The optional Windows media bridge is an independent self-contained .NET 8 x64
   process. Runtime license and third-party notices are in vendor/DOTNET-RUNTIME-*.txt
   and are included in the package README. The game plugin remains native x86.
+
+Native NetEase playback adapter:
+- src/netease_elog.hpp adapts the byte decoder and playback-event model from
+  344272586-sketch/dsh-pet-qqmusic, lib/netease-elog.js (MIT, Copyright (c) 2026
+  dsh-pet-qqmusic contributors; upstream identifies netease-cloudmusic-detector
+  as its decoder source). License is retained in vendor/NETEASE-ELOG-LICENSE.MIT.
+- The local reader, bounded file tailing/process-lifetime validation and async
+  WinHTTP song-ID lyric adapter are native implementations. Raw client log
+  records, music URLs, cookies and credentials are not copied or uploaded.

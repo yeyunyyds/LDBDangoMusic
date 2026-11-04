@@ -1,6 +1,6 @@
 # L4D2DangoMusic
 
-本分支基于 v0.9.5 增加 Windows 音乐会话及网易云、QQ、酷狗、LRCLIB 歌词获取，测试包与使用方法见 [多平台歌词指南](docs/multi-platform-lyrics.md)。正式版 Release 保持 v0.9.5。
+本分支基于 v0.9.5 增加网易云原生 elog 通道（单 DLL、无需 SMTC/.NET），以及可选的 Windows 音乐会话桥接和 QQ、酷狗、LRCLIB 歌词获取，测试包与使用方法见 [多平台歌词指南](docs/multi-platform-lyrics.md)。正式版 Release 保持 v0.9.5。网易云小包：[下载 netease-native.zip](https://github.com/yeyunyyds/LDBDangoMusic/raw/refs/heads/zip/L4D2DangoMusic-0.9.5-netease-native.zip)。
 
 > 当前正式版：[v0.9.5](https://github.com/yeyunyyds/LDBDangoMusic/releases/tag/v0.9.5)。提供普通世界/屏幕歌词、场景挂画，以及可选的手动/自动实体跟随；支持平滑移动、原生 HUD 菜单和可选彩色效果。
 
@@ -42,7 +42,7 @@
 
 1. 退出游戏，确认 L4N 已安装并正常工作。
 2. 将压缩包内的 `bin` 文件夹合并到游戏根目录。
-3. 首次安装复制全部文件。多平台测试包升级时替换 DLL 和配置子目录内的 `DangoMediaBridge.exe`，保留已有的 `config.json`。
+3. 首次安装复制全部文件。多平台测试包升级时保留已有的 `config.json`。网易云原生小包只替换 DLL，选择“音乐来源 → 网易云音乐”；完整 SMTC 包还需替换配置子目录内的 `DangoMediaBridge.exe`。
 4. 完整重启游戏，在 L4N 菜单进入 L4D2DangoMusic。
 
 安装路径：

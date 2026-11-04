@@ -14,3 +14,5 @@ mkdir -p build
 "$compiler" -std=c++17 -O2 -Isrc tests/gnome_follow_test.cpp -static -o build/gnome_follow_test.exe
 "$compiler" -std=c++17 -O2 -Ivendor -Isrc tests/entity_auto_motion_test.cpp -static -o build/entity_auto_motion_test.exe
 "$compiler" -std=c++17 -O2 -Ivendor -Isrc tests/menu_visual_test.cpp -static -o build/menu_visual_test.exe
+
+"$compiler" -std=c++17 -O2 -Ivendor -Isrc tests/netease_elog_test.cpp -static -o build/netease_elog_test.exe

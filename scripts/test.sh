@@ -66,3 +66,6 @@ g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc -Ivendor 
 g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc -Ivendor tests/media_protocol_test.cpp -o build/media_protocol_test
 ./build/media_protocol_test
 if command -v dotnet >/dev/null 2>&1; then dotnet run --project tests/media-bridge/MediaBridgeTests.csproj -c Release; fi
+
+g++ -std=c++17 -O2 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc -Ivendor tests/netease_elog_test.cpp -o build/netease_elog_test
+./build/netease_elog_test

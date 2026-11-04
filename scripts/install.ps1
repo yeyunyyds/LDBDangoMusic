@@ -1,10 +1,10 @@
-param([Parameter(Mandatory=$true)][string]$GameRoot,[ValidateRange(-10000,10000)][int]$OffsetMs)
+param([Parameter(Mandatory=$true)][string]$GameRoot,[ValidateRange(-10000,10000)][int]$OffsetMs,[switch]$NativeNetEase)
 $ErrorActionPreference = 'Stop'
 if (Get-Process -Name left4dead2 -ErrorAction SilentlyContinue) { throw 'Exit Left 4 Dead 2 before installing; also close any legacy lyrics Host if used.' }
 $repo = Split-Path $PSScriptRoot -Parent
 $sourceDll = Join-Path $repo 'build/L4D2DangoMusic.dll'
 $mediaBridge = Join-Path $repo 'build/media-bridge/DangoMediaBridge.exe'
-if (!(Test-Path $mediaBridge)) { throw 'Build the self-contained Windows media bridge first.' }
+if (!$NativeNetEase -and !(Test-Path $mediaBridge)) { throw 'Build the self-contained Windows media bridge first, or pass -NativeNetEase.' }
 if (!(Test-Path $sourceDll)) { throw 'Build the x86 DLL or run from the ZIP source directory.' }
 $neko = Join-Path $GameRoot 'bin/neko'
 if (!(Test-Path $neko)) { throw 'L4N bin/neko not found.' }
@@ -12,6 +12,7 @@ $target = Join-Path $neko 'plugins'
 $settingsDir = Join-Path $target 'L4D2DangoMusic'
 $path = Join-Path $settingsDir 'config.json'
 $defaults = Get-Content -Raw -Encoding UTF8 (Join-Path $repo 'config.example.json') | ConvertFrom-Json
+if ($NativeNetEase) { $defaults.musicSource = 3 }
 # Explicit legacy names are retained only for migration, not as active product names.
 $legacy = 'LDBDangoMusic'
 $candidates = @($path, (Join-Path $target "$legacy/config.json"), (Join-Path $GameRoot "bin/.l4d2bridge/plugins/$legacy/config.json"))
@@ -65,7 +66,7 @@ foreach ($location in $locations) {
     }
 }
 Copy-Item $sourceDll $dll -Force
-Copy-Item $mediaBridge (Join-Path $settingsDir 'DangoMediaBridge.exe') -Force
+if (!$NativeNetEase) { Copy-Item $mediaBridge (Join-Path $settingsDir 'DangoMediaBridge.exe') -Force }
 [IO.File]::WriteAllText($path, ($settings | ConvertTo-Json -Depth 16), [System.Text.UTF8Encoding]::new($false))
 Write-Host 'Installed L4D2DangoMusic 0.9.5; settings preserved. Restart game; use the L4D2DangoMusic 0.9.5 menu.'
 

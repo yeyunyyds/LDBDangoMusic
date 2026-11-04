@@ -7,10 +7,10 @@ public static class Protocol
         app + "\u001f" + title + "\u001f" + artist + "\u001f" + Math.Round(duration * 1000);
     public static bool Matches(string app, int source)
     {
-        app = app.ToLowerInvariant();
+        app = new string(app.ToLowerInvariant().Where(char.IsLetterOrDigit).ToArray());
         return source switch
         {
-            3 => app.Contains("cloudmusic") || app.Contains("netease"),
+            3 => app.Contains("cloudmusic") || app.Contains("netease") || app.Contains("music163"),
             4 => app.Contains("qqmusic"),
             5 => app.Contains("kugou"),
             6 => app.Contains("spotify"),
