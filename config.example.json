@@ -157,5 +157,8 @@
   "lyricMove": false,
   "moveCurve": 0,
   "moveMs": 350,
-  "wallIndependentTiming": false
+  "wallIndependentTiming": false,
+  "colorEffect": 0,
+  "colorSpeed": 0.2,
+  "colorAmount": 1
 }

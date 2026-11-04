@@ -22,6 +22,12 @@ inline void discover(std::vector<Type>& types,const inventory::Frame& frame,cons
  auto add=[&](const std::string& key,const std::string& label){if(types.size()>=512||std::any_of(types.begin(),types.end(),[&](const auto& t){return t.key==key;}))return;types.push_back({key,label,3});};
  for(const auto& r:frame.records)add(semanticKey(r),r.className);for(const auto& key:config.rules)add(key,key);
 }
+inline std::pair<size_t,size_t> counts(const std::vector<Type>& types,const AutoFollowConfig& config,int group=-1){size_t selected=0,total=0;for(const auto& type:types)if(group<0||type.group==group){++total;if(autoRule(config,type.key))++selected;}return {selected,total};}
+inline void toggleGroup(const std::vector<Type>& types,AutoFollowConfig& config,int group=-1){bool any=group<0?!config.rules.empty():counts(types,config,group).first>0;
+ if(group<0&&any){config.rules.clear();config.enabled=false;return;}
+ for(const auto& type:types)if(group<0||type.group==group)setAutoRule(config,type.key,!any);
+ if(!any)config.enabled=true;else if(config.rules.empty())config.enabled=false;
+}
 inline const inventory::Record* aimed(const inventory::Frame& frame,const GameCameraFrame& camera,const CameraPose& eye,uint64_t tick){
  if(!camera.active||frame.epoch!=camera.epoch||tick<frame.tick||tick-frame.tick>600)return nullptr;const inventory::Record* chosen=nullptr;float best=60.5f;
  for(const auto& r:frame.records){if(!alive(r))continue;auto p=follow::pose(frame,r.handle);if(!p.ready)continue;auto point=scene::point(p.matrix,{});auto ray=point-eye.eye;float distance=length(ray);if(distance<48||distance>1200)continue;Vec3 clip;if(!transform(camera.worldToClip,point,clip,true)||std::abs(clip.x)>.98f||std::abs(clip.y)>.98f||clip.z<0||clip.z>1)continue;float cosine=(ray.x*eye.forward.x+ray.y*eye.forward.y+ray.z*eye.forward.z)/distance;float score=(1-cosine)*1000+distance*.0001f;if(score<best){best=score;chosen=&r;}}

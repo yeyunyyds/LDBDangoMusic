@@ -53,9 +53,13 @@ int main(){
  auto offCount=[&](){std::ifstream log(root/L"build/L4D2DangoMusic/L4D2DangoMusic.log");std::string line;unsigned count=0;while(std::getline(log,line))if(line.find("Entity follow enabled=0")!=std::string::npos)++count;return count;};
  auto offBefore=offCount();press('9');require(offCount()>offBefore,"Root return-to-normal action did not stop entity following");press(VK_ESCAPE);
  // Automatic type rules use real paginated HUD controls and the same save path.
- menu(plugin,false);present();present();press('8');press('5');press('2');press('1');press('0');press('9');
+ menu(plugin,false);present();present();press('8');press('5');press('2');press('2');press('0');press('9');
  saved([](const auto& c){return c.at("autoFollow").value("enabled",false)&&c.at("autoFollow").at("rules")==nlohmann::json::array({"class:Tank"});});
- press('7');press('8');press('9');saved([](const auto& c){return !c.at("autoFollow").value("enabled",true)&&c.at("autoFollow").at("rules").empty();});press(VK_ESCAPE);
+ press('7');press('9');saved([](const auto& c){return !c.at("autoFollow").value("enabled",true)&&c.at("autoFollow").at("rules").empty();});press(VK_ESCAPE);
+ // New gradients remain optional, can be saved, and old presets restore solid color.
+ menu(plugin,false);present();present();press('4');press('5');press('2');press('1');press('0');press('4');press('8');press('0');press('0');press('7');
+ saved([](const auto& c){return c.value("colorEffect",0)==1&&std::abs(c.value("colorAmount",0.f)-.9f)<.001f&&std::abs(c.value("colorSpeed",0.f)-.3f)<.001f;});press(VK_ESCAPE);
+ menu(plugin,false);present();present();press('4');press('1');press('1');press('0');press('0');press('7');saved([](const auto& c){return c.value("colorEffect",-1)==0&&c.value("presetId",-1)==0;});press(VK_ESCAPE);
  // Independent default-on entity smoothing and default-off slot travel persist.
  menu(plugin,false);present();present();press('5');press('9');press('1');press('2');press('3');press('2');press('0');press('0');press('0');press('7');
  saved([](const auto& c){return c.value("lyricMove",false)&&!c.value("entitySmooth",true)&&c.value("moveCurve",-1)==1;});press(VK_ESCAPE);

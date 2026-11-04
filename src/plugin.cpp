@@ -146,6 +146,7 @@ Image raster(IDirect3DDevice9* dev,const std::string& text){
 Image image(IDirect3DDevice9* dev,const std::string& text){auto it=cache.find(text);if(it!=cache.end())return it->second;auto im=raster(dev,text);if(im.texture)cache.emplace(text,im);else checked(E_FAIL,7,"Create glyph texture (GDI/CreateTexture/LockRect)");return im;}
 struct Vertex{float x,y,z,rhw;DWORD color;float u,v;};
 void draw(IDirect3DDevice9* dev,Image im,float x,float y,float scale,float alpha,DWORD tint=0xffffff,float rotation=0){if(!im.texture||alpha<=0)return;float r=x+im.width*scale,b=y+im.height*scale;DWORD color=(DWORD(std::clamp(alpha,0.f,1.f)*255)<<24)|(tint&0xffffff);Vertex v[]={{x-.5f,y-.5f,0,1,color,0,0},{r-.5f,y-.5f,0,1,color,1,0},{x-.5f,b-.5f,0,1,color,0,1},{r-.5f,b-.5f,0,1,color,1,1}};if(rotation!=0){float cx=(x+r)*.5f,cy=(y+b)*.5f;for(auto& point:v){float dx=point.x-cx,dy=point.y-cy;point.x=cx+dx*std::cos(rotation)-dy*std::sin(rotation);point.y=cy+dx*std::sin(rotation)+dy*std::cos(rotation);}}dev->SetTexture(0,im.texture);if(checked(dev->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP,2,v,sizeof(Vertex)),6,"DrawPrimitiveUP")&&!drewPixels){drewPixels=true;note("L4D2DangoMusic first textured draw submitted");}}
+uint32_t lyricTint(size_t index,size_t count,double clock){return chroma::sample(cfg.textColor,cfg.accent,cfg.colorEffect,count>1?float(index)/float(count-1):.5f,clock,cfg.colorSpeed,cfg.colorAmount);}
 void styled(IDirect3DDevice9* dev,Image im,float x,float y,float scale,float alpha,DWORD color,float rotation=0){
  if(alpha<=.002f||!im.texture)return;
  if(cfg.glow&&cfg.glowStrength>0&&im.halo){auto glow=im;glow.texture=im.halo;draw(dev,glow,x,y,scale,alpha*std::min(1.f,cfg.glowStrength*2),cfg.accent,rotation);}
@@ -190,10 +191,10 @@ void peakFrame(IDirect3DDevice9* dev,const State& state,int at,int64_t song,bool
  top-=life.lift*(world?20.f*scale*cfg.size/cfg.worldHeight:height*.025f);
  for(auto& glyph:entry.layout.glyphs){auto frame=peak::revealFrame(entry.motion,entry.animation,glyph.index,song,clock,cfg.animationSpeed,cfg.progressiveReveal,cfg.pop,cfg.wiggle,cfg.wiggleFrequency,cfg.wiggleAmount,cfg.fallbackReveal);if(frame.alpha<=0)continue;
  auto im=image(dev,entry.animation.glyphs[glyph.index].text);float size=scale*frame.scale;float x=center+(glyph.x+glyph.width*.5f)*scale+frame.x*height/1080.f-im.width*size*.5f;float y=top+(glyph.y+cfg.size*.5f)*scale+frame.y*height/1080.f-im.height*size*.5f;
- styled(dev,im,x,y,size,life.alpha*frame.alpha*cfg.opacity,cfg.textColor,frame.rotation);}
+ styled(dev,im,x,y,size,life.alpha*frame.alpha*cfg.opacity,lyricTint(glyph.index,entry.animation.glyphs.size(),clock),frame.rotation);}
  if(cfg.translation&&!entry.line.translation.empty()){float ts=scale*.72f;
  for(auto& glyph:entry.translationLayout.glyphs){auto frame=peak::revealFrame(entry.translationMotion,entry.translated,glyph.index,song,clock,cfg.animationSpeed,cfg.progressiveReveal,false,false,8,0,cfg.fallbackReveal);if(frame.alpha<=0)continue;
- auto tr=image(dev,entry.translated.glyphs[glyph.index].text);styled(dev,tr,center+(glyph.x+glyph.width*.5f)*ts-tr.width*ts*.5f,top+entry.layout.height*scale+8+glyph.y*ts,ts,life.alpha*frame.alpha*cfg.opacity,cfg.textColor);}}
+ auto tr=image(dev,entry.translated.glyphs[glyph.index].text);styled(dev,tr,center+(glyph.x+glyph.width*.5f)*ts-tr.width*ts*.5f,top+entry.layout.height*scale+8+glyph.y*ts,ts,life.alpha*frame.alpha*cfg.opacity,lyricTint(glyph.index,entry.translated.glyphs.size(),clock));}}
  }
 }
 void drawPositionedText(IDirect3DDevice9* dev,const std::string& text,const ComponentPosition& position,const GameCameraFrame& camera,bool world,const CameraPose& pose,float width,float height,DWORD color,float maxWidth,const Vec3* fixed=nullptr){
@@ -210,7 +211,7 @@ void drawPositionPreview(IDirect3DDevice9* dev,const GameCameraFrame& camera,boo
  for(int i=0;i<cfg.layout.lyricCount;++i){const auto& position=cfg.layout.lyrics[i];auto place=screenComponent(position,width,height,cfg.size);
  if(world){Vec3 anchor;if(!componentAnchor(camera,pose,position,anchor)||!worldComponent(camera,anchor,position,width,height,cfg.worldHeight,cfg.size,place))continue;}
  Line line;line.text=u8"歌词 "+std::to_string(i+1)+u8" · 这是一句预览歌词";peak::Animation animation(line,3000);auto& glyphs=animation.glyphs;auto layout=peak::layout(glyphs,[&](const std::string& glyph){return image(dev,glyph).advance;},width*cfg.width*cfg.lineWidthScale/std::max(place.scale,.02f),cfg.size*1.35f);
- float top=place.y-layout.height*place.scale*.5f;for(auto& glyph:layout.glyphs){auto frame=moving?peak::revealFrame(motions[i],animation,glyph.index,song,clock,cfg.animationSpeed,cfg.progressiveReveal,cfg.pop,cfg.wiggle,cfg.wiggleFrequency,cfg.wiggleAmount,cfg.fallbackReveal):peak::GlyphFrame{1,1,0,0,0};if(frame.alpha<=0)continue;auto im=image(dev,glyphs[glyph.index].text);float size=place.scale*frame.scale;styled(dev,im,place.x+(glyph.x+glyph.width*.5f)*place.scale-im.width*size*.5f+frame.x*height/1080.f,top+(glyph.y+cfg.size*.5f)*place.scale-im.height*size*.5f+frame.y*height/1080.f,size,cfg.opacity*frame.alpha,cfg.textColor,frame.rotation);}
+ float top=place.y-layout.height*place.scale*.5f;for(auto& glyph:layout.glyphs){auto frame=moving?peak::revealFrame(motions[i],animation,glyph.index,song,clock,cfg.animationSpeed,cfg.progressiveReveal,cfg.pop,cfg.wiggle,cfg.wiggleFrequency,cfg.wiggleAmount,cfg.fallbackReveal):peak::GlyphFrame{1,1,0,0,0};if(frame.alpha<=0)continue;auto im=image(dev,glyphs[glyph.index].text);float size=place.scale*frame.scale;styled(dev,im,place.x+(glyph.x+glyph.width*.5f)*place.scale-im.width*size*.5f+frame.x*height/1080.f,top+(glyph.y+cfg.size*.5f)*place.scale-im.height*size*.5f+frame.y*height/1080.f,size,cfg.opacity*frame.alpha,lyricTint(glyph.index,glyphs.size(),clock),frame.rotation);}
  }
 }
 void drawSongInfo(IDirect3DDevice9* dev,const State& state,const GameCameraFrame& camera,bool valid,const CameraPose& pose,float width,float height){
@@ -255,7 +256,7 @@ void wallGlyphs(IDirect3DDevice9* dev,const wall::Panel& panel,const GameCameraF
  face.center=panel.center+panel.right*((glyph.x+glyph.width*.5f+frame.x)*unit)+panel.up*(top-(glyph.y+cfg.size*.5f+frame.y)*unit);
  face.width=im.width*unit*frame.scale;face.height=im.height*unit*frame.scale;
  float angle=frame.rotation;face.right=panel.right*std::cos(angle)+panel.up*std::sin(angle);face.up=panel.up*std::cos(angle)-panel.right*std::sin(angle);
- DWORD color=(DWORD(std::clamp(cfg.opacity*frame.alpha*opacity,0.f,1.f)*255)<<24)|(cfg.textColor&0xffffff);wallQuad(dev,face,camera,width,height,im,color);
+ DWORD color=(DWORD(std::clamp(cfg.opacity*frame.alpha*opacity,0.f,1.f)*255)<<24)|lyricTint(glyph.index,animation.glyphs.size(),clock);wallQuad(dev,face,camera,width,height,im,color);
  }
 }
 void wallPositionedText(IDirect3DDevice9* dev,const wall::Panel& panel,const GameCameraFrame& camera,float width,float height,const std::string& text,const WallTextPosition& position,float maxHeight,DWORD color){
@@ -495,9 +496,11 @@ const char* followLayoutAxisMenu(int axis){auto f=std::atomic_load(&followSettin
 const char* followBobMenu(){auto f=std::atomic_load(&followSettings);return page(u8"实体歌词 · 整句上下往复",item(menus::value(u8"运动开关",on(f->bobEnabled)),8600)+item(menus::value(u8"完整周期",positionValue(f->bobPeriod)+u8" 秒"),0)+item(u8"周期 -0.1 秒",8601)+item(u8"周期 +0.1 秒",8602)+item(menus::value(u8"上下各移动",positionValue(f->bobAmplitude)+u8" 游戏单位"),0)+item(u8"幅度 -0.1",8603)+item(u8"幅度 +0.1",8604)+item(u8"恢复默认（关闭，0.5秒，幅度1）",8605));}
 const char* movementMenu(const Config& c){return page(u8"歌词移动与实体平滑",item(menus::value(u8"全局换句位置移动",on(c.lyricMove)),110011)+item(menus::value(u8"实体移动平滑",on(c.entitySmooth)),110010)+item(menus::value(u8"移动曲线",movement::name(c.moveCurve)),879)+item(menus::value(u8"移动耗时",std::to_string(c.moveMs)+"ms"),0)+item(u8"耗时 -0.1秒",110013)+item(u8"耗时 +0.1秒",110014));}
 std::string aimedAutoKey(){auto f=std::atomic_load(&source_entities::snapshot);auto camera=std::atomic_load(&source_camera::snapshot);CameraPose eye;if(!usableCamera(*camera,uint64_t(now()))||!cameraPose(*camera,eye))return {};auto r=autofollow::aimed(*f,*camera,eye,uint64_t(now()));return r?autofollow::semanticKey(*r):std::string{};}
-const char* automaticMenu(const Config& c){return page(u8"自动实体追踪 · 永久规则",item(menus::value(u8"自动追踪总开关",on(c.autoFollow.enabled)),110000)+item(u8"特殊感染者",871)+item(u8"队友与角色",872)+item(u8"武器与物品",873)+item(u8"其他实体",874)+item(u8"瞄准识别并设置类型",875)+item(u8"全部已列类型开启",110001)+item(u8"全部类型关闭",110002)+item(menus::saveLabel(c,std::atomic_load(&savedSettings)?*std::atomic_load(&savedSettings):Config{},saveState.load()==1,saveState.load()<0,bool(std::atomic_load(&savedSettings)))+u8"（跨游戏保留规则）",18));}
+std::string autoGroupState(const Config& c,int group=-1){auto state=autofollow::counts(autoTypes,c.autoFollow,group);return state.first==0?(group<0&&!c.autoFollow.rules.empty()?u8"部分开启":u8"关闭"):state.first==state.second?u8"开启":u8"部分开启";}
+const char* visualMenu(const Config& c){return page(u8"彩色、混色与渐变",item(menus::value(u8"着色方式",chroma::name(c.colorEffect)),891)+item(u8"新增视觉配色预设",892)+item(menus::value(u8"混色强度",positionValue(c.colorAmount)),0)+item(u8"强度 -0.1",120010)+item(u8"强度 +0.1",120011)+item(menus::value(u8"流动速度",positionValue(c.colorSpeed)),0)+item(u8"速度 -0.1",120012)+item(u8"速度 +0.1",120013)+item(u8"示例预览（第二色使用光晕颜色）",27));}
+const char* automaticMenu(const Config& c){autofollow::discover(autoTypes,*std::atomic_load(&source_entities::snapshot),c.autoFollow);return page(u8"自动实体追踪 · 永久规则",item(menus::value(u8"自动追踪总开关",on(c.autoFollow.enabled)),110000)+item(u8"特殊感染者",871)+item(u8"队友与角色",872)+item(u8"武器与物品",873)+item(u8"其他实体",874)+item(u8"瞄准识别并设置类型",875)+item(menus::value(u8"一键开关",autoGroupState(c)),110001)+item(menus::value(u8"已选类型",std::to_string(c.autoFollow.rules.size())),0)+item(menus::saveLabel(c,std::atomic_load(&savedSettings)?*std::atomic_load(&savedSettings):Config{},saveState.load()==1,saveState.load()<0,bool(std::atomic_load(&savedSettings)))+u8"（跨游戏保留规则）",18));}
 const char* automaticAimMenu(const Config& c){auto key=aimedAutoKey();std::string label=key.empty()?u8"未识别，请对准实体并稍等":key;for(const auto& type:autoTypes)if(type.key==key){label=type.label;break;}return page(u8"瞄准类型 · 自动追踪",item(menus::value(u8"准星实体类型",label),0)+item(menus::value(u8"该类型自动追踪",on(!key.empty()&&autoRule(c.autoFollow,key))),0)+item(u8"开启此类型（并开启自动追踪）",110005)+item(u8"关闭此类型",110006)+item(menus::value(u8"检测范围",positionValue(c.autoFollow.range)),0)+item(u8"范围 -100",110003)+item(u8"范围 +100",110004));}
-const char* automaticCategoryMenu(const Config& c,int group){auto f=std::atomic_load(&source_entities::snapshot);autofollow::discover(autoTypes,*f,c.autoFollow);const char* names[]={u8"特殊感染者",u8"队友与角色",u8"武器与物品",u8"其他实体"};std::string rows;for(size_t i=0;i<autoTypes.size();++i)if(autoTypes[i].group==group)rows+=item(menus::value(autoTypes[i].label,on(autoRule(c.autoFollow,autoTypes[i].key))),100000+i);return page(names[group],rows);}
+const char* automaticCategoryMenu(const Config& c,int group){auto f=std::atomic_load(&source_entities::snapshot);autofollow::discover(autoTypes,*f,c.autoFollow);const char* names[]={u8"特殊感染者",u8"队友与角色",u8"武器与物品",u8"其他实体"};std::string rows=item(menus::value(u8"一键开关",autoGroupState(c,group)),110030+group);for(size_t i=0;i<autoTypes.size();++i)if(autoTypes[i].group==group)rows+=item(menus::value(autoTypes[i].label,on(autoRule(c.autoFollow,autoTypes[i].key))),100000+i);return page(names[group],rows);}
 void followAction(uintptr_t id){auto next=*std::atomic_load(&followSettings);followNotice.clear();followNoticeUntil=uint64_t(now())+2000;
  if(id==820)next.enabled=!next.enabled;
  else if(id==823)next.sample=!next.sample;
@@ -538,22 +541,27 @@ const char* menuActionImpl(void* argument){uintptr_t id=reinterpret_cast<uintptr
  if(id>=20000&&id<=31304){int code=int(id-20000),index=code/1000,axis=code%1000/100,choice=code%100;if(index>2+MaxLyricSlots||axis>3||choice>4)return nullptr;positionPreview=true;if(index==2+MaxLyricSlots)adjustLyricGroup(c.layout,axis,choice);else adjustPosition(c.layout,index,axis,choice);changeSettings(c);return positionAxisMenu(c,index,axis);}
  positionPreview=false;
  if(id==847){followAction(id);c.autoFollow.enabled=false;c.enabled=true;changeSettings(c);return nullptr;}
+ if(id==890)return visualMenu(c);
+ if(id==891){std::string rows;for(int i=0;i<5;++i)rows+=item(chroma::name(i),120000+i);return page(u8"着色方式",rows);}
+ if(id==892){std::string rows;for(int i=0;i<4;++i)rows+=item(chroma::palette(i).name,120020+i);return page(u8"新增视觉配色",rows);}
+ if(id>=120000&&id<=120023){if(id<=120004){c.colorEffect=int(id-120000);}else if(id>=120020)c=applyChromaPalette(c,int(id-120020));else if(id==120010||id==120011)c.colorAmount=float(std::clamp(int(std::lround(c.colorAmount*10))+(id==120010?-1:1),0,10))/10;else if(id==120012||id==120013)c.colorSpeed=float(std::clamp(int(std::lround(c.colorSpeed*10))+(id==120012?-1:1),0,20))/10;else return nullptr;changeSettings(c);return nullptr;}
  if(id==819)return movementMenu(c);
  if(id==879){std::string rows;for(int i=0;i<5;++i)rows+=item(movement::name(i),110020+i);return page(u8"移动曲线预设",rows);}
  if(id==870)return automaticMenu(c);
  if(id>=871&&id<=874)return automaticCategoryMenu(c,int(id-871));
  if(id==875)return automaticAimMenu(c);
  if(id>=100000&&id<100512){size_t index=id-100000;if(index<autoTypes.size()){auto key=autoTypes[index].key;bool enable=!autoRule(c.autoFollow,key);setAutoRule(c.autoFollow,key,enable);if(enable)c.autoFollow.enabled=true;changeSettings(c);}return nullptr;}
- if(id>=110000&&id<=110024){
+ if(id>=110000&&id<=110033){
  if(id==110000)c.autoFollow.enabled=!c.autoFollow.enabled;
- else if(id==110001){autofollow::discover(autoTypes,*std::atomic_load(&source_entities::snapshot),c.autoFollow);c.autoFollow.rules.clear();for(const auto& type:autoTypes)setAutoRule(c.autoFollow,type.key,true);c.autoFollow.enabled=true;}
+ else if(id==110001){autofollow::discover(autoTypes,*std::atomic_load(&source_entities::snapshot),c.autoFollow);autofollow::toggleGroup(autoTypes,c.autoFollow);}
  else if(id==110002){c.autoFollow.rules.clear();c.autoFollow.enabled=false;}
  else if(id==110003||id==110004)c.autoFollow.range=std::clamp(c.autoFollow.range+(id==110003?-100.f:100.f),100.f,4000.f);
  else if(id==110005||id==110006){auto key=aimedAutoKey();if(key.empty())return nullptr;setAutoRule(c.autoFollow,key,id==110005);if(id==110005)c.autoFollow.enabled=true;}
  else if(id==110010)c.entitySmooth=!c.entitySmooth;
  else if(id==110011)c.lyricMove=!c.lyricMove;
  else if(id==110013||id==110014)c.moveMs=std::clamp(c.moveMs+(id==110013?-100:100),100,2000);
- else if(id>=110020)c.moveCurve=int(id-110020);
+ else if(id>=110030){autofollow::discover(autoTypes,*std::atomic_load(&source_entities::snapshot),c.autoFollow);autofollow::toggleGroup(autoTypes,c.autoFollow,int(id-110030));}
+ else if(id>=110020&&id<=110024)c.moveCurve=int(id-110020);
  else return nullptr;
  changeSettings(c);return nullptr;
  }
@@ -605,7 +613,7 @@ const char* menuActionImpl(void* argument){uintptr_t id=reinterpret_cast<uintptr
  if(id==31)return page(u8"单行长度（不改变字号和距离） · "+positionValue(c.lineWidthScale)+"x",item("0.75x",600)+item(u8"1x（默认）",601)+item("1.5x",602)+item("2x",603)+item("3x",604)+item("4x",605)+item(u8"返回主菜单",0));
  if(id==19)return page(u8"长句回到当前视野 · "+reanchorSeconds(c.reanchorMs)+u8" 秒",item(u8"关闭",580)+item(u8"每 3 秒",581)+item(u8"每 5 秒",582)+item(u8"每 10 秒",583)+item(u8"自定义秒数（当前 "+reanchorSeconds(c.reanchorMs)+u8" 秒）",34));
  if(id==34)return page(u8"自定义回归间隔 · "+reanchorSeconds(c.reanchorMs)+u8" 秒",item(u8"-10 秒",584)+item(u8"-1 秒",585)+item(u8"-0.1 秒",586)+item(u8"+0.1 秒",587)+item(u8"+1 秒",588)+item(u8"+10 秒",589)+item(u8"重设为 3 秒",590)+item(u8"关闭回归",591)+item(u8"范围 0.1～300 秒；0 为关闭",0));
- if(id==10){std::string rows;for(int i=0;i<6;++i)rows+=item(presetName(i),100+i);return page(std::string(u8"歌词预设 · ")+presetName(colorPresetId(c)),rows);}
+ if(id==10){std::string rows;for(int i=0;i<6;++i)rows+=item(presetName(i),100+i);return page(std::string(u8"歌词预设 · ")+colorPresetLabel(c),rows);}
  if(id==11||id==12)return menuPage(menus::palette(c,id==12));
  if(id==40||id==41)return menuPage(menus::channels(c,id==41));
  if(id>=400&&id<=402)return channelMenu(c,false,unsigned(id-400));if(id>=410&&id<=412)return channelMenu(c,true,unsigned(id-410));

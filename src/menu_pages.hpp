@@ -13,7 +13,7 @@ inline std::string saveLabel(const Config& current,const Config& saved,bool savi
 }
 inline hud::Document root(const Config& c,const std::string& save,bool following=false){hud::Document doc{"L4D2DangoMusic 0.9.4",{
  {value(u8"歌词显示",std::string(on(c.enabled))+(following?u8" · 实体跟随":"")),1},{u8"显示与歌词信息",20},{u8"位置与数量（固定预览）",23},
- {value(u8"歌词颜色",presetName(colorPresetId(c))),21},{u8"动画、速度与停留",22},{value(u8"场景挂画",on(c.wallEnabled)),30},
+ {value(u8"歌词颜色",colorPresetLabel(c)),21},{u8"动画、速度与停留",22},{value(u8"场景挂画",on(c.wallEnabled)),30},
  {save,18},{u8"更多设置",35}}};if(following)doc.rows.push_back({u8"返回普通歌词（关闭实体跟随）",847});return doc;}
 inline hud::Document display(const Config& c){return {u8"显示与歌词信息",{
  {value(u8"翻译",on(c.translation)),2},{value(u8"单行长度",number(c.lineWidthScale)+"x"),31},
@@ -28,8 +28,8 @@ inline hud::Document metadata(const Config& c){return {u8"歌名与作者",{
  {value(u8"显示歌名",on(c.showTitle)),5},{value(u8"显示作者",on(c.showArtist)),6},
  {u8"歌名位置（固定预览）",2100},{u8"作者位置（固定预览）",2101}}};}
 inline hud::Document colors(const Config& c){return {u8"歌词颜色",{
- {value(u8"颜色预设",presetName(colorPresetId(c))),10},{value(u8"正文颜色",colorText(c.textColor)),11},
- {value(u8"光晕颜色",colorText(c.accent)),12},{value(u8"柔光",on(c.glow)),8}}};}
+ {value(u8"颜色预设",colorPresetLabel(c)),10},{value(u8"正文颜色",colorText(c.textColor)),11},
+ {value(u8"光晕颜色",colorText(c.accent)),12},{value(u8"柔光",on(c.glow)),8},{u8"彩色、混色与渐变",890}}};}
 inline hud::Document palette(const Config& c,bool accent){
  const char* names[]={u8"暖白",u8"纯白",u8"樱花粉",u8"冰蓝",u8"金色",u8"薄荷绿",u8"淡紫",u8"橘红"};
  hud::Document doc{value(accent?u8"光晕颜色":u8"正文颜色",colorText(accent?c.accent:c.textColor)),{}};

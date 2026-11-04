@@ -53,7 +53,7 @@ class NativeHud {
  void close(){opened=false;gate.reset();if(closed)closed();}
  void applyPreset(){if(preset==0){background={.015f,.018f,.020f,1};opacity=.48f;}if(preset==1){background={.10f,.105f,.11f,1};opacity=.42f;}if(preset==2){background={.055f,.065f,.075f,1};opacity=.66f;}if(preset==3){background={.01f,.012f,.014f,1};opacity=.28f;}}
  static void text(const std::string& s,ImVec4 color={.94f,.94f,.91f,1}){ImGui::PushStyleColor(ImGuiCol_Text,color);ImGui::TextWrapped("%s",s.c_str());ImGui::PopStyleColor();}
- static void row(unsigned n,const std::string& s,bool enabled=true){text((enabled?"["+std::to_string(n)+"]  ":"     ")+s,enabled?ImVec4(.94f,.94f,.91f,1):ImVec4(.58f,.60f,.60f,1));ImGui::Dummy({1,3});}
+ static void row(unsigned n,const std::string& s,bool enabled=true,uintptr_t action=0){auto tone=rowTone(s,action,enabled);ImVec4 color(1,1,1,1);if(tone==RowTone::Enabled)color={.38f,.95f,.48f,1};else if(tone==RowTone::Disabled)color={1,.38f,.36f,1};else if(tone==RowTone::Partial)color={1,.78f,.25f,1};else if(tone==RowTone::Muted)color={.58f,.60f,.60f,1};text((enabled?"["+std::to_string(n)+"]  ":"     ")+s,color);ImGui::Dummy({1,3});}
  void font(){auto& io=ImGui::GetIO();menuFontRanges(*io.Fonts,fontRanges);char windows[MAX_PATH]{};if(GetWindowsDirectoryA(windows,MAX_PATH))for(auto name:{"msyh.ttc","msyhbd.ttc","simhei.ttf"}){
  auto path=std::string(windows)+"\\Fonts\\"+name;if(GetFileAttributesA(path.c_str())!=INVALID_FILE_ATTRIBUTES&&io.Fonts->AddFontFromFileTTF(path.c_str(),24,nullptr,fontRanges.Data))return;}
  io.Fonts->AddFontDefault();if(log)log("Native HUD Chinese font unavailable; using fallback");}
@@ -103,7 +103,7 @@ public:
  if(page==Page::Settings){auto doc=document(build(stack.current().page));stack.clamp(doc.rows.size());
  if(edge[12])stack.previous();if(edge[13])stack.next(doc.rows.size());
  text(doc.title,{1,.84f,.22f,1});ImGui::Separator();size_t first=stack.current().sheet*MenuStack::PageSize;
- for(size_t i=first;i<doc.rows.size()&&i<first+MenuStack::PageSize;++i){auto& item=doc.rows[i];unsigned n=unsigned(i-first+1);row(n,item.label,item.action!=0);if(edge[n]&&item.action)action=item.action;}
+ for(size_t i=first;i<doc.rows.size()&&i<first+MenuStack::PageSize;++i){auto& item=doc.rows[i];unsigned n=unsigned(i-first+1);row(n,item.label,item.action!=0,item.action);if(edge[n]&&item.action)action=item.action;}
  size_t count=std::max<size_t>(1,(doc.rows.size()+MenuStack::PageSize-1)/MenuStack::PageSize);if(count>1)text(u8"[-] 上页    [=] 下页    "+std::to_string(stack.current().sheet+1)+" / "+std::to_string(count),{.58f,.60f,.60f,1});
  openAppearance=action==9000;
  }else if(page==Page::Appearance){text(u8"菜单外观",{1,.84f,.22f,1});ImGui::Separator();appearance(edge);

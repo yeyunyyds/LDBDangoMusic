@@ -3,6 +3,8 @@ $repo = Split-Path $PSScriptRoot -Parent
 $testRoot = Join-Path ([IO.Path]::GetTempPath()) ('l4d2dango-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Force (Join-Path $testRoot 'build'), (Join-Path $testRoot 'build/L4D2DangoMusic') | Out-Null
 try {
+    & (Join-Path $repo 'build/menu_visual_test.exe')
+    if ($LASTEXITCODE -ne 0) { throw 'Menu visual tests failed' }
     & (Join-Path $repo 'build/entity_auto_motion_test.exe')
     if ($LASTEXITCODE -ne 0) { throw 'Entity auto/motion tests failed' }
     & (Join-Path $repo 'build/gnome_follow_test.exe')

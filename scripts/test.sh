@@ -59,3 +59,6 @@ g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc tests/gno
 
 g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc -Ivendor tests/entity_auto_motion_test.cpp -o build/entity_auto_motion_test
 ./build/entity_auto_motion_test
+
+g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc -Ivendor tests/menu_visual_test.cpp -o build/menu_visual_test
+./build/menu_visual_test

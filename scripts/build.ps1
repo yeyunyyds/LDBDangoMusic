@@ -37,3 +37,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Gnome representation tests failed' }
 if ($LASTEXITCODE -ne 0) { throw 'Entity auto/motion build failed' }
 & ./build/entity_auto_motion_test.exe
 if ($LASTEXITCODE -ne 0) { throw 'Entity auto/motion tests failed' }
+
+& cl.exe /nologo /std:c++17 /EHsc /utf-8 /W4 /Isrc /Ivendor tests/menu_visual_test.cpp /Fobuild/menu_visual_test.obj /Febuild/menu_visual_test.exe
+if ($LASTEXITCODE -ne 0) { throw 'Menu visual build failed' }
+& ./build/menu_visual_test.exe
+if ($LASTEXITCODE -ne 0) { throw 'Menu visual tests failed' }

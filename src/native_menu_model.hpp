@@ -6,9 +6,19 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include "hud_menu_policy.hpp"
 
 namespace dango::hud {
 struct Row {std::string label;uintptr_t action=0;};
+enum class RowTone {Neutral,Enabled,Disabled,Partial,Muted};
+inline RowTone rowTone(const std::string& label,uintptr_t action,bool interactive){
+ if(opensChild(action)||action==9000)return RowTone::Neutral;
+ if(action==110005)return RowTone::Enabled;if(action==110006)return RowTone::Disabled;
+ if(label.find(u8"[部分开启]")!=std::string::npos)return RowTone::Partial;
+ if(label.find(u8"[开启]")!=std::string::npos||label.find(u8"[开]")!=std::string::npos||label.find(u8"[开 ·")!=std::string::npos||label.find(u8": 开")!=std::string::npos)return RowTone::Enabled;
+ if(label.find(u8"[关闭]")!=std::string::npos||label.find(u8"[关]")!=std::string::npos||label.find(u8"[关 ·")!=std::string::npos||label.find(u8": 关")!=std::string::npos)return RowTone::Disabled;
+ return interactive?RowTone::Neutral:RowTone::Muted;
+}
 struct Document {std::string title;std::vector<Row> rows;};
 // Decode only our own generated KeyValues. No game pointers or callback
 // addresses from the document are ever executed by the native renderer.

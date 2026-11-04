@@ -4,6 +4,7 @@
 #include "hud_appearance.hpp"
 #include "wall_layout.hpp"
 #include "entity_auto_settings.hpp"
+#include "color_effects.hpp"
 #include <string>
 #include <stdexcept>
 #include <algorithm>
@@ -11,6 +12,7 @@
 #include <cmath>
 namespace dango {
 struct Config {
+ int colorEffect=0;float colorSpeed=.2f,colorAmount=1;
  AutoFollowConfig autoFollow;bool entitySmooth=true,lyricMove=false,wallIndependentTiming=false;int moveCurve=0,moveMs=350;
  int port=23330,size=32;bool enabled=true,worldLyrics=false,worldTestAnchor=false;
  float worldDistance=200,worldSide=75,worldHeight=8;bool cameraDiagnostics=false,demo=true,translation=false,alternate=true;
@@ -40,6 +42,7 @@ inline Config decodeConfig(const nlohmann::json& j){
  auto integer=[&](const char* key,int value,int lo,int hi){return std::clamp(j.value(key,value),lo,hi);};
  auto number=[&](const char* key,float value,float lo,float hi){float n=j.value(key,value);if(!std::isfinite(n))throw std::runtime_error("Non-finite setting");return std::clamp(n,lo,hi);};
  if(j.contains("autoFollow"))c.autoFollow=readAutoFollow(j["autoFollow"]);c.moveCurve=integer("moveCurve",0,0,4);c.moveMs=integer("moveMs",350,100,2000);
+ c.colorEffect=integer("colorEffect",0,0,4);c.colorSpeed=number("colorSpeed",.2f,0,2);c.colorAmount=number("colorAmount",1,0,1);
  c.wallSurface=integer("wallSurface",0,0,1);if(j.contains("wallLayout"))c.wallLayout=readWallLayout(j.at("wallLayout"));
  c.wallSize=integer("wallSize",1,0,2);c.wallCapacity=integer("wallCapacity",6,2,8);c.wallLingerMs=integer("wallLingerMs",4000,0,15000);c.wallFadeMs=integer("wallFadeMs",1000,200,3000);c.wallRange=number("wallRange",600,160,1200);c.wallSpacing=number("wallSpacing",140,40,400);
  c.reuseDistanceFactor=number("reuseDistanceFactor",3,1,10);
@@ -52,17 +55,21 @@ inline Config decodeConfig(const nlohmann::json& j){
  c.textColor=parseColor(j.value("textColor",std::string("#F7E1D7")));c.accent=parseColor(j.value("accentColor",std::string("#F7E1D7")));return c;
 }
 inline nlohmann::json encodeConfig(const Config& c){return {
+ {"colorEffect",c.colorEffect},{"colorSpeed",c.colorSpeed},{"colorAmount",c.colorAmount},
  {"autoFollow",autoFollowJson(c.autoFollow)},{"entitySmooth",c.entitySmooth},{"lyricMove",c.lyricMove},{"moveCurve",c.moveCurve},{"moveMs",c.moveMs},{"wallIndependentTiming",c.wallIndependentTiming},
  {"wallFloorFollow",c.wallFloorFollow},{"wallReuse",c.wallReuse},{"wallSurface",c.wallSurface},{"wallLayout",wallLayoutJson(c.wallLayout)},
  {"hudAppearance",{{"preset",c.hud.preset},{"step",c.hud.step},{"opacity",c.hud.opacity},{"font",c.hud.font},{"x",c.hud.x},{"y",c.hud.y},{"centerY",c.hud.centerY},{"f10",c.hud.f10}}},{"wallFallback",c.wallFallback},{"wallEnabled",c.wallEnabled},{"wallAutomatic",c.wallAutomatic},{"wallLiveLyrics",c.wallLiveLyrics},{"wallSize",c.wallSize},{"wallCapacity",c.wallCapacity},{"wallLingerMs",c.wallLingerMs},{"wallFadeMs",c.wallFadeMs},{"wallRange",c.wallRange},{"wallSpacing",c.wallSpacing},{"fallbackReveal",c.fallbackReveal},{"wallBackdrop",c.wallBackdrop},{"wallDebug",c.wallDebug},{"progressiveReveal",c.progressiveReveal},{"reuseVisibleAnchor",c.reuseVisibleAnchor},{"reuseDistanceFactor",c.reuseDistanceFactor},{"lineWidthScale",c.lineWidthScale},{"defaultsVersion",2},{"layout",layoutJson(c.layout)},{"enabled",c.enabled},{"port",c.port},{"fontSize",c.size},{"worldLyrics",c.worldLyrics},{"worldTestAnchor",c.worldTestAnchor},{"worldDistance",c.worldDistance},{"worldSide",c.worldSide},{"worldHeight",c.worldHeight},{"cameraDiagnostics",c.cameraDiagnostics},{"demo",c.demo},{"translation",c.translation},{"alternate",c.alternate},{"verticalPosition",c.y},{"offsetMs",c.offset},{"outline",c.outline},{"glow",c.glow},{"glowStrength",c.glowStrength},{"glowRadius",c.glowRadius},{"opacity",c.opacity},{"maxWidth",c.width},{"transitionMs",c.transition},{"lingerMs",c.lingerMs},{"reanchorMs",c.reanchorMs},{"animationSpeed",c.animationSpeed},{"pop",c.pop},{"wiggle",c.wiggle},{"wiggleFrequency",c.wiggleFrequency},{"wiggleAmount",c.wiggleAmount},{"spreadDegrees",c.spread},{"keepAway",c.keepAway},{"debugOverlay",c.debugOverlay},{"textColor",colorText(c.textColor)},{"accentColor",colorText(c.accent)},{"showTitle",c.showTitle},{"showArtist",c.showArtist},{"presetId",c.presetId},{"displayMode","peak"}};}
 inline const char* presetName(int id){static const char* names[]={u8"暖白浮光",u8"轻柔舒缓",u8"霓虹粉",u8"冰蓝",u8"琥珀金",u8"简洁纯净"};return id>=0&&id<6?names[id]:u8"自定义";}
-inline Config applyPreset(Config c,int id){if(id<0||id>5)return c;c.presetId=id;c.pop=true;c.wiggle=true;c.outline=false;c.glow=true;c.glowStrength=.3f;c.glowRadius=.5f;c.wiggleFrequency=8;c.wiggleAmount=.8f;c.animationSpeed=1;c.transition=400;c.lingerMs=1000;c.textColor=c.accent=0xf7e1d7;
+inline Config applyPreset(Config c,int id){if(id<0||id>5)return c;c.presetId=id;c.colorEffect=0;c.pop=true;c.wiggle=true;c.outline=false;c.glow=true;c.glowStrength=.3f;c.glowRadius=.5f;c.wiggleFrequency=8;c.wiggleAmount=.8f;c.animationSpeed=1;c.transition=400;c.lingerMs=1000;c.textColor=c.accent=0xf7e1d7;
  switch(id){case 1:c.textColor=0xf6f1eb;c.accent=0xe3cedf;c.pop=false;c.wiggle=false;c.glowStrength=.2f;c.animationSpeed=.65f;c.transition=700;break;
  case 2:c.textColor=0xffd6ea;c.accent=0xff4d9f;c.glowStrength=.65f;c.glowRadius=.8f;c.wiggleFrequency=12;c.wiggleAmount=.55f;break;
  case 3:c.textColor=0xe5f7ff;c.accent=0x5ac8fa;c.glowStrength=.4f;c.wiggleFrequency=6;c.wiggleAmount=.25f;break;
  case 4:c.textColor=0xffebcd;c.accent=0xffb347;c.glowStrength=.35f;c.wiggleFrequency=6;c.wiggleAmount=.3f;break;
  case 5:c.textColor=c.accent=0xf6f6f6;c.glow=false;c.pop=false;c.wiggle=false;c.transition=500;break;}return c;
 }
-inline Config applyColorPreset(Config c,int id){if(id<0||id>5)return c;auto p=applyPreset(Config{},id);c.presetId=id;c.textColor=p.textColor;c.accent=p.accent;c.glow=p.glow;c.glowStrength=p.glowStrength;c.glowRadius=p.glowRadius;c.outline=p.outline;return c;}
-inline int colorPresetId(const Config& c){if(c.presetId<0||c.presetId>5)return -1;auto p=applyColorPreset(Config{},c.presetId);return (c.textColor&0xffffff)==(p.textColor&0xffffff)&&(c.accent&0xffffff)==(p.accent&0xffffff)&&c.glow==p.glow&&c.glowStrength==p.glowStrength&&c.glowRadius==p.glowRadius&&c.outline==p.outline?c.presetId:-1;}
+inline Config applyColorPreset(Config c,int id){if(id<0||id>5)return c;auto p=applyPreset(Config{},id);c.presetId=id;c.colorEffect=0;c.textColor=p.textColor;c.accent=p.accent;c.glow=p.glow;c.glowStrength=p.glowStrength;c.glowRadius=p.glowRadius;c.outline=p.outline;return c;}
+inline Config applyChromaPalette(Config c,int id){auto p=chroma::palette(id);c.textColor=p.first;c.accent=p.second;c.colorEffect=p.mode;c.colorSpeed=.2f;c.colorAmount=1;c.presetId=-1;c.glow=true;c.glowStrength=.25f;c.glowRadius=.5f;c.outline=false;return c;}
+inline int colorPresetId(const Config& c){if(c.colorEffect||c.presetId<0||c.presetId>5)return -1;auto p=applyColorPreset(Config{},c.presetId);return (c.textColor&0xffffff)==(p.textColor&0xffffff)&&(c.accent&0xffffff)==(p.accent&0xffffff)&&c.glow==p.glow&&c.glowStrength==p.glowStrength&&c.glowRadius==p.glowRadius&&c.outline==p.outline?c.presetId:-1;}
+inline const char* colorPresetLabel(const Config& c){int legacy=colorPresetId(c);if(legacy>=0)return presetName(legacy);for(int i=0;i<4;++i){auto p=chroma::palette(i);if((c.textColor&0xffffff)==p.first&&(c.accent&0xffffff)==p.second&&c.colorEffect==p.mode&&c.colorAmount==1&&c.colorSpeed==.2f&&c.glow&&c.glowStrength==.25f&&c.glowRadius==.5f&&!c.outline)return p.name;}return u8"自定义";}
+
 }
