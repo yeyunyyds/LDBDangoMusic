@@ -24,6 +24,7 @@
 #include "render_lifecycle.hpp"
 #include "lyric_lifecycle.hpp"
 #include "player_session.hpp"
+#include "media_bridge.hpp"
 #include "camera_diagnostics.hpp"
 #include "source_camera.hpp"
 #include "source_walls.hpp"
@@ -111,14 +112,24 @@ nlohmann::json get(const wchar_t* path,size_t limit){
 }
 constexpr auto statusPath=L"/status?filter=status,name,singer,duration,progress,playbackRate";
 void run() noexcept {
- try {cfg=*std::atomic_load(&settings);CameraWriter cameraWriter;PlayerSession player;auto demoStart=now();
+ try {cfg=*std::atomic_load(&settings);CameraWriter cameraWriter;PlayerSession player;media::Bridge mediaBridge;int activeSource=-1;bool useMedia=false;int64_t nextLxProbe=0;auto demoStart=now();
  while(!stopping||std::atomic_load(&pendingSave)){
+ cfg=*std::atomic_load(&settings);
+ if(activeSource!=cfg.musicSource){activeSource=cfg.musicSource;useMedia=cfg.musicSource>=2;nextLxProbe=0;player=PlayerSession{};publish(player.disconnect(now()));}
  if(auto requested=std::atomic_exchange(&pendingSave,std::shared_ptr<const Config>{})){saveState=1;try{auto path=directory/L"config.json";nlohmann::json stored=nlohmann::json::object();if(std::filesystem::exists(path)){std::ifstream old(path);stored=nlohmann::json::parse(old);if(!stored.is_object())throw std::runtime_error("Existing config is not an object");}stored.update(encodeConfig(*requested));std::filesystem::create_directories(directory);auto temp=directory/L"config.json.tmp";{std::ofstream file(temp,std::ios::binary|std::ios::trunc);file<<stored.dump(2)<<'\n';file.flush();if(!file)throw std::runtime_error("Config write failed");}if(std::filesystem::exists(path))std::filesystem::copy_file(path,directory/L"config.json.bak",std::filesystem::copy_options::overwrite_existing);if(!MoveFileExW(temp.c_str(),path.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH))throw std::runtime_error("Config replace failed");std::atomic_store(&savedSettings,requested);saveState=2;note("Settings saved");}catch(const std::exception& e){saveState=-1;note(e.what());}}
  cameraWriter.drain();source_entities::drain(directory);try{State s;
  if(cfg.demo){s.connected=s.playing=true;s.title="Offline demonstration";s.key="demo";s.duration=16000;s.position=(now()-demoStart)%16000;s.sampled=now();s.timeline=parse("[00:01.00]<1000,500>你好 <1500,500>求生之路\n[00:05.00]Left and right floating lyrics\n[00:09.00]暂停、换歌与逐字时间轴\n[00:13.00]L4D2DangoMusic");s.message="Offline demo";}
- else {player.poll([](){return status(get(statusPath,65536),now());},[](){return peak::splitTimeline(lyrics(get(L"/lyric-all",2*1024*1024)));},[](){return now();},[](State state){publish(std::move(state));});}
+ else {
+ State probed;bool haveProbe=false;
+ if(cfg.musicSource<=1&&(!useMedia||now()>=nextLxProbe)){
+  try{probed=status(get(statusPath,65536),now());haveProbe=true;if(useMedia){player=PlayerSession{};useMedia=false;note("Music source: LX local API");}}
+  catch(...){if(cfg.musicSource==1)throw;if(!useMedia){player=PlayerSession{};useMedia=true;note("LX unavailable; falling back to Windows media session");}nextLxProbe=now()+5000;}
+ }
+ if(useMedia){mediaBridge.ensure(directory,cfg.musicSource,now());player.poll([&](){return mediaBridge.status(now());},[&](){return mediaBridge.lyrics(now());},[](){return now();},[](State state){if(state.message=="Connected to BLF / LX")state.message="Synchronized lyrics ready";state.message="Windows media: "+state.message;publish(std::move(state));});}
+ else {player.poll([&](){if(haveProbe){haveProbe=false;return probed;}return status(get(statusPath,65536),now());},[](){return peak::splitTimeline(lyrics(get(L"/lyric-all",2*1024*1024)));},[](){return now();},[](State state){publish(std::move(state));});}
+ }
  if(cfg.demo)publish(std::move(s));
- }catch(const std::exception& e){bool wasOnline=player.online;publish(player.disconnect(now()));if(wasOnline)note(std::string("Player disconnected; lyric cache invalidated: ")+e.what());}
+ }catch(const std::exception& e){bool wasOnline=player.online;auto disconnected=player.disconnect(now());disconnected.message=e.what();publish(std::move(disconnected));if(wasOnline)note(std::string("Player disconnected; lyric cache invalidated: ")+e.what());}
 
  std::unique_lock<std::mutex> lock(sleepMutex);wake.wait_for(lock,std::chrono::milliseconds(cfg.demo?50:150),[]{return stopping.load();});
  }
@@ -600,6 +611,8 @@ const char* menuActionImpl(void* argument){uintptr_t id=reinterpret_cast<uintptr
  else if(id==719)c.wallSurface=1-c.wallSurface;
  else if(id==717){if(!c.wallIndependentTiming){c.wallLingerMs=c.lingerMs;c.wallFadeMs=c.transition;}c.wallIndependentTiming=true;c.wallFadeMs=c.wallFadeMs<1000?1000:c.wallFadeMs<2000?2000:500;}
  changeSettings(c);return id>=712&&id<=717?wallOptionsMenu():wallMenu();}
+ if(id==9500){std::string rows;for(int i=0;i<8;++i)rows+=item(std::string(c.musicSource==i?u8"当前 · ":"")+media::sourceName(i),9510+i);auto music=std::atomic_load(&snapshot);rows+=item(u8"状态："+music->message,0);return page(u8"音乐来源",rows);}
+ if(id>=9510&&id<=9517){c.musicSource=int(id-9510);c.demo=false;changeSettings(c);return nullptr;}
  if(id==24)return diagnosticMenu();
  if(id==20)return displayMenu(c);
  if(id==21)return colorMenu(c);
@@ -647,6 +660,7 @@ const char* menuAction(void* argument){
  if(!hud::opensChild(id)&&id){auto c=*std::atomic_load(&settings);std::string text=u8"设置已实时应用";
  auto status=[&](const char* label,bool value){text=std::string(label)+(value?u8"：已开启":u8"：已关闭");};
  switch(id){case 847:case 820:case 821:case 822:case 823:case 824:case 825:case 826:case 827:case 828:case 829:case 830:case 831:case 832:case 833:case 840:case 841:case 842:case 843:case 844:case 845:case 846:text=followNotice.empty()?u8"实体跟随设置已应用":followNotice;break;case 801:status(u8"实体诊断采集",source_entities::enabled.load());break;case 802:text=u8"已请求后台导出当前实体快照";break;case 1:status(u8"歌词显示",c.enabled);break;case 2:status(u8"翻译",c.translation);break;case 3:status(u8"抖动",c.wiggle);break;case 4:status(u8"弹跳",c.pop);break;case 5:status(u8"歌名",c.showTitle);break;case 6:status(u8"作者",c.showArtist);break;case 7:status(u8"世界歌词",c.worldLyrics);break;case 8:status(u8"柔光",c.glow);break;case 9:status(u8"靠近后退（悬浮世界歌词）",c.keepAway);break;case 28:status(u8"按演唱进度显字",c.progressiveReveal);break;case 29:status(u8"沿用可见锚点",c.reuseVisibleAnchor);break;case 32:text=c.fallbackReveal?u8"无逐字时间轴：估算渐显":u8"无逐字时间轴：整句显示";break;case 18:case 2098:text=u8"已提交保存设置";break;case 2099:text=u8"已结束位置预览";break;case 700:status(u8"场景挂画",c.wallEnabled);break;case 702:text=c.wallLiveLyrics?u8"挂画内容：歌词轮换":u8"挂画内容：固定示例";break;case 703:status(u8"挂画背景",c.wallBackdrop);break;case 705:status(u8"挂画调试标识",c.wallDebug);break;case 709:text=c.wallAutomatic?u8"自动寻找墙面":u8"手动挂画轮换";break;case 710:status(u8"新句无墙面时固定世界歌词",c.wallFallback);break;case 704:text=u8"已请求清空挂画，下一句重新寻找墙面";break;default:break;}
+ if(id>=9510&&id<=9517)text=std::string(u8"音乐来源：")+media::sourceName(c.musicSource);
  if(id>=100&&id<=105)text=std::string(u8"预设：")+presetName(c.presetId);
  if(id>=10000&&id<11209)text=std::string(id>=11000?u8"光晕颜色：":u8"正文颜色：")+colorText(id>=11000?c.accent:c.textColor);
  if(id>=2201&&id<=2209)text=u8"歌词位置数量："+std::to_string(c.layout.lyricCount);

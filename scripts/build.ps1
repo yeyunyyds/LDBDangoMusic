@@ -42,3 +42,6 @@ if ($LASTEXITCODE -ne 0) { throw 'Entity auto/motion tests failed' }
 if ($LASTEXITCODE -ne 0) { throw 'Menu visual build failed' }
 & ./build/menu_visual_test.exe
 if ($LASTEXITCODE -ne 0) { throw 'Menu visual tests failed' }
+
+& dotnet publish media-bridge/DangoMediaBridge.csproj -c Release -o build/media-bridge
+if ($LASTEXITCODE -ne 0) { throw 'Windows media bridge build failed' }

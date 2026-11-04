@@ -1,5 +1,7 @@
 # L4D2DangoMusic
 
+本分支基于 v0.9.5 增加 Windows 音乐会话及网易云、QQ、酷狗、LRCLIB 歌词获取，测试包与使用方法见 [多平台歌词指南](docs/multi-platform-lyrics.md)。正式版 Release 保持 v0.9.5。
+
 > 当前正式版：[v0.9.5](https://github.com/yeyunyyds/LDBDangoMusic/releases/tag/v0.9.5)。提供普通世界/屏幕歌词、场景挂画，以及可选的手动/自动实体跟随；支持平滑移动、原生 HUD 菜单和可选彩色效果。
 
 为《求生之路 2》（Left 4 Dead 2）提供音乐歌词显示的 L4N 插件。通过兼容 LX / BLF 的本地音乐 API 获取播放进度和歌词，在游戏中呈现带逐字动画的歌词，并支持世界空间定位、歌名与作者显示以及游戏内调节。
@@ -26,7 +28,7 @@
 
 - Windows 版《求生之路 2》。
 - 已安装并正常工作的 L4N，支持插件接口 v2 的 HUD 菜单功能。
-- 提供兼容 `/status` 和 `/lyric-all` HTTP 接口的 LX / BLF 音乐播放器，并已开启本地 API。
+- LX / BLF 本地 API，或能向 Windows SMTC 提供歌曲、时长和进度的音乐客户端；Windows 会话桥接要求 Windows 10 2004+ x64。
 
 默认连接 `127.0.0.1:23330`。不同播放器版本提供的 API 可能不同，请先确认所用版本支持上述接口。
 
@@ -40,7 +42,7 @@
 
 1. 退出游戏，确认 L4N 已安装并正常工作。
 2. 将压缩包内的 `bin` 文件夹合并到游戏根目录。
-3. 首次安装复制全部文件。升级时替换 DLL，保留已有的 `config.json`，避免覆盖设置。
+3. 首次安装复制全部文件。多平台测试包升级时替换 DLL 和配置子目录内的 `DangoMediaBridge.exe`，保留已有的 `config.json`。
 4. 完整重启游戏，在 L4N 菜单进入 L4D2DangoMusic。
 
 安装路径：
@@ -48,6 +50,7 @@
 ```text
 bin/neko/plugins/L4D2DangoMusic.dll
 bin/neko/plugins/L4D2DangoMusic/config.json
+bin/neko/plugins/L4D2DangoMusic/DangoMediaBridge.exe  # 多平台测试包
 ```
 
 源码和构建脚本维护在 [`main` 分支](https://github.com/yeyunyyds/LDBDangoMusic/tree/main)，[`zip` 分支](https://github.com/yeyunyyds/LDBDangoMusic/tree/zip) 仅提供安装压缩包。
@@ -58,7 +61,7 @@ bin/neko/plugins/L4D2DangoMusic/config.json
 
 ## 使用与设置
 
-1. 启动音乐播放器并开启本地 API，播放一首有歌词的歌曲。
+1. 启动音乐播放器，使用 LX 时开启本地 API；使用网易云等 Windows 客户端时选择“显示与歌词信息 → 音乐来源”。
 2. 启动游戏，在 L4N 菜单中选择 **L4D2DangoMusic**。
 3. 按需调整显示、翻译、预设、颜色、动画及同步偏移。
 4. 点击 **保存设置**，使修改在下次启动时继续生效。
@@ -106,6 +109,7 @@ bin/neko/plugins/L4D2DangoMusic/config.json
 
 | 配置项 | 用途 | 默认值 |
 | --- | --- | --- |
+| `musicSource` | 0 自动，1 LX，2 Windows，3 网易云，4 QQ，5 酷狗，6 Spotify，7 Tidal | `0` |
 | `port` | 本地音乐 API 端口 | `23330` |
 | `demo` | 使用离线示例歌词 | `false` |
 | `translation` | 显示翻译 | `false` |
@@ -131,7 +135,7 @@ bin/neko/plugins/L4D2DangoMusic/config.json
 
 ### 问题排查
 
-- **没有歌词**：确认播放器 API 已开启、端口一致，且歌曲带有同步歌词。正常播放模式在暂停、停止或断开时会隐藏歌词。
+- **没有歌词**：LX 请检查本地 API；其他客户端请确认 Windows 媒体控件有当前歌曲和进度，且安装了桥接 EXE、选择了正确来源。正常播放模式在暂停、停止或断开时会隐藏歌词。
 - **歌词有提前或延后**：在菜单中调整同步偏移；正值使歌词提前，负值使歌词延后。
 - **出现双份歌词**：检查 L4N 插件目录，移出旧副本后完整重启游戏。若曾安装旧版 Host 歌词插件，也需停用该副本并重启对应 Host。
 - **动画不明显**：部分预设会关闭动画，可选择“恢复默认动画”，再进入“动画预览”检查。
@@ -142,7 +146,7 @@ bin/neko/plugins/L4D2DangoMusic/config.json
 
 ### Windows / MSVC
 
-安装 Visual Studio C++ 构建工具，在 **x86 开发者 PowerShell** 中进入源码根目录并运行：
+安装 .NET 8 SDK 和 Visual Studio C++ 构建工具，在 **x86 开发者 PowerShell** 中进入源码根目录并运行：
 
 ```powershell
 .\scripts\build.ps1
@@ -152,11 +156,12 @@ bin/neko/plugins/L4D2DangoMusic/config.json
 
 ### Linux / MinGW
 
-安装支持 C++17 的 GCC、Python 3，以及 i686 MinGW-w64 POSIX 工具链：
+安装 .NET 8 SDK、支持 C++17 的 GCC、Python 3，以及 i686 MinGW-w64 POSIX 工具链：
 
 ```bash
 bash scripts/test.sh
 bash scripts/build-mingw.sh
+dotnet publish media-bridge/DangoMediaBridge.csproj -c Release -o build/media-bridge
 ```
 
 可通过 `DANGO_CXX` 环境变量指定 MinGW 编译器路径。Windows D3D9 验证程序可通过 `scripts/smoke.ps1` 运行；打包使用 Python 3：

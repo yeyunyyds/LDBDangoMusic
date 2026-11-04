@@ -62,3 +62,7 @@ g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc -Ivendor 
 
 g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc -Ivendor tests/menu_visual_test.cpp -o build/menu_visual_test
 ./build/menu_visual_test
+
+g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc -Ivendor tests/media_protocol_test.cpp -o build/media_protocol_test
+./build/media_protocol_test
+if command -v dotnet >/dev/null 2>&1; then dotnet run --project tests/media-bridge/MediaBridgeTests.csproj -c Release; fi

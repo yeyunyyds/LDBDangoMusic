@@ -42,12 +42,17 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y g++-mingw-w64-i686-posix
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
       - name: Run regression tests
         run: bash scripts/test.sh
       - name: Build Windows x86 plugin
         env:
           DANGO_CXX: i686-w64-mingw32-g++-posix
         run: bash scripts/build-mingw.sh
+      - name: Build Windows media bridge
+        run: dotnet publish media-bridge/DangoMediaBridge.csproj -c Release -o build/media-bridge
       - name: Package minimal installer
         run: python3 scripts/package.py
       - name: Publish release and installer

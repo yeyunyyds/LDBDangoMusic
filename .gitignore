@@ -3,3 +3,6 @@
 *.lib
 *.exp
 __pycache__/
+
+**/obj/
+**/bin/

@@ -3,6 +3,8 @@ $ErrorActionPreference = 'Stop'
 if (Get-Process -Name left4dead2 -ErrorAction SilentlyContinue) { throw 'Exit Left 4 Dead 2 before installing; also close any legacy lyrics Host if used.' }
 $repo = Split-Path $PSScriptRoot -Parent
 $sourceDll = Join-Path $repo 'build/L4D2DangoMusic.dll'
+$mediaBridge = Join-Path $repo 'build/media-bridge/DangoMediaBridge.exe'
+if (!(Test-Path $mediaBridge)) { throw 'Build the self-contained Windows media bridge first.' }
 if (!(Test-Path $sourceDll)) { throw 'Build the x86 DLL or run from the ZIP source directory.' }
 $neko = Join-Path $GameRoot 'bin/neko'
 if (!(Test-Path $neko)) { throw 'L4N bin/neko not found.' }
@@ -63,6 +65,7 @@ foreach ($location in $locations) {
     }
 }
 Copy-Item $sourceDll $dll -Force
+Copy-Item $mediaBridge (Join-Path $settingsDir 'DangoMediaBridge.exe') -Force
 [IO.File]::WriteAllText($path, ($settings | ConvertTo-Json -Depth 16), [System.Text.UTF8Encoding]::new($false))
 Write-Host 'Installed L4D2DangoMusic 0.9.5; settings preserved. Restart game; use the L4D2DangoMusic 0.9.5 menu.'
 

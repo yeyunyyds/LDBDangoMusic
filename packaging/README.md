@@ -1,12 +1,12 @@
-# L4D2DangoMusic @VERSION@
+# L4D2DangoMusic @VERSION@ · 多平台歌词测试版
 
-《求生之路 2》的原生 L4N 歌词插件。支持 LX / BLF 本地 API、逐字歌词与翻译、世界/屏幕歌词、墙面和地面挂画，以及可选的手动/自动实体跟随。运行在 32 位游戏进程，不依赖 LDB、DXVK、Unity 或另行下载的游戏 DLL。
+《求生之路 2》的原生 L4N 歌词插件。支持 LX / BLF 本地 API、Windows 媒体会话、多平台同步歌词、逐字歌词与翻译、世界/屏幕歌词、墙面和地面挂画，以及可选的手动/自动实体跟随。运行在 32 位游戏进程，不依赖 LDB、DXVK、Unity 或另行下载的游戏 DLL。
 
 ## 安装与升级
 
 1. 完整退出游戏，先确认已安装并能正常使用 L4N。
 2. 首次安装，将本包 `bin` 文件夹合并到游戏根目录，例如 `D:\Steam\steamapps\common\Left 4 Dead 2`。
-3. 升级时替换 `bin/neko/plugins/L4D2DangoMusic.dll`，保留自己的 `bin/neko/plugins/L4D2DangoMusic/config.json`。
+3. 升级时替换 `bin/neko/plugins/L4D2DangoMusic.dll` 和配置子目录的 `DangoMediaBridge.exe`，保留自己的 `bin/neko/plugins/L4D2DangoMusic/config.json`。
 4. 移出旧 `LDBDangoMusic.dll`、改名副本及旧 Host 歌词插件，只加载一份本插件，然后重启游戏。
 
 安装后的文件：
@@ -15,14 +15,16 @@
 游戏根目录/
 └─ bin/neko/plugins/
    ├─ L4D2DangoMusic.dll
-   └─ L4D2DangoMusic/config.json
+   └─ L4D2DangoMusic/
+      ├─ config.json
+      └─ DangoMediaBridge.exe
 ```
 
 L4N 和音乐播放器需自行安装。本包仅包含 bin 与本文档，不附带游戏资源、源码、构建工具或测试程序。
 
 ## 开始使用
 
-开启支持 `/status` 和 `/lyric-all` 的 LX / BLF 本地音乐 API，默认地址 `127.0.0.1:23330`。播放有同步歌词的歌曲，在 L4N 菜单选择 L4D2DangoMusic。
+LX 用户开启支持 `/status` 和 `/lyric-all` 的本地 API，默认地址 `127.0.0.1:23330`。网易云等客户端用户在“显示与歌词信息 → 音乐来源”指定客户端，并确认 Windows 媒体控件有歌曲和进度。播放有同步歌词的歌曲，在 L4N 菜单选择 L4D2DangoMusic。
 
 菜单设置即时生效，主菜单第 7 项“保存设置”保留下次使用。实际修改显示未保存，写入成功后显示已保存。`1..9` 选择，`-` / `=` 翻页，`0` 返回，`Esc` 或 `/` 关闭。菜单外观页可调整背景、透明度、字号、位置和 F10 快捷键。
 
@@ -73,3 +75,16 @@ L4N 和音乐播放器需自行安装。本包仅包含 bin 与本文档，不�
 项目主页：https://github.com/yeyunyyds/LDBDangoMusic/tree/main
 
 本版本不包含角色台词采集。第三方项目参考、许可声明与 GPL 许可全文附于本文档末尾。
+
+
+## 多平台歌词测试
+
+本安装包以正式版 v0.9.5 为基准，新增 Windows 音乐会话桥接，不是新的正式版 Release。
+
+升级时除插件 DLL 外，还需替换 bin/neko/plugins/L4D2DangoMusic/DangoMediaBridge.exe，保留自己的 config.json。桥接自带运行时，需要 Windows 10 2004+ x64，无须另装 .NET。
+
+网易云验证：先在 Windows 媒体控件确认当前歌曲和播放进度；游戏内“显示与歌词信息 → 音乐来源 → 网易云音乐”，再保存设置。未提供 SMTC 的客户端版本无法直接读取。默认自动模式仍优先 LX 本地 API，API 断开后尝试 Windows 会话。
+
+已接入网易云、QQ 音乐、酷狗、LRCLIB 歌词搜索，保留歌词源翻译和可用的逐字时间；没有逐字时间时继续使用整句/估算选项。网易云在线接口探测通过，Windows 到游戏的完整链路待用户验证；其他来源完成接口移植和模拟响应测试，未实机验证。Spotify、Tidal 等提供 SMTC 的客户端也可选。
+
+桥接随游戏启动/退出，不监听网络端口；配置子目录的 media-bridge.log 和 media-state-进程号.json 可用于排查。后台搜索按歌曲隔离，切歌、暂停、关闭客户端继续遵守原有清理规则。
