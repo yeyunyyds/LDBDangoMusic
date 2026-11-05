@@ -55,3 +55,10 @@ auto result = executor.observe(freshLocalState, now);
 ack.accepted 表示 HTTP 请求应答成功，result.verified 才表示状态已验证。不把远端 ACK 或 HTTP 200 当成音频已经对齐。停止由固定的 Pause+Seek(0) 构成；每步前重新读本机状态，不接受远端字符串作为 HTTP 路径。命令执行限制在 127.0.0.1 的配置端口。
 
 UI 回调通过 Requests.push 提交，返回值只表示队列有容量，不等于音乐已受控。实际执行结果由 Status.control 与日志给出；这些请求/回读在后台线程运行，不在 D3D9 渲染或 L4N 菜单回调中执行。
+
+
+## 当前来源与排队请求
+
+Runtime.tick 的最后一个参数为 SourceContext（provider、revision、epoch）；默认上下文不给予 LX 控制权限。集成层必须按实际使用的播放器填入，不能仅根据“本机安装了 LX”判断。Requests 的本机控制命令也要携带 sourceRevision/sourceEpoch。来源切换、自动回退、断线或旧命令代次不符时，丢弃命令、取消回读并重建同步会话。
+
+仅 SourceContext::LX 可以启用 Session 与执行控制，网易云/Windows/示例上下文即使角色和 apply 都开启也不初始化房间或访问 LX 写 API。实际集成在每次 HTTP 操作前再次比较不可变配置的 playbackSourceRevision，避免切换来源与后台执行之间的竞争。此运行时字段不写入用户配置文件。

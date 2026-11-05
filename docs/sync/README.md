@@ -1,6 +1,6 @@
 # Steam 歌曲进度同步实验
 
-分支：`experiment/steam-progress-sync`，独立基于正式版 v0.9.5。不会合入网易云实验，也不修改正式 Release。安装包仍只有 bin 和 README，不附加运行时或 Steam DLL。
+分支：`experiment/steam-progress-sync`，独立基于正式版 v0.9.5。已合并网易云原生分支，不修改正式 Release。安装包仍只有 bin 和 README，不附加运行时或 Steam DLL。
 
 ## 实现范围
 
@@ -20,6 +20,14 @@ flowchart LR
   E --> F[本地控制队列与回读]
   F --> G[跟随端自己的 LX 与音乐资源]
 ```
+
+## 来源隔离
+
+合并包同时支持网易云原生歌词，但一起听和反向控制严格限于当前实际使用的 LX API。自动来源回退到网易云、手动选择网易云/其他 Windows 来源、离线示例和连接失败时，停止发布与跟随，并清空旧控制队列。切回 LX 必须新建会话、重新校时；不会把网易云进度发送给 LX 或错误地控制后台另一个 LX 客户端。
+
+界面检查、来源修订号、活动来源代次、执行前再次校验和协议来源约束共同实现隔离。协议升级为 `L4D2DangoMusic.lx-progress` v2 / source=lx，拒绝旧实验客户端和非 LX 包；两端须更新到同一版本。
+
+虚拟 User 入口已删除；旧回调 ID 仍被拦截，绝不进入 SteamClient 用户/pipe 生命周期接口。
 
 ## 本机控制回调测试
 
@@ -44,10 +52,9 @@ flowchart LR
 
 1. **绑定 / 检查 Steam 接口**：显示真实 SteamID64、所用接口或明确的不支持原因。不会调用 SteamAPI_Init/Shutdown，不读取或处理游戏的 Steam 回调队列。
 2. **当前 SteamID 自指收发**：实际调用 Steam SendP2PPacket 向自己发送探测包，只有收到真实 echo 才标 PASS。Steam 拒绝自发或 4 秒无回包会报告 rejected/TIMEOUT；不会用内存模拟冒充成功。
-3. **CreateLocalUser（游戏内禁用）**：旧版调用这一链路后发生过游戏无响应/崩溃。SDK 标明这是面向游戏服务器、非线程安全的接口，相关用户/pipe 释放操作同样不允许与其他 Steam API 并发。修正版直接返回 BLOCKED，不初始化 Steam，不创建/查询/释放测试用户，不用 try/catch 或插件私有锁冒充隔离。若未来仍需验证该生命周期，只能设计独立进程工具；当前未提供。该接口不用于创建新的 Steam 账号。
-4. **Steam CreateSocketPair 双端测试**：若游戏提供 SteamNetworkingSockets012，实际创建两个本地连接端点（network loopback），A 发送进度包到 B，检查解码的 30000ms 进度。接口缺失明确标 UNSUPPORTED，失败/超时不算通过。两端是本地虚拟连接，不是新建认证 Steam 玩家。
+3. **Steam CreateSocketPair 双端测试**：若游戏提供 SteamNetworkingSockets012，实际创建两个本地连接端点（network loopback），A 发送进度包到 B，检查解码的 30000ms 进度。接口缺失明确标 UNSUPPORTED，失败/超时不算通过。两端是本地虚拟连接，不是新建认证 Steam 玩家。
 
-上述三个真实 Steam 实验不控制音乐。自指成功不证明 NAT/中继/好友链路正常，SocketPair 成功不证明真实跨账号连接正常；双玩家仍需要两个已登录 Steam 账号进行实机测试。
+上述真实 Steam 实验不控制音乐。自指成功不证明 NAT/中继/好友链路正常，SocketPair 成功不证明真实跨账号连接正常；双玩家仍需要两个已登录 Steam 账号进行实机测试。
 
 此外菜单提供“虚拟多玩家模拟”，不需要其他 Steam 账号，直接运行纯 C++ 内存传输总线，可创建多个虚拟 Steam-ID 格式端点，注入时钟差、断线、重复、伪造来源和错误歌曲。模拟 ID 仅存在于内存总线，从不发送到真实 Steam 网络。
 
@@ -85,7 +92,7 @@ role：0 关闭，1 房主，2 跟随者。请把上面步骤得到的真实 ID 
 ```bash
 bash scripts/test.sh
 DANGO_CXX=i686-w64-mingw32-g++-posix bash scripts/build-mingw.sh
-python3 scripts/package.py --variant steam-sync
+python3 scripts/package.py --variant combined
 ```
 
 Windows x86 MSVC：scripts/build.ps1 同时构建并运行 Steam ABI mock 和协议测试。Steam 游戏接口本身的测试必须在已登录 Steam 的实际游戏内运行；云端交叉编译不能代替这一部分。

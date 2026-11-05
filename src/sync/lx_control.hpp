@@ -4,7 +4,7 @@
 #include <functional>
 namespace dango::lx {
 enum class Action{Play,Pause,Seek,Stop};
-struct Command{uint64_t id=0;Action action=Action::Pause;int64_t position=0;std::string expectedTrack;bool automatic=false;};
+struct Command{uint64_t id=0;Action action=Action::Pause;int64_t position=0;std::string expectedTrack;bool automatic=false;uint64_t sourceRevision=0,sourceEpoch=0;};
 inline std::string path(const Command& c,int64_t duration){
  if(c.action==Action::Play)return "/play";if(c.action==Action::Pause||c.action==Action::Stop)return "/pause";
  if(c.position<0||duration<=0||c.position>duration)throw std::runtime_error("LX seek outside current track");

@@ -16,4 +16,6 @@ runtime = (root/'src/sync/runtime.hpp').read_text(encoding='utf-8')
 blocked = re.search(r'if\(r\.action==2\)\{([^}]+)\}', runtime)
 assert blocked and 'BLOCKED' in blocked[1] and 'continue;' in blocked[1], 'User test must stop before Steam binding'
 assert not any(name in blocked[1] for name in ('ensure(', 'invoke<', 'transport->')), 'Blocked entry still touches the Steam SDK'
+plugin=(root/'src/plugin.cpp').read_text(encoding='utf-8')
+assert 'item(u8"CreateLocalUser' not in plugin, 'User probe must not return to the UI'
 print('Passed: game plugin cannot create/release Steam users/pipes; blocked user diagnostic never binds Steam')

@@ -1,3 +1,4 @@
+param([switch]$NativeNetEase,[switch]$WithMediaBridge)
 $ErrorActionPreference = 'Stop'
 Set-Location (Join-Path $PSScriptRoot '..')
 New-Item -ItemType Directory -Force build | Out-Null
@@ -51,3 +52,12 @@ if ($LASTEXITCODE -ne 0) { throw 'Steam ABI mock failed' }
 if ($LASTEXITCODE -ne 0) { throw 'Progress protocol build failed' }
 & ./build/steam_progress_test.exe
 if ($LASTEXITCODE -ne 0) { throw 'Progress protocol failed' }
+if ($WithMediaBridge) {
+    & dotnet publish media-bridge/DangoMediaBridge.csproj -c Release -o build/media-bridge
+    if ($LASTEXITCODE -ne 0) { throw 'Windows media bridge build failed' }
+}
+
+& cl.exe /nologo /std:c++17 /EHsc /utf-8 /W4 /Isrc /Ivendor tests/netease_elog_test.cpp /Fobuild/netease_elog_test.obj /Febuild/netease_elog_test.exe
+if ($LASTEXITCODE -ne 0) { throw 'NetEase elog tests build failed' }
+& ./build/netease_elog_test.exe
+if ($LASTEXITCODE -ne 0) { throw 'NetEase elog tests failed' }

@@ -14,6 +14,8 @@
 namespace dango {
 struct Config {
  sync::Settings sync;
+ uint64_t playbackSourceRevision=1;
+ int musicSource=0;
  int colorEffect=0;float colorSpeed=.2f,colorAmount=1;
  AutoFollowConfig autoFollow;bool entitySmooth=true,lyricMove=false,wallIndependentTiming=false;int moveCurve=0,moveMs=350;
  int port=23330,size=32;bool enabled=true,worldLyrics=false,worldTestAnchor=false;
@@ -45,6 +47,7 @@ inline Config decodeConfig(const nlohmann::json& j){
  auto number=[&](const char* key,float value,float lo,float hi){float n=j.value(key,value);if(!std::isfinite(n))throw std::runtime_error("Non-finite setting");return std::clamp(n,lo,hi);};
  if(j.contains("steamSync"))c.sync=sync::readSettings(j["steamSync"]);
  if(j.contains("autoFollow"))c.autoFollow=readAutoFollow(j["autoFollow"]);c.moveCurve=integer("moveCurve",0,0,4);c.moveMs=integer("moveMs",350,100,2000);
+ c.musicSource=integer("musicSource",0,0,7);
  c.colorEffect=integer("colorEffect",0,0,4);c.colorSpeed=number("colorSpeed",.2f,0,2);c.colorAmount=number("colorAmount",1,0,1);
  c.wallSurface=integer("wallSurface",0,0,1);if(j.contains("wallLayout"))c.wallLayout=readWallLayout(j.at("wallLayout"));
  c.wallSize=integer("wallSize",1,0,2);c.wallCapacity=integer("wallCapacity",6,2,8);c.wallLingerMs=integer("wallLingerMs",4000,0,15000);c.wallFadeMs=integer("wallFadeMs",1000,200,3000);c.wallRange=number("wallRange",600,160,1200);c.wallSpacing=number("wallSpacing",140,40,400);
@@ -57,7 +60,7 @@ inline Config decodeConfig(const nlohmann::json& j){
  if(j.contains("hudAppearance")){auto a=j.at("hudAppearance");if(!a.is_object())throw std::runtime_error("HUD appearance must be an object");auto f=[&](const char* key,float fallback,float low,float high){float v=a.value(key,fallback);return std::isfinite(v)?std::clamp(v,low,high):fallback;};c.hud.preset=unsigned(std::clamp(a.value("preset",0),0,3));c.hud.step=unsigned(std::clamp(a.value("step",8),1,64));c.hud.opacity=f("opacity",.48f,.2f,.95f);c.hud.font=f("font",22,16,32);c.hud.x=f("x",8,0,16384);c.hud.y=f("y",14,0,16384);c.hud.centerY=a.value("centerY",std::abs(c.hud.y-14.f)<.001f);c.hud.f10=a.value("f10",false);}
  c.textColor=parseColor(j.value("textColor",std::string("#F7E1D7")));c.accent=parseColor(j.value("accentColor",std::string("#F7E1D7")));return c;
 }
-inline nlohmann::json encodeConfig(const Config& c){return {{"steamSync",sync::settingsJson(c.sync)},
+inline nlohmann::json encodeConfig(const Config& c){return {{"steamSync",sync::settingsJson(c.sync)},{"musicSource",c.musicSource},
  {"colorEffect",c.colorEffect},{"colorSpeed",c.colorSpeed},{"colorAmount",c.colorAmount},
  {"autoFollow",autoFollowJson(c.autoFollow)},{"entitySmooth",c.entitySmooth},{"lyricMove",c.lyricMove},{"moveCurve",c.moveCurve},{"moveMs",c.moveMs},{"wallIndependentTiming",c.wallIndependentTiming},
  {"wallFloorFollow",c.wallFloorFollow},{"wallReuse",c.wallReuse},{"wallSurface",c.wallSurface},{"wallLayout",wallLayoutJson(c.wallLayout)},

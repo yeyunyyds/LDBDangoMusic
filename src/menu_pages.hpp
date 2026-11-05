@@ -1,5 +1,6 @@
 #pragma once
 #include "lyrics_settings.hpp"
+#include "media_protocol.hpp"
 #include "native_menu_model.hpp"
 #include "render_lifecycle.hpp"
 
@@ -18,7 +19,7 @@ inline hud::Document root(const Config& c,const std::string& save,bool following
 inline hud::Document display(const Config& c){return {u8"显示与歌词信息",{
  {value(u8"翻译",on(c.translation)),2},{value(u8"单行长度",number(c.lineWidthScale)+"x"),31},
  {value(u8"同步偏移",std::to_string(c.offset)+"ms"),16},{value(u8"世界歌词",on(c.worldLyrics)),7},
- {u8"世界位置与回归",36},{u8"歌名与作者",37}}};}
+ {u8"世界位置与回归",36},{u8"歌名与作者",37},{value(u8"音乐来源",media::sourceName(c.musicSource)),9500}}};}
 inline hud::Document world(const Config& c){return {u8"世界位置与回归",{
  {value(u8"换句沿用视野内原位置",on(c.reuseVisibleAnchor)),29},
  {value(u8"复用距离上限",number(c.reuseDistanceFactor)+u8" × 配置距离"),33},

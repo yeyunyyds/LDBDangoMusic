@@ -17,3 +17,4 @@ mkdir -p build
 
 "$compiler" -std=c++17 -O2 -Ivendor -Isrc tests/steam_abi_test.cpp -static -o build/steam_abi_test.exe
 "$compiler" -std=c++17 -O2 -Ivendor -Isrc tests/steam_progress_test.cpp -static -o build/steam_progress_test.exe
+"$compiler" -std=c++17 -O2 -Ivendor -Isrc tests/netease_elog_test.cpp -static -o build/netease_elog_test.exe

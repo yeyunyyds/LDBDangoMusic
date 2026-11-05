@@ -2,12 +2,14 @@
 #include "sync/lx_control.hpp"
 #include "sync/settings.hpp"
 #include "sync/simulation.hpp"
+#include "sync/source_policy.hpp"
 #include <cassert>
 #include <iostream>
 using namespace dango;
 constexpr uint64_t a=76561197960265729ULL,b=76561197960265730ULL,c=76561197960265731ULL;
 State track(int64_t tick,int64_t position=10000,bool playing=true){State s;s.connected=true;s.playing=playing;s.key="song";s.title="Song";s.artist="Artist";s.duration=120000;s.position=position;s.sampled=tick;return s;}
 int main(){
+ sync::SourceContext lxSource{sync::Provider::LX,7,10},neteaseSource{sync::Provider::Netease,8,11};assert(sync::currentCommand(lxSource,7,10));assert(!sync::currentCommand(lxSource,7,9));assert(!sync::currentCommand(lxSource,6,10));assert(!sync::currentCommand(neteaseSource,8,11));assert(!sync::lxAllowed({sync::Provider::Windows,8,11})&&!sync::lxAllowed({sync::Provider::Demo,8,11})&&!sync::lxAllowed({}));
  assert(sync::virtualPlayersTest().rfind("PASS",0)==0);
  assert(sync::steamId(a));bool rejected=false;try{sync::peer("1");}catch(...){rejected=true;}assert(rejected);
  lx::Executor controls;std::vector<std::string> paths;auto request=[&](const std::string& p){paths.push_back(p);};auto local=track(1000);
@@ -28,6 +30,7 @@ int main(){
  sync::Message sample;sample.sender=a;sample.kind="state";sample.track=sync::song(local);sample.t2=1000;sample.position=10000;sample.playing=false;sync::Clock clock;assert(clock.sample(1000,51020,51020,1040));sample.t2=51020;auto paused=sync::plan(track(1040),sample,clock,1040,1040);assert(paused.valid&&paused.pause&&!paused.play);
 
  auto strict=nlohmann::json::parse(sync::encode(forged));strict["seq"]=-1;rejected=false;try{sync::decode({a,strict.dump()});}catch(...){rejected=true;}assert(rejected);
+ strict=nlohmann::json::parse(sync::encode(forged));strict["source"]="netease";rejected=false;try{sync::decode({a,strict.dump()});}catch(...){rejected=true;}assert(rejected);
  strict=nlohmann::json::parse(sync::encode(forged));strict["title"]=nlohmann::json::array();rejected=false;try{sync::decode({a,strict.dump()});}catch(...){rejected=true;}assert(rejected);
  sync::Settings settings;settings.role=2;settings.host=a;settings.peers={a};assert(sync::readSettings(sync::settingsJson(settings)).host==a);assert(!sync::Settings{}.apply&&sync::Settings{}.role==0);
  sync::Message duplicate;duplicate.kind="state";duplicate.sender=a;duplicate.room=111;duplicate.seq=1;duplicate.track=sync::song(local);host.send(b,sync::encode(duplicate));auto rejectedBefore=client.rejected;client.tick(track(2100),2100);assert(client.rejected>rejectedBefore);

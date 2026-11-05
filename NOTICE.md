@@ -51,3 +51,23 @@ Native HUD menu adaptation:
   MIT; see vendor/imgui/LICENSE.txt. Only the core and D3D9 backend are built.
 - The lyric plugin keeps its own ImGui context and uses its existing D3D9
   Present/Reset chain. It does not call or require any Bridge control API.
+
+Windows media / online lyric adapter:
+- media-bridge/LyricsService.cs and KaraokeWordTiming.cs adapt Epi-1120/desktop-lyric
+  617b16eb4dcb380616f3175474a8622dd8c5d47e (MIT, Copyright (c) 2026 Epi-1120),
+  referenced via https://github.com/Epi-Lo/desktop-lyric. License retained in
+  vendor/DESKTOP-LYRIC-LICENSE.MIT. Provider requests, candidate scoring, LRC/YRC
+  parsing and timestamp translation merge follow that project. Automatic machine
+  translation, Traditional Chinese conversion, WPF and overlay UI are not included.
+- The optional Windows media bridge is an independent self-contained .NET 8 x64
+  process. Runtime license and third-party notices are in vendor/DOTNET-RUNTIME-*.txt
+  and are included in the package README. The game plugin remains native x86.
+
+Native NetEase playback adapter:
+- src/netease_elog.hpp adapts the byte decoder and playback-event model from
+  344272586-sketch/dsh-pet-qqmusic, lib/netease-elog.js (MIT, Copyright (c) 2026
+  dsh-pet-qqmusic contributors; upstream identifies netease-cloudmusic-detector
+  as its decoder source). License is retained in vendor/NETEASE-ELOG-LICENSE.MIT.
+- The local reader, bounded file tailing/process-lifetime validation and async
+  WinHTTP song-ID lyric adapter are native implementations. Raw client log
+  records, music URLs, cookies and credentials are not copied or uploaded.

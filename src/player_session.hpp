@@ -14,7 +14,7 @@ struct PlayerSession {
  State attach(State state)const{
  state.generation=generation;
  state.timeline=state.connected&&state.playing&&state.key==key?timeline:Timeline{};
- if(!state.playing)state.message=state.key.empty()?"No active track":"Paused";
+ if(!state.playing){if(!state.key.empty())state.message="Paused";else if(state.message.empty()||state.message=="Connected: no active track")state.message="No active track";}
  else state.message=state.timeline.empty()?"Waiting for synchronized lyrics":"Connected to BLF / LX";
  return state;
  }
