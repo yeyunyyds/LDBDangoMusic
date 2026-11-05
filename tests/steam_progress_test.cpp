@@ -23,6 +23,7 @@ int main(){
  // Different OS uptimes: host clock is +50 seconds. Simulated one-way 20ms.
  for(int64_t now=1000;now<=2000;now+=20){client.tick(track(now,5000+now-1000),now);leader.tick(track(now+50020,10000+now-1000),now+50020);}
  auto correction=client.correction(track(2020,6020),2020);assert(correction.valid&&correction.seek&&correction.drift>4000&&client.timing().ready);assert(client.timing().rtt<=40);
+ assert(!client.correction(track(2020,6020),2020,10000).seek);
  auto wrong=track(2020);wrong.title="Other";assert(!client.correction(wrong,2020).valid);
  assert(!client.correction(track(20000),20000).valid);
  sync::Message forged;forged.sender=a;forged.kind="state";forged.room=111;forged.seq=999;forged.track=sync::song(local);outsider.send(b,sync::encode(forged));client.tick(track(2040),2040);assert(client.rejected>0);

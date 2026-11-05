@@ -1,98 +1,61 @@
-# Steam 歌曲进度同步实验
+# 自动发现与 LX 一起听实验
 
-分支：`experiment/steam-progress-sync`，独立基于正式版 v0.9.5。已合并网易云原生分支，不修改正式 Release。安装包仍只有 bin 和 README，不附加运行时或 Steam DLL。
+分支：`experiment/steam-progress-sync`，基于正式版 v0.9.5，已合入网易云原生歌词。当前不改变正式 Release。
 
-## 实现范围
+## 使用
 
-- 菜单调用 LX 官方本地 API 播放、暂停、绝对跳转；停止由“暂停 + 跳转到零”组成。
-- 每次调用分为队列接收、HTTP 应答、实际状态回读；HTTP 200/OK 不等于播放成功。2 秒内观察不到预期状态就报告未验证。
-- Steam P2P 只传输歌名、歌手、时长、进度、播放状态、倍率及协议/校时字段，不发送音乐、歌词全文、下载链接或登录信息。
-- 房主单向发布状态，跟随端仅接受配置允许的指定房主。没有主机自动迁移或任意玩家的远程控制。
-- 两端各自在自己的 LX 中选同一版本歌曲。歌名/歌手归一化后匹配、时长差不超过 1500ms；不匹配时不控制本机。LX 官方 OpenAPI 没有按歌曲 ID 自动选曲的接口，因此本实验不假设可以自动分发或切换曲目。
-- 默认全部关闭；“应用收到的进度”默认关闭。可先观察 DRY RUN 预测漂移，再开启应用。
+见[安装包说明](../../packaging/README-combined.md)。菜单“更多设置 → 一起听与播放控制”提供 LX 控制、一起听、同局发现和 Steam 测试。两端更新同一测试包，开启 LX OpenAPI，加入同一局，开启一起听即可；无需填写 SteamID。
 
-```mermaid
-flowchart LR
-  A[房主本机 LX 状态] --> B[Session 与校时]
-  B --> C[Steam P2P 专用通道]
-  C --> D[跟随端身份与会话检查]
-  D --> E[曲目匹配 / 漂移计划]
-  E --> F[本地控制队列与回读]
-  F --> G[跟随端自己的 LX 与音乐资源]
-```
+音乐来源仅显示自动、LX、网易云。网易云原生通道只显示歌词；一起听、搜索和反向控制严格限于当前实际使用的 LX。切换来源会取消未发送的旧控制；返回 LX 后重新握手和校时。
 
-## 来源隔离
-
-合并包同时支持网易云原生歌词，但一起听和反向控制严格限于当前实际使用的 LX API。自动来源回退到网易云、手动选择网易云/其他 Windows 来源、离线示例和连接失败时，停止发布与跟随，并清空旧控制队列。切回 LX 必须新建会话、重新校时；不会把网易云进度发送给 LX 或错误地控制后台另一个 LX 客户端。
-
-界面检查、来源修订号、活动来源代次、执行前再次校验和协议来源约束共同实现隔离。协议升级为 `L4D2DangoMusic.lx-progress` v2 / source=lx，拒绝旧实验客户端和非 LX 包；两端须更新到同一版本。
-
-虚拟 User 入口已删除；旧回调 ID 仍被拦截，绝不进入 SteamClient 用户/pipe 生命周期接口。
-
-## 本机控制回调测试
-
-前提：正常安装 L4N、LX 官方桌面版开启 OpenAPI（默认 127.0.0.1:23330），正常歌词模式。其他兼容播放器是否支持写接口需要单独验证。
-
-入口：更多设置 → 落雪控制与 Steam 同步实验 → 落雪 API 控制回调测试。
-
-| 操作 | 端点 | 成功回读 |
-| --- | --- | --- |
-| 播放 | GET /play | status=playing |
-| 暂停 | GET /pause | status=paused |
-| 停止 | GET /pause，然后 GET /seek?offset=0.000 | 暂停且进度接近零 |
-| 指定进度 | GET /seek?offset=秒数 | 进度接近目标，考虑恢复播放后的自然推进 |
-
-菜单提供 0 秒、30 秒、当前位置后移 10 秒、歌曲中间。开发接口支持任意合法毫秒位置。超过曲目长度、已切歌或断开时不发送无效请求。停止的两个请求之间也重新确认歌曲，避免归零到下一首。
-
-测试时观察“回调”状态及 L4D2DangoMusic.log：`accepted=1` 仅是 API 接收，`verified=1` 才是状态验证成功。线程在后台执行，菜单回调不访问网络；日志包含请求编号和验证结果，不记录歌曲资源地址。
-
-## Steam 单人测试
-
-入口：更多设置 → 落雪控制与 Steam 同步实验 → Steam 自指与本地创建测试。
-
-1. **绑定 / 检查 Steam 接口**：显示真实 SteamID64、所用接口或明确的不支持原因。不会调用 SteamAPI_Init/Shutdown，不读取或处理游戏的 Steam 回调队列。
-2. **当前 SteamID 自指收发**：实际调用 Steam SendP2PPacket 向自己发送探测包，只有收到真实 echo 才标 PASS。Steam 拒绝自发或 4 秒无回包会报告 rejected/TIMEOUT；不会用内存模拟冒充成功。
-3. **Steam CreateSocketPair 双端测试**：若游戏提供 SteamNetworkingSockets012，实际创建两个本地连接端点（network loopback），A 发送进度包到 B，检查解码的 30000ms 进度。接口缺失明确标 UNSUPPORTED，失败/超时不算通过。两端是本地虚拟连接，不是新建认证 Steam 玩家。
-
-上述真实 Steam 实验不控制音乐。自指成功不证明 NAT/中继/好友链路正常，SocketPair 成功不证明真实跨账号连接正常；双玩家仍需要两个已登录 Steam 账号进行实机测试。
-
-此外菜单提供“虚拟多玩家模拟”，不需要其他 Steam 账号，直接运行纯 C++ 内存传输总线，可创建多个虚拟 Steam-ID 格式端点，注入时钟差、断线、重复、伪造来源和错误歌曲。模拟 ID 仅存在于内存总线，从不发送到真实 Steam 网络。
-
-## 两位玩家联调
-
-1. 两端安装同一个实验包，各自打开 Steam、L4D2、L4N 和提供上述控制 API 的 LX。
-2. 两端分别运行“绑定 / 检查 Steam 接口”，记下本机真实 SteamID64。初次可先做上述自指/本地创建测试。
-3. 退出游戏，在各自 `bin/neko/plugins/L4D2DangoMusic/config.json` 加入 `steamSync`。ID 必须为十进制字符串，不要写为 JSON 浮点数字。
-4. A 的 `role=1`，`peers` 列出 B 的 SteamID64；B 的 `role=2`，`host` 为 A 的 SteamID64，`peers` 至少包含 A。最多允许 8 个对端。`apply` 先保持 false。
-5. 重启游戏，两端自己选好同一版本歌曲。共享歌曲进度页应显示握手/校时、收发数量、RTT、预测漂移；不匹配或超时会显示原因。
-6. B 确认歌曲匹配后，开启“应用收到的进度”。A 测试暂停、播放、拖动进度和停止，观察 B 的控制回读。保存设置可保留角色、允许列表、房主和开关。
-
-初始配置模板（默认关闭）：
+默认：同局发现开，一起听关，自动搜索开，进度应用关。菜单开启一起听时同时打开进度应用，可单独关闭应用作 DRY RUN。设置须主动保存。
 
 ```json
 "steamSync": {
-  "role": 0,
+  "enabled": false,
+  "discover": true,
+  "autoSearch": true,
   "apply": false,
-  "thresholdMs": 350,
-  "host": "",
-  "peers": []
+  "thresholdMs": 350
 }
 ```
 
-role：0 关闭，1 房主，2 跟随者。请把上面步骤得到的真实 ID 填入允许列表。房主/允许列表在配置文件设置，当前没有好友邀请/自动发现或文本输入菜单。
+旧 role/host/peers 字段兼容读取，旧非零 role 可迁移启用状态，但这些字段不再绕过同局授权或指定主机。
 
-房主每 500ms 发布状态；双向校时每 2 秒一次，使用四时间戳估计时钟差和往返延迟，不把两台电脑的 uptime 当成同一时钟。跟随端默认漂移超过 350ms 才跳转，校正操作间隔至少 1200ms；菜单可选 150/350/700ms。暂停/恢复按状态变化执行，不重复 toggle。
+## 同局发现与选主
 
-校时超过 15 秒无有效样本、状态超过 3 秒无有效更新，或房主失联时停止自动控制。6 秒无房主消息会重新握手；不会自行选择陌生新房主，也不会在断线时强制暂停本机。播放倍率不一致时要求用户自行设成相同倍率，不悄悄修改速度。这里对齐的是播放器进度，不是音频采样时钟；声卡、蓝牙及各客户端的缓冲延迟仍可能不同。
+Source 相机回调在游戏线程每秒获取当前游戏玩家名单，排除 bot、HLTV 和本机，最多三个对端。GetPlayerInfo、GetLocalPlayer、GetMaxClients 均按已提供的 engine.dll 静态核对 RVA、代码字节和结构布局；不依赖网上不同 SDK 的槽位猜测。未知游戏构建拒绝调用。名单快照通过原子共享指针传给工作线程；Steam 收发和音乐网络操作在工作线程执行。
 
-## 开发与复用
+发现使用独立通道 45630，进度使用 45631；发送和接收都限定当前名单。双向 incarnation challenge 验证插件，拒绝旧进程、重放和名单外发送者。名单、地图代次或本机身份改变会重建会话。没有响应只表示“未响应或版本不兼容”，不能证明对方没安装。
 
-见 [模块 API](api.md) 和 [接口契约 / 测试记录](validation.md)。配置中的角色与远端应用均默认关闭；原有普通歌词、世界/挂画和实体跟随逻辑继续使用本机 LX 的状态。
+发现默认每个候选最多八次退避探测，可手动重新扫描；确认后每秒 presence，七秒失联撤回资格。只有已确认、一起听已开、当前实际 LX 的参与者可成为房主。
+
+无房主时按游戏玩家顺序自动分配。手动“我来当房主”发布递增逻辑任期，已观察到前一次声明后的新声明覆盖前一次；同时声明按 SteamID 确定性打破平局。声明直发所有已确认对象，presence 重发。切源、关闭一起听或失联后可自动重选。分区期间无法保证所有机器瞬时一致，恢复通信后收敛；房主变化立即重建进度握手，旧会话不能继续控制。
+
+## 搜索、选曲及进度
+
+LX 官方 HTTP OpenAPI 负责 /status、/play、/pause 和 /seek?offset=秒数。停止是暂停后归零；每一步前重新检查当前歌曲，回读验证而非仅看 HTTP 200。
+
+官方 [Scheme 文档](https://lxmusic.toside.cn/desktop/scheme-url) 的 music/searchPlay 接受 URL 编码 JSON：name、singer、interval（mm:ss）、playLater=false。实现按 LX 源码 ad95d5091c9ed689fa72b5e5c849df65f5a679ce 核对；使用 ShellExecuteW 调用已注册的固定协议，不执行任意 URI 或命令。
+
+房主曲目稳定 750ms 后，跟随端根据歌名、歌手、时长请求本机 LX 搜索并播放。LX 自行选择首个候选，没有搜索结果回调；系统接受 URI 只代表已交给播放器。插件回读实际状态，标题/歌手归一化匹配且时长差不超过 1500ms 才允许进度控制。错误版本不会被跳转至房主时间，但 Scheme 已播放的候选无法在发出前验证或撤销。
+
+等待实际选曲最长 20 秒，失败冷却 30 秒，每首最多三次；手动重试可复位。暂停的房主不会触发搜索播放不同曲目。源、房主或成员代次变化会取消未发送的自动操作；已发给系统的 Scheme 无法取消。
+
+房主每 500ms 发布元数据和状态；每两秒做四时间戳校时，不假定两台机器 uptime 相同。默认漂移阈值 350ms，校正最短间隔 1200ms。状态超过三秒、校时超过十五秒或歌曲不匹配时停止写入。播放倍率不一致时提示，不擅自改速度。同步播放器进度，不保证声卡输出采样级一致。
+
+进度协议 v3 / source=lx，包含游戏名单 scope 和独立会话 nonce。两端须一起升级。网络仅传元数据、进度和状态，不发音乐、歌词全文、资源地址或凭据。
+
+## 测试
+
+Steam 自指、SocketPair 和 LX 写操作已由用户日志验证；不再调用 CreateLocalUser、CreateSteamPipe、ReleaseUser、BReleaseSteamPipe，也不接管游戏 Steam 回调队列。
+
+`tests/auto_listening_test.cpp` 覆盖名单布局、bot、授权范围、自动发现、后声明覆盖、并发选主、退出、重启、伪造来源、Scheme 编码和实际选曲验证。`steam_progress_test.cpp` 覆盖进度、时钟差、会话与来源。云端无法替代双 Steam 账号游戏联调，新增自动功能仍需实测。
 
 ```bash
 bash scripts/test.sh
 DANGO_CXX=i686-w64-mingw32-g++-posix bash scripts/build-mingw.sh
-python3 scripts/package.py --variant combined
+python3 scripts/package.py --variant auto-listening
 ```
 
-Windows x86 MSVC：scripts/build.ps1 同时构建并运行 Steam ABI mock 和协议测试。Steam 游戏接口本身的测试必须在已登录 Steam 的实际游戏内运行；云端交叉编译不能代替这一部分。
+Windows MSVC 的 scripts/build.ps1 还运行 x86 ABI mocks。可复用模块见 [API](api.md)，底层历史核对记录见 [validation](validation.md)。

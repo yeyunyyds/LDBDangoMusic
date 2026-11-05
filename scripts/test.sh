@@ -75,3 +75,6 @@ if command -v dotnet >/dev/null 2>&1; then dotnet run --project tests/media-brid
 
 g++ -std=c++17 -O2 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc -Ivendor tests/netease_elog_test.cpp -o build/netease_elog_test
 ./build/netease_elog_test
+
+g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc -Ivendor tests/auto_listening_test.cpp -o build/auto_listening_test
+./build/auto_listening_test

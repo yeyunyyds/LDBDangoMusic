@@ -15,5 +15,6 @@ int main(){
  auto changed=j;changed["sourceId"]="qqmusic";assert(media::readStatus(changed,1100,123).key!=s.key);
  PlayerSession session;session.observe(s);session.timeline=lines;auto paused=s;paused.playing=false;assert(session.observe(paused).timeline.empty());assert(session.disconnect(1200).timeline.empty());
  Config c;assert(c.musicSource==0);c.musicSource=3;assert(decodeConfig(encodeConfig(c)).musicSource==3);assert(decodeConfig(nlohmann::json::object()).musicSource==0);
+ for(int source:{2,4,5,6,7})assert(decodeConfig({{"musicSource",source}}).musicSource==0);
  std::cout<<"Passed: SMTC snapshots, identity/staleness rejection, words/translation, source/pause/disconnect isolation and source settings\n";
 }

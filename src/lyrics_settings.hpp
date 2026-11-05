@@ -47,7 +47,7 @@ inline Config decodeConfig(const nlohmann::json& j){
  auto number=[&](const char* key,float value,float lo,float hi){float n=j.value(key,value);if(!std::isfinite(n))throw std::runtime_error("Non-finite setting");return std::clamp(n,lo,hi);};
  if(j.contains("steamSync"))c.sync=sync::readSettings(j["steamSync"]);
  if(j.contains("autoFollow"))c.autoFollow=readAutoFollow(j["autoFollow"]);c.moveCurve=integer("moveCurve",0,0,4);c.moveMs=integer("moveMs",350,100,2000);
- c.musicSource=integer("musicSource",0,0,7);
+ c.musicSource=integer("musicSource",0,0,7);if(c.musicSource!=0&&c.musicSource!=1&&c.musicSource!=3)c.musicSource=0;
  c.colorEffect=integer("colorEffect",0,0,4);c.colorSpeed=number("colorSpeed",.2f,0,2);c.colorAmount=number("colorAmount",1,0,1);
  c.wallSurface=integer("wallSurface",0,0,1);if(j.contains("wallLayout"))c.wallLayout=readWallLayout(j.at("wallLayout"));
  c.wallSize=integer("wallSize",1,0,2);c.wallCapacity=integer("wallCapacity",6,2,8);c.wallLingerMs=integer("wallLingerMs",4000,0,15000);c.wallFadeMs=integer("wallFadeMs",1000,200,3000);c.wallRange=number("wallRange",600,160,1200);c.wallSpacing=number("wallSpacing",140,40,400);

@@ -3,14 +3,14 @@
 namespace dango::sync {
 enum class Role{Host,Follower};
 class Session {
- Transport& io;Role role;std::set<Peer> allowed;Peer authority;uint64_t hostRoom,helloCookie,sequence=0,room=0,lastStateSequence=0;int64_t nextHello=0,nextClock=0,nextState=0,clockSentAt=-1,receivedAt=-1,lastHostSeen=-1;std::map<Peer,int64_t> joined;
+ Transport& io;Role role;std::set<Peer> allowed;Peer authority;uint64_t expectedCohort=0;uint64_t hostRoom,helloCookie,sequence=0,room=0,lastStateSequence=0;int64_t nextHello=0,nextClock=0,nextState=0,clockSentAt=-1,receivedAt=-1,lastHostSeen=-1;std::map<Peer,int64_t> joined;
  Message latest;Clock clock;
- void send(Peer to,Message m){m.sender=io.self();m.seq=++sequence;if(!io.send(to,encode(m)))++sendFailures;else ++sent;}
+ void send(Peer to,Message m){m.sender=io.self();m.cohort=expectedCohort;m.seq=++sequence;if(!io.send(to,encode(m)))++sendFailures;else ++sent;}
 public:
  uint64_t sent=0,received=0,rejected=0,sendFailures=0;std::string status="Not connected";
- Session(Transport& transport,Role r,std::set<Peer> peers,Peer host,uint64_t nonce):io(transport),role(r),allowed(std::move(peers)),authority(host),hostRoom(nonce),helloCookie(nonce){if(!steamId(io.self())||!nonce||allowed.size()>8)throw std::runtime_error("Invalid sync session configuration");if(role==Role::Follower&&(!allowed.count(authority)||authority==io.self()))throw std::runtime_error("Follower requires one other allowed host");}
+ Session(Transport& transport,Role r,std::set<Peer> peers,Peer host,uint64_t nonce,uint64_t cohort=0):io(transport),role(r),allowed(std::move(peers)),authority(host),hostRoom(nonce),helloCookie(nonce){expectedCohort=cohort;if(!steamId(io.self())||!nonce||allowed.size()>8)throw std::runtime_error("Invalid sync session configuration");if(role==Role::Follower&&(!allowed.count(authority)||authority==io.self()))throw std::runtime_error("Follower requires one other allowed host");}
  void tick(const State& local,int64_t now){
-  Packet packet;for(int budget=0;budget<32&&io.receive(packet);++budget){try{auto m=decode(packet);if(!allowed.count(m.sender)||m.sender==io.self())throw std::runtime_error("Peer not allowed");++received;
+  Packet packet;for(int budget=0;budget<32&&io.receive(packet);++budget){try{auto m=decode(packet);if(m.cohort!=expectedCohort||!allowed.count(m.sender)||m.sender==io.self())throw std::runtime_error("Peer not allowed");++received;
    if(role==Role::Host){
     if(m.kind=="hello"&&m.cookie){joined[m.sender]=now;Message reply;reply.kind="welcome";reply.room=hostRoom;reply.cookie=m.cookie;send(m.sender,reply);}
     else if(m.kind=="clock"&&m.room==hostRoom&&joined.count(m.sender)){joined[m.sender]=now;Message reply;reply.kind="pong";reply.room=hostRoom;reply.cookie=m.cookie;reply.t0=m.t0;reply.t1=reply.t2=now;send(m.sender,reply);}
@@ -35,7 +35,8 @@ public:
    if(room&&receivedAt>=0)status=correction(local,now).reason;
   }
  }
- Plan correction(const State& local,int64_t now)const{if(role!=Role::Follower||!room||receivedAt<0){Plan p;p.reason="Waiting for host handshake and playback";return p;}return plan(local,latest,clock,now,receivedAt);}
+ Plan correction(const State& local,int64_t now,int threshold=350)const{if(role!=Role::Follower||!room||receivedAt<0){Plan p;p.reason="Waiting for host handshake and playback";return p;}return plan(local,latest,clock,now,receivedAt,threshold);}
+ const Message* remote(int64_t now)const{return role==Role::Follower&&room&&receivedAt>=0&&now>=receivedAt&&now-receivedAt<=3000&&clock.fresh(now)&&!latest.track.title.empty()&&latest.track.duration>0?&latest:nullptr;}
  const Clock& timing()const{return clock;}
 };
 }

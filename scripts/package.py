@@ -13,7 +13,7 @@ VERSION = '0.9.5'
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--variant', choices=['native-hud', 'music-platforms', 'netease-native', 'steam-sync', 'combined'], help='Name a preview package separately from stable installs')
+    parser.add_argument('--variant', choices=['native-hud', 'music-platforms', 'netease-native', 'steam-sync', 'combined', 'auto-listening'], help='Name a preview package separately from stable installs')
     parser.add_argument('--output-dir', type=Path, default=ROOT / 'build/packages')
     args = parser.parse_args()
     dll = ROOT / 'build/L4D2DangoMusic.dll'
