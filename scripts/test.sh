@@ -62,3 +62,8 @@ g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc -Ivendor 
 
 g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc -Ivendor tests/menu_visual_test.cpp -o build/menu_visual_test
 ./build/menu_visual_test
+
+g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc -Ivendor tests/steam_progress_test.cpp -o build/steam_progress_test
+./build/steam_progress_test
+g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc -Ivendor tests/lx_control_driver.cpp -o build/lx_control_driver
+python3 tests/test_lx_control_http.py

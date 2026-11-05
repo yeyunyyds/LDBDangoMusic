@@ -14,7 +14,7 @@ int main(){
  auto following=menus::root(base,label,true);check(following.rows.size()==9&&following.rows[6].action==18&&following.rows[8].action==847&&following.rows[0].label.find(u8"实体跟随")!=std::string::npos);
  auto display=menus::display(base);check(display.rows[1].action==31&&display.rows[2].action==16&&display.rows[2].label==u8"同步偏移: [500ms]");
  for(auto doc:{menus::root(base,label),menus::display(base),menus::world(base),menus::metadata(base),menus::colors(base),menus::animation(base),menus::timing(base),menus::more(),menus::wall(base,"active"),menus::wallAppearance(base),menus::palette(base,false),menus::palette(base,true),menus::channels(base,false)})check(doc.rows.size()<=9);
- check(menus::more().rows.back().action==870&&menus::more().rows[2].action==810);
+ check(menus::more().rows[4].action==870&&menus::more().rows[2].action==810&&menus::more().rows.back().action==9600);
  for(auto id:{35,36,37,38,39,40,41,720,721,722,723,730,741,800,810,811,812,813,814,815,816,818,819,870,871,872,873,874,875,879,890,891,892})check(hud::opensChild(id));
  current.translation=true;check(menus::saveLabel(current,base,false,false)==u8"保存设置: [未保存]");
  auto firstRequest=current;current.offset=600;

@@ -14,3 +14,6 @@ mkdir -p build
 "$compiler" -std=c++17 -O2 -Isrc tests/gnome_follow_test.cpp -static -o build/gnome_follow_test.exe
 "$compiler" -std=c++17 -O2 -Ivendor -Isrc tests/entity_auto_motion_test.cpp -static -o build/entity_auto_motion_test.exe
 "$compiler" -std=c++17 -O2 -Ivendor -Isrc tests/menu_visual_test.cpp -static -o build/menu_visual_test.exe
+
+"$compiler" -std=c++17 -O2 -Ivendor -Isrc tests/steam_abi_test.cpp -static -o build/steam_abi_test.exe
+"$compiler" -std=c++17 -O2 -Ivendor -Isrc tests/steam_progress_test.cpp -static -o build/steam_progress_test.exe

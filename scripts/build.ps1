@@ -42,3 +42,12 @@ if ($LASTEXITCODE -ne 0) { throw 'Entity auto/motion tests failed' }
 if ($LASTEXITCODE -ne 0) { throw 'Menu visual build failed' }
 & ./build/menu_visual_test.exe
 if ($LASTEXITCODE -ne 0) { throw 'Menu visual tests failed' }
+
+& cl.exe /nologo /std:c++17 /EHsc /utf-8 /W4 /Ivendor /Isrc tests/steam_abi_test.cpp /Fobuild/steam_abi_test.obj /Febuild/steam_abi_test.exe
+if ($LASTEXITCODE -ne 0) { throw 'Steam ABI mock build failed' }
+& ./build/steam_abi_test.exe
+if ($LASTEXITCODE -ne 0) { throw 'Steam ABI mock failed' }
+& cl.exe /nologo /std:c++17 /EHsc /utf-8 /W4 /Ivendor /Isrc tests/steam_progress_test.cpp /Fobuild/steam_progress_test.obj /Febuild/steam_progress_test.exe
+if ($LASTEXITCODE -ne 0) { throw 'Progress protocol build failed' }
+& ./build/steam_progress_test.exe
+if ($LASTEXITCODE -ne 0) { throw 'Progress protocol failed' }
