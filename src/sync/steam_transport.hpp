@@ -42,7 +42,7 @@ class Transport final:public sync::Transport {
  void closePair(){if(!sockets)return;for(auto p:{pairA,pairB})if(p)invoke<bool>(sockets,5,p,0,"Dango local test complete",false);pairA=pairB=0;}
 public:
  explicit Transport(int channel=45631):Channel(channel){if(channel<1024)throw std::runtime_error("Reserve a non-game Steam virtual channel >=1024");}
- std::string binding="Steam unavailable",selfResult="Not run",createResult="Not run",pairResult="Not run";uint64_t dropped=0;
+ std::string binding="Steam unavailable",selfResult="Not run",pairResult="Not run";uint64_t dropped=0;
  ~Transport(){try{closePair();if(networking){for(auto p:permitted)invoke<bool>(networking,5,p,Channel);if(identity&&probeCookie)invoke<bool>(networking,5,identity,Channel);}/* Borrowed game user/pipe are never released by this module. */}catch(...){}}
  void connect(){
   if(networking)return;api=GetModuleHandleW(L"steam_api.dll");if(!api)throw std::runtime_error("Game steam_api.dll not loaded");using HandleFn=int(__cdecl*)();auto gameUser=reinterpret_cast<HandleFn>(GetProcAddress(api,"SteamAPI_GetHSteamUser"));auto gamePipe=reinterpret_cast<HandleFn>(GetProcAddress(api,"SteamAPI_GetHSteamPipe"));if(!gameUser||!gamePipe||!gameUser()||!gamePipe())throw std::runtime_error("Game Steam context not initialized");
@@ -58,10 +58,6 @@ public:
  bool send(Peer to,const std::string& bytes)override{if(!networking||bytes.size()>4096||(!permitted.count(to)&&to!=identity))return false;invoke<bool>(networking,3,to);return invoke<bool>(networking,0,to,static_cast<const void*>(bytes.data()),uint32_t(bytes.size()),2,Channel);}
  bool receive(Packet& p)override{if(inbox.empty())return false;p=std::move(inbox.front());inbox.pop_front();return true;}
  void selfTest(int64_t now){probeCookie=nonce();Message m;m.kind="probe";m.sender=identity;m.cookie=probeCookie;m.t0=now;probeDeadline=now+4000;selfResult=send(identity,encode(m))?"Self Steam P2P sent; awaiting echo":"Self Steam P2P send rejected (not simulated)";if(selfResult.find("rejected")!=std::string::npos)probeDeadline=0;}
- void createLocalTest(){
-  int privatePipe=0,privateUser=0;try{privateUser=invoke<int>(client,3,&privatePipe,1);if(!privateUser||!privatePipe){createResult="CreateLocalUser returned no local user";}else{auto p=getUser(privateUser,privatePipe);auto id=p?userId(api,p):0;bool logged=p&&invoke<bool>(p,1);createResult="CreateLocalUser id="+std::to_string(id)+" loggedOn="+std::to_string(logged)+"; not a new authenticated account";}}
-  catch(const std::exception& e){createResult=e.what();}if(privatePipe&&privatePipe!=pipe){if(privateUser)invoke<void>(client,4,privatePipe,privateUser);invoke<bool>(client,1,privatePipe);}
- }
  void socketPairTest(int64_t now){
   closePair();if(!sockets){pairResult="UNSUPPORTED: SteamNetworkingSockets012 not exposed by game";return;}
   if(!invoke<bool>(sockets,19,&pairA,&pairB,true,static_cast<const void*>(nullptr),static_cast<const void*>(nullptr))||!pairA||!pairB){pairResult="CreateSocketPair failed";closePair();return;}

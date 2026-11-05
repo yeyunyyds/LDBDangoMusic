@@ -17,15 +17,16 @@ public:
  template<class Read,class Http> Status tick(const Settings& cfg,const State& state,int64_t now,Read readStatus,Http http){
   for(auto& r:requests.drain()){
    if(r.action==0){if(commands.size()<16)commands.push_back(std::move(r.command));continue;}
+   if(r.action==2){report.create="BLOCKED: CreateLocalUser is a non-thread-safe server-user API; disabled inside the game";if(log)log("Steam user lifecycle probe blocked before SDK binding");continue;}
    if(r.action==5){try{report.simulated=virtualPlayersTest();}catch(const std::exception& e){report.simulated=e.what();}if(log)log(report.simulated);continue;}
-   try{ensure(now);if(r.action==1)transport->selfTest(now);if(r.action==2)transport->createLocalTest();if(r.action==3)transport->socketPairTest(now);if(log)log("Steam diagnostic action="+std::to_string(r.action));}catch(const std::exception& e){report.network=e.what();if(log)log("Steam diagnostic: "+report.network);}
+   try{if(log)log("Steam diagnostic begin action="+std::to_string(r.action));ensure(now);if(r.action==1)transport->selfTest(now);if(r.action==3)transport->socketPairTest(now);if(log)log("Steam diagnostic action="+std::to_string(r.action));}catch(const std::exception& e){report.network=e.what();if(log)log("Steam diagnostic: "+report.network);}
   }
   auto observed=executor.observe(state,now);if(observed.id&&!observed.message.empty()){report.control=observed.message;if(log)log("LX callback id="+std::to_string(observed.id)+" verified="+std::to_string(observed.verified)+" "+observed.message);}
   try{
    if(cfg.role)ensure(now);
    if(transport){auto next=std::to_string(cfg.role)+"/"+std::to_string(cfg.host);for(auto p:cfg.peers)next+="/"+std::to_string(p);
     if(signature!=next){session.reset();transport->allow(cfg.role?cfg.peers:std::set<Peer>{});signature=next;if(cfg.role){session=std::make_unique<Session>(*transport,cfg.role==1?Role::Host:Role::Follower,cfg.peers,cfg.host,steam::nonce());}nextCorrection=0;}
-    transport->pump(now);report.identity=transport->self();if(log&&report.self!=transport->selfResult)log("Steam self test: "+transport->selfResult);if(log&&report.create!=transport->createResult)log("Steam CreateLocalUser: "+transport->createResult);if(log&&report.pair!=transport->pairResult)log("Steam CreateSocketPair: "+transport->pairResult);report.self=transport->selfResult;report.create=transport->createResult;report.pair=transport->pairResult;report.network=transport->binding;
+    transport->pump(now);report.identity=transport->self();if(log&&report.self!=transport->selfResult)log("Steam self test: "+transport->selfResult);if(log&&report.pair!=transport->pairResult)log("Steam CreateSocketPair: "+transport->pairResult);report.self=transport->selfResult;report.pair=transport->pairResult;report.network=transport->binding;
    }
    if(session){session->tick(state,now);report.network=session->status+" sendFailures="+std::to_string(session->sendFailures);report.sent=session->sent;report.received=session->received;report.rejected=session->rejected;report.rtt=session->timing().rtt;
     auto decision=session->correction(state,now);report.drift=decision.drift;report.progress=cfg.role==1?"Publishing local playback; no remote controls on host":decision.reason+(cfg.apply?"; APPLY":"; DRY RUN");

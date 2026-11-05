@@ -67,3 +67,5 @@ g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc -Ivendor 
 ./build/steam_progress_test
 g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc -Ivendor tests/lx_control_driver.cpp -o build/lx_control_driver
 python3 tests/test_lx_control_http.py
+
+python3 tests/test_steam_lifecycle_boundary.py

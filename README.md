@@ -1,6 +1,6 @@
 # L4D2DangoMusic
 
-此分支独立实验 LX 反向控制与 Steam 歌曲进度同步，基于正式版 v0.9.5；不包含网易云适配实验。使用、配置、单人 Steam 测试及模块 API 见 [同步实验指南](docs/sync/README.md)。正式 Release 不变。[下载实验安装包](https://github.com/yeyunyyds/LDBDangoMusic/raw/refs/heads/zip/L4D2DangoMusic-0.9.5-steam-sync.zip)。
+此分支独立实验 LX 反向控制与 Steam 歌曲进度同步，基于正式版 v0.9.5；不包含网易云适配实验。使用、配置、单人 Steam 测试及模块 API 见 [同步实验指南](docs/sync/README.md)。正式 Release 不变。[下载实验安装包](https://github.com/yeyunyyds/LDBDangoMusic/raw/refs/heads/zip/L4D2DangoMusic-0.9.5-steam-sync-fix1.zip)。
 
 > 当前正式版：[v0.9.5](https://github.com/yeyunyyds/LDBDangoMusic/releases/tag/v0.9.5)。提供普通世界/屏幕歌词、场景挂画，以及可选的手动/自动实体跟随；支持平滑移动、原生 HUD 菜单和可选彩色效果。
 
