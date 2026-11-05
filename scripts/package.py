@@ -8,7 +8,7 @@ from pathlib import Path
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = '0.9.5'
+VERSION = '0.9.6'
 
 
 def main():
@@ -28,6 +28,11 @@ def main():
     native = args.variant != 'music-platforms'
     template = 'README-combined.md' if args.variant != 'music-platforms' else 'README.md'
     readme = (ROOT / 'packaging' / template).read_text(encoding='utf-8').replace('@VERSION@', VERSION).replace('@SOURCE_URL@', source_url)
+    disclaimer = (ROOT / 'DISCLAIMER.md').read_text(encoding='utf-8')
+    if '@DISCLAIMER@' in readme:
+        readme = readme.replace('@DISCLAIMER@', disclaimer)
+    else:
+        readme += '\n\n' + disclaimer
     notices = [('项目及参考代码声明', 'NOTICE.md'), ('GPL-3.0 许可全文', 'LICENSE'), ('nlohmann/json MIT 许可', 'vendor/JSON-LICENSE.MIT'), ('Bridge 原生菜单 MIT 许可', 'vendor/BRIDGE-LICENSE.MIT'), ('Dear ImGui MIT 许可', 'vendor/imgui/LICENSE.txt'), ('Desktop Lyric MIT 许可', 'vendor/DESKTOP-LYRIC-LICENSE.MIT'), ('网易云 elog 参考代码 MIT 许可', 'vendor/NETEASE-ELOG-LICENSE.MIT')]
     if not native:
         notices += [('.NET Runtime 许可', 'vendor/DOTNET-RUNTIME-LICENSE.txt'), ('.NET 第三方声明', 'vendor/DOTNET-RUNTIME-NOTICES.txt')]

@@ -1,12 +1,20 @@
 # L4D2DangoMusic
 
-此实验分支合并 LX 控制、Steam 进度同步和已验证的网易云原生通道。一起听仅限 LX；网易云独立显示歌词，不发布或应用进度。默认包为单 DLL，无需 .NET。[下载合并测试包](https://github.com/yeyunyyds/LDBDangoMusic/raw/refs/heads/zip/L4D2DangoMusic-0.9.5-auto-listening.zip) · [一起听配置与 API](docs/sync/README.md) · [网易云说明](docs/multi-platform-lyrics.md)
-
-> 当前正式版：[v0.9.5](https://github.com/yeyunyyds/LDBDangoMusic/releases/tag/v0.9.5)。提供普通世界/屏幕歌词、场景挂画，以及可选的手动/自动实体跟随；支持平滑移动、原生 HUD 菜单和可选彩色效果。
+> 当前正式版：[v0.9.6](https://github.com/yeyunyyds/LDBDangoMusic/releases/tag/v0.9.6)。提供普通世界/屏幕歌词、场景挂画，以及可选的手动/自动实体跟随；支持平滑移动、原生 HUD 菜单和可选彩色效果。
 
 为《求生之路 2》（Left 4 Dead 2）提供音乐歌词显示的 L4N 插件。通过兼容 LX / BLF 的本地音乐 API 获取播放进度和歌词，在游戏中呈现带逐字动画的歌词，并支持世界空间定位、歌名与作者显示以及游戏内调节。
 
-插件由 L4N 加载，在 **32 位游戏进程**中直接读取 Source Engine 相机信息并使用 D3D9 绘制。运行依赖为 L4N 和音乐播放器的本地 API，不需要 LDB 或 DXVK。
+支持 LX 本地 API 与网易云原生歌词；一起听仅支持 LX。默认安装包为单 DLL，无需 .NET。[一起听使用指南](docs/sync/README.md) · [网易云通道说明](docs/multi-platform-lyrics.md)
+
+插件由 L4N 加载，在 **32 位游戏进程**中直接读取 Source Engine 相机信息并使用 D3D9 绘制。运行依赖为 L4N 和受支持的音乐播放器，不需要 LDB 或 DXVK。
+
+## 免责声明与联机风险
+
+**联机功能未测试：本版本的 Steam P2P 一起听、自动发现玩家、自动分配房主及自动切歌，尚未经过真实多账号联机实测。** 已完成的静态检查、协议模拟、编译及单机自指/本地通道验证，不代表真实联机功能已经验证，也不保证连接成功、同步准确或运行稳定。可能发生同步错误、播放被中断、游戏无响应或崩溃。一起听默认关闭，请自行决定是否启用。
+
+**不保证 VAC 安全：本项目没有获得 Valve、Steam 或 VAC 的官方认可、安全认证或反作弊兼容保证。** 插件在游戏进程中运行并使用游戏及 Steam 接口，无法保证不会触发 VAC、服务器或其他第三方反作弊检测，也无法保证不会导致踢出、限制或账号封禁。单机测试成功、他人正常使用或发布为正式版，均不构成 VAC 安全证明。
+
+本软件按“现状”提供，不对适用性、稳定性、数据安全或反作弊兼容性作出保证。使用者应自行了解并遵守平台和服务器规则，评估并承担使用风险。在适用法律允许的范围内，项目开发者与贡献者不对使用本软件导致的账号处罚、数据丢失或其他损失承担责任；本声明不排除法律规定不得排除的责任。
 
 ## 功能
 
@@ -21,8 +29,10 @@
 - 实体平滑默认开启，可选全局换句移动与多种曲线，实体字幕和普通歌词的退场规则相互独立。
 - 通过 L4N 菜单实时设置，支持固定内容预览、动画预览、位置重置与配置保存。
 - 支持暂停、恢复播放、换歌及播放器断开后的重新同步。
+- 原生获取网易云当前歌曲及歌词；来源菜单仅显示自动、LX 和网易云。
+- 可选 LX 一起听：同局最多三名玩家自动发现、自动选主、手动声明房主、Scheme 搜索切歌及进度同步。联机功能未实测，默认关闭。
 
-本插件负责显示歌词，不播放音乐，也不提供音乐资源。
+本插件显示歌词；可选一起听通过本机 LX 控制播放、暂停、跳转与搜索选曲。音乐由用户自己的播放器获取和播放，插件不提供或转发音频资源。
 
 ## 运行要求
 
@@ -36,7 +46,7 @@
 
 ## 安装
 
-[下载 L4D2DangoMusic v0.9.5](https://github.com/yeyunyyds/LDBDangoMusic/releases/download/v0.9.5/L4D2DangoMusic-0.9.5-l4n.zip) · [Release 说明](https://github.com/yeyunyyds/LDBDangoMusic/releases/tag/v0.9.5)
+[下载 L4D2DangoMusic v0.9.6](https://github.com/yeyunyyds/LDBDangoMusic/releases/download/v0.9.6/L4D2DangoMusic-0.9.6-l4n.zip) · [Release 说明](https://github.com/yeyunyyds/LDBDangoMusic/releases/tag/v0.9.6)
 
 安装压缩包内仅包含 **bin 文件夹和 README.md**，不附带源码、构建工具、测试程序或额外依赖。
 
@@ -57,6 +67,10 @@ bin/neko/plugins/L4D2DangoMusic/config.json
 从源码构建的用户仍可使用 `scripts/install.ps1 -GameRoot "游戏根目录"` 安装；运行目录为源码根目录。安装包用户直接复制 `bin` 即可。
 
 请只保留一份启用的歌词插件。旧的 `LDBDangoMusic.dll` 和改名副本应移出加载目录，否则可能出现两份歌词或菜单分别控制不同副本的情况。
+
+## 一起听
+
+两端安装同版本插件、开启 LX OpenAPI，加入同一游戏后，在“更多设置 → 一起听与播放控制”确认同局发现，再各自开启一起听。可选择“我来当房主”，跟随端使用 LX 官方 Scheme 搜索房主歌曲，实际曲目匹配后才同步进度。网易云不参与一起听。详见[使用指南](docs/sync/README.md)及上方免责声明。
 
 ## 使用与设置
 

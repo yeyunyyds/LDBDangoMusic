@@ -1,10 +1,12 @@
-# 自动发现与 LX 一起听实验
+# 自动发现与 LX 一起听
 
-分支：`experiment/steam-progress-sync`，基于正式版 v0.9.5，已合入网易云原生歌词。当前不改变正式 Release。
+自正式版 v0.9.6 起提供，合入网易云原生歌词；联机功能仍未经过真实多账号实测，不保证 VAC 安全。请先阅读[免责声明](../../DISCLAIMER.md)。
+
+开发分支：`experiment/steam-progress-sync`；正式源码：`main`。
 
 ## 使用
 
-见[安装包说明](../../packaging/README-combined.md)。菜单“更多设置 → 一起听与播放控制”提供 LX 控制、一起听、同局发现和 Steam 测试。两端更新同一测试包，开启 LX OpenAPI，加入同一局，开启一起听即可；无需填写 SteamID。
+见[安装包说明](../../packaging/README-combined.md)。菜单“更多设置 → 一起听与播放控制”提供 LX 控制、一起听、同局发现和 Steam 测试。两端更新同一版本，开启 LX OpenAPI，加入同一局，开启一起听即可；无需填写 SteamID。
 
 音乐来源仅显示自动、LX、网易云。网易云原生通道只显示歌词；一起听、搜索和反向控制严格限于当前实际使用的 LX。切换来源会取消未发送的旧控制；返回 LX 后重新握手和校时。
 
