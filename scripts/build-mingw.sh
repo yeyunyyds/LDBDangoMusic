@@ -28,3 +28,5 @@ if [[ "${DANGO_DIAGNOSTICS:-0}" == 1 ]]; then exit 0; fi
 "$compiler" -std=c++17 -O2 -Ivendor -Isrc tests/netease_elog_test.cpp -static -o build/netease_elog_test.exe
 
 "$compiler" -std=c++17 -O2 -Ivendor -Isrc tests/auto_listening_test.cpp -static -o build/auto_listening_test.exe
+
+"$compiler" -std=c++17 -O2 -Ivendor -Isrc tests/visual_presets_test.cpp -static -o build/visual_presets_test.exe

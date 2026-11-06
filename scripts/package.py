@@ -8,12 +8,12 @@ from pathlib import Path
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = '0.9.7'
+VERSION = '0.9.8-preview1'
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--variant', choices=['native-hud', 'music-platforms', 'netease-native', 'steam-sync', 'combined', 'auto-listening', 'diagnostics'], help='Name a preview package separately from stable installs')
+    parser.add_argument('--variant', choices=['native-hud', 'music-platforms', 'netease-native', 'steam-sync', 'combined', 'auto-listening', 'diagnostics', 'visual-preview'], help='Name a preview package separately from stable installs')
     parser.add_argument('--output-dir', type=Path, default=ROOT / 'build/packages')
     args = parser.parse_args()
     dll = ROOT / ('build/diagnostics/L4D2DangoMusic.dll' if args.variant == 'diagnostics' else 'build/L4D2DangoMusic.dll')
@@ -31,7 +31,7 @@ def main():
     commit = subprocess.check_output(['git', 'rev-parse', '--verify', 'HEAD^{commit}'], cwd=ROOT, text=True).strip()
     source_url = f'https://github.com/yeyunyyds/LDBDangoMusic/tree/{commit}'
     native = args.variant != 'music-platforms'
-    template = 'README-combined.md' if args.variant != 'music-platforms' else 'README.md'
+    template = 'README-visual-preview.md' if args.variant == 'visual-preview' else ('README-combined.md' if args.variant != 'music-platforms' else 'README.md')
     readme = (ROOT / 'packaging' / template).read_text(encoding='utf-8').replace('@VERSION@', VERSION).replace('@SOURCE_URL@', source_url)
     if args.variant == 'diagnostics':
         readme = '# 独立诊断构建，仅用于手动排查\n\n包含 Steam/LX/相机/实体诊断，勿与正式 DLL 同时加载。所有网络诊断也须先主动开启一起听总开关；此包不是正式安装包。\n\n' + readme

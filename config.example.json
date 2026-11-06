@@ -172,5 +172,29 @@
   "wallIndependentTiming": false,
   "colorEffect": 0,
   "colorSpeed": 0.2,
-  "colorAmount": 1
+  "colorAmount": 1,
+  "visualStyle": {
+    "bob": false,
+    "bobAmount": 0.006000000052154064,
+    "bobPeriod": 4.0,
+    "dynamicGlow": false,
+    "exit": 0,
+    "highlight": "#FFFFFF",
+    "metadataSize": 1.0,
+    "originalOpacity": 1.0,
+    "pending": 0.44999998807907104,
+    "popStrength": 1.0,
+    "smoothMs": 180,
+    "smoothScale": false,
+    "softEntrance": false,
+    "sung": 0.8500000238418579,
+    "tone": false,
+    "translationColor": "#F7E1D7",
+    "translationFollow": true,
+    "translationGap": 8.0,
+    "translationOpacity": 1.0,
+    "translationSize": 0.7200000286102295,
+    "wallEffects": false
+  },
+  "visualPresets": []
 }

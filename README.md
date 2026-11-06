@@ -1,5 +1,7 @@
 # L4D2DangoMusic
 
+> 视觉测试分支：**0.9.8-preview1**。新增七套预设、八个自定义槽位、分项应用、原文／翻译样式、逐字明暗、动态柔光与可选退场／尺寸平滑。[下载视觉测试包](https://github.com/yeyunyyds/LDBDangoMusic/raw/refs/heads/zip/L4D2DangoMusic-0.9.8-preview1-visual-preview.zip) · [使用说明](docs/visual-presets-preview.md)
+
 > 当前正式版：[v0.9.7](https://github.com/yeyunyyds/LDBDangoMusic/releases/tag/v0.9.7)。提供普通世界/屏幕歌词、场景挂画，以及可选的手动/自动实体跟随；支持平滑移动、原生 HUD 菜单和可选彩色效果。
 
 为《求生之路 2》（Left 4 Dead 2）提供音乐歌词显示的 L4N 插件。通过兼容 LX / BLF 的本地音乐 API 获取播放进度和歌词，在游戏中呈现带逐字动画的歌词，并支持世界空间定位、歌名与作者显示以及游戏内调节。

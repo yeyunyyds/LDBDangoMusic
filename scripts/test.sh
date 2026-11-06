@@ -81,3 +81,7 @@ g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc -Ivendor 
 
 g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Itests -Isrc -Ivendor tests/network_isolation_test.cpp -o build/network_isolation_test
 ./build/network_isolation_test
+
+g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc -Ivendor tests/visual_presets_test.cpp -o build/visual_presets_test
+./build/visual_presets_test
+python3 tests/test_visual_presets.py

@@ -6,6 +6,7 @@
 #include "wall_layout.hpp"
 #include "entity_auto_settings.hpp"
 #include "color_effects.hpp"
+#include "visual_style.hpp"
 #include "sync/settings.hpp"
 #include <string>
 #include <stdexcept>
@@ -14,6 +15,7 @@
 #include <cmath>
 namespace dango {
 struct Config {
+ visual::Style visual; nlohmann::json visualPresets=nlohmann::json::array();
  sync::Settings sync;
  uint64_t playbackSourceRevision=1;
  int musicSource=0;
@@ -47,6 +49,8 @@ inline Config decodeConfig(const nlohmann::json& j){
  auto integer=[&](const char* key,int value,int lo,int hi){return std::clamp(j.value(key,value),lo,hi);};
  auto number=[&](const char* key,float value,float lo,float hi){float n=j.value(key,value);if(!std::isfinite(n))throw std::runtime_error("Non-finite setting");return std::clamp(n,lo,hi);};
  if(!build::diagnostics)c.cameraDiagnostics=c.debugOverlay=c.worldTestAnchor=c.wallDebug=false;
+ if(j.contains("visualStyle"))c.visual=visual::read(j.at("visualStyle"));
+ if(j.contains("visualPresets")){auto slots=j.at("visualPresets");if(!slots.is_array()||slots.size()>8||slots.dump().size()>65536)throw std::runtime_error("Invalid visual preset slots");for(auto& slot:slots)if(!slot.is_null()&&(!slot.is_object()||slot.value("schema",0)!=1||!slot.contains("settings")||!slot.at("settings").is_object()||slot.value("name",std::string{}).size()>64))throw std::runtime_error("Invalid saved visual preset");c.visualPresets=slots;}
  if(j.contains("steamSync"))c.sync=sync::readSettings(j["steamSync"]);
  if(j.contains("autoFollow"))c.autoFollow=readAutoFollow(j["autoFollow"]);c.moveCurve=integer("moveCurve",0,0,4);c.moveMs=integer("moveMs",350,100,2000);
  c.musicSource=integer("musicSource",0,0,7);if(c.musicSource!=0&&c.musicSource!=1&&c.musicSource!=3)c.musicSource=0;
@@ -63,7 +67,7 @@ inline Config decodeConfig(const nlohmann::json& j){
  c.textColor=parseColor(j.value("textColor",std::string("#F7E1D7")));c.accent=parseColor(j.value("accentColor",std::string("#F7E1D7")));return c;
 }
 inline nlohmann::json encodeConfig(const Config& c){return {{"steamSync",sync::settingsJson(c.sync)},{"musicSource",c.musicSource},
- {"colorEffect",c.colorEffect},{"colorSpeed",c.colorSpeed},{"colorAmount",c.colorAmount},
+ {"visualStyle",visual::json(c.visual)},{"visualPresets",c.visualPresets},{"colorEffect",c.colorEffect},{"colorSpeed",c.colorSpeed},{"colorAmount",c.colorAmount},
  {"autoFollow",autoFollowJson(c.autoFollow)},{"entitySmooth",c.entitySmooth},{"lyricMove",c.lyricMove},{"moveCurve",c.moveCurve},{"moveMs",c.moveMs},{"wallIndependentTiming",c.wallIndependentTiming},
  {"wallFloorFollow",c.wallFloorFollow},{"wallReuse",c.wallReuse},{"wallSurface",c.wallSurface},{"wallLayout",wallLayoutJson(c.wallLayout)},
  {"hudAppearance",{{"preset",c.hud.preset},{"step",c.hud.step},{"opacity",c.hud.opacity},{"font",c.hud.font},{"x",c.hud.x},{"y",c.hud.y},{"centerY",c.hud.centerY},{"f10",c.hud.f10}}},{"wallFallback",c.wallFallback},{"wallEnabled",c.wallEnabled},{"wallAutomatic",c.wallAutomatic},{"wallLiveLyrics",c.wallLiveLyrics},{"wallSize",c.wallSize},{"wallCapacity",c.wallCapacity},{"wallLingerMs",c.wallLingerMs},{"wallFadeMs",c.wallFadeMs},{"wallRange",c.wallRange},{"wallSpacing",c.wallSpacing},{"fallbackReveal",c.fallbackReveal},{"wallBackdrop",c.wallBackdrop},{"wallDebug",c.wallDebug},{"progressiveReveal",c.progressiveReveal},{"reuseVisibleAnchor",c.reuseVisibleAnchor},{"reuseDistanceFactor",c.reuseDistanceFactor},{"lineWidthScale",c.lineWidthScale},{"defaultsVersion",2},{"layout",layoutJson(c.layout)},{"enabled",c.enabled},{"port",c.port},{"fontSize",c.size},{"worldLyrics",c.worldLyrics},{"worldTestAnchor",c.worldTestAnchor},{"worldDistance",c.worldDistance},{"worldSide",c.worldSide},{"worldHeight",c.worldHeight},{"cameraDiagnostics",c.cameraDiagnostics},{"demo",c.demo},{"translation",c.translation},{"alternate",c.alternate},{"verticalPosition",c.y},{"offsetMs",c.offset},{"outline",c.outline},{"glow",c.glow},{"glowStrength",c.glowStrength},{"glowRadius",c.glowRadius},{"opacity",c.opacity},{"maxWidth",c.width},{"transitionMs",c.transition},{"lingerMs",c.lingerMs},{"reanchorMs",c.reanchorMs},{"animationSpeed",c.animationSpeed},{"pop",c.pop},{"wiggle",c.wiggle},{"wiggleFrequency",c.wiggleFrequency},{"wiggleAmount",c.wiggleAmount},{"spreadDegrees",c.spread},{"keepAway",c.keepAway},{"debugOverlay",c.debugOverlay},{"textColor",colorText(c.textColor)},{"accentColor",colorText(c.accent)},{"showTitle",c.showTitle},{"showArtist",c.showArtist},{"presetId",c.presetId},{"displayMode","peak"}};}

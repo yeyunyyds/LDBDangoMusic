@@ -1,6 +1,7 @@
 #pragma once
 #include "build_features.hpp"
 #include "lyrics_settings.hpp"
+#include "visual_presets.hpp"
 #include "media_protocol.hpp"
 #include "native_menu_model.hpp"
 #include "render_lifecycle.hpp"
@@ -13,14 +14,14 @@ inline std::string saveLabel(const Config& current,const Config& saved,bool savi
  bool dirty=!hasSaved||encodeConfig(current)!=encodeConfig(saved);
  return value(u8"保存设置",dirty?u8"未保存":saving?u8"保存中":u8"已保存")+(saving&&dirty?u8" · 保存中":failed?u8" · 保存失败，见日志":"");
 }
-inline hud::Document root(const Config& c,const std::string& save,bool following=false){hud::Document doc{"L4D2DangoMusic 0.9.7",{
+inline hud::Document root(const Config& c,const std::string& save,bool following=false){hud::Document doc{"L4D2DangoMusic 0.9.8-preview1",{
  {value(u8"歌词显示",std::string(on(c.enabled))+(following?u8" · 实体跟随":"")),1},{u8"显示与歌词信息",20},{u8"位置与数量（固定预览）",23},
- {value(u8"歌词颜色",colorPresetLabel(c)),21},{u8"动画、速度与停留",22},{value(u8"场景挂画",on(c.wallEnabled)),30},
+ {value(u8"歌词颜色",visual::paletteLabel(c)),21},{u8"动画、速度与停留",22},{value(u8"场景挂画",on(c.wallEnabled)),30},
  {save,18},{u8"更多设置",35}}};if(following)doc.rows.push_back({u8"返回普通歌词（关闭实体跟随）",847});return doc;}
 inline hud::Document display(const Config& c){return {u8"显示与歌词信息",{
  {value(u8"翻译",on(c.translation)),2},{value(u8"单行长度",number(c.lineWidthScale)+"x"),31},
  {value(u8"同步偏移",std::to_string(c.offset)+"ms"),16},{value(u8"世界歌词",on(c.worldLyrics)),7},
- {u8"世界位置与回归",36},{u8"歌名与作者",37},{value(u8"音乐来源",media::sourceName(c.musicSource)),9500}}};}
+ {u8"世界位置与回归",36},{u8"歌名与作者",37},{value(u8"音乐来源",media::sourceName(c.musicSource)),9500},{u8"原文与翻译样式",1370}}};}
 inline hud::Document world(const Config& c){return {u8"世界位置与回归",{
  {value(u8"换句沿用视野内原位置",on(c.reuseVisibleAnchor)),29},
  {value(u8"复用距离上限",number(c.reuseDistanceFactor)+u8" × 配置距离"),33},
@@ -30,8 +31,8 @@ inline hud::Document metadata(const Config& c){return {u8"歌名与作者",{
  {value(u8"显示歌名",on(c.showTitle)),5},{value(u8"显示作者",on(c.showArtist)),6},
  {u8"歌名位置（固定预览）",2100},{u8"作者位置（固定预览）",2101}}};}
 inline hud::Document colors(const Config& c){return {u8"歌词颜色",{
- {value(u8"颜色预设",colorPresetLabel(c)),10},{value(u8"正文颜色",colorText(c.textColor)),11},
- {value(u8"光晕颜色",colorText(c.accent)),12},{value(u8"柔光",on(c.glow)),8},{u8"彩色、混色与渐变",890}}};}
+ {value(u8"颜色预设",visual::paletteLabel(c)),10},{value(u8"正文颜色",colorText(c.textColor)),11},
+ {value(u8"光晕颜色",colorText(c.accent)),12},{value(u8"柔光",on(c.glow)),8},{u8"彩色、混色与渐变",890},{u8"七套视觉预设与自定义收藏",1300},{u8"原文与翻译样式",1370},{u8"逐字明暗与动态柔光",1380}}};}
 inline hud::Document palette(const Config& c,bool accent){
  const char* names[]={u8"暖白",u8"纯白",u8"樱花粉",u8"冰蓝",u8"金色",u8"薄荷绿",u8"淡紫",u8"橘红"};
  hud::Document doc{value(accent?u8"光晕颜色":u8"正文颜色",colorText(accent?c.accent:c.textColor)),{}};
@@ -46,7 +47,7 @@ inline hud::Document animation(const Config& c){return {u8"动画、速度与停
  {u8"停留与退场",38},{u8"恢复默认动画（抖动＋弹跳）",26},{u8"动画预览（示例歌词）",27},{u8"歌词移动与实体平滑",819}}};}
 inline hud::Document timing(const Config& c){return {u8"停留与退场",{
  {value(u8"换句后额外停留",std::to_string(c.lingerMs)+"ms"),15},
- {value(u8"退场耗时",std::to_string(c.transition)+"ms"),14}}};}
+ {value(u8"退场耗时",std::to_string(c.transition)+"ms"),14},{value(u8"退场外观",visual::exitName(c.visual.exit)),1390},{u8"整句悬浮与入场幅度",1395}}};}
 inline hud::Document more(){hud::Document doc{u8"更多设置",{{u8"菜单外观",9000},{u8"版本与路径",24},{u8"实体持续跟随歌词",810},{u8"自动实体追踪（永久规则）",870},{u8"一起听（实验，默认关闭）",9600}}};
 #if DANGO_DIAGNOSTICS
  doc.rows.push_back({u8"实体接口只读诊断",800});

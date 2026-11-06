@@ -75,3 +75,8 @@ if ($LASTEXITCODE -ne 0) { throw "Auto listening tests failed" }
 if ($LASTEXITCODE -ne 0) { throw "Network isolation test build failed" }
 & ./build/network_isolation_test.exe
 if ($LASTEXITCODE -ne 0) { throw "Network isolation test failed" }
+
+& cl.exe /nologo /std:c++17 /EHsc /utf-8 /W4 /Isrc /Ivendor tests/visual_presets_test.cpp /Fobuild/visual_presets_test.obj /Febuild/visual_presets_test.exe
+if ($LASTEXITCODE -ne 0) { throw "Visual presets tests build failed" }
+& ./build/visual_presets_test.exe
+if ($LASTEXITCODE -ne 0) { throw "Visual presets tests failed" }

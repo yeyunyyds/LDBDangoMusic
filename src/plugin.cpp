@@ -27,6 +27,8 @@ extern "C" __declspec(dllexport) const char DangoBuildFlavor[]="DANGO_PRODUCTION
 #include "present_target.hpp"
 #include "presentation.hpp"
 #include "peak_style.hpp"
+#include "visual_effects.hpp"
+#include "visual_presets.hpp"
 #include "lyrics_settings.hpp"
 #include "render_lifecycle.hpp"
 #include "lyric_lifecycle.hpp"
@@ -116,7 +118,7 @@ bool checked(HRESULT hr,unsigned stage,const char* operation){if(SUCCEEDED(hr))r
 void publish(State s){auto old=std::atomic_load(&snapshot);if(old->connected!=s.connected||old->playing!=s.playing||old->generation!=s.generation||old->message!=s.message)note("Player state connected="+std::to_string(s.connected)+" playing="+std::to_string(s.playing)+" generation="+std::to_string(s.generation)+" position_ms="+std::to_string(s.position)+" timeline_lines="+std::to_string(s.timeline.size())+" message="+s.message);std::atomic_store(&snapshot,std::make_shared<const State>(std::move(s)));}
 struct Internet {HINTERNET h; explicit Internet(HINTERNET v):h(v){if(!h)throw std::runtime_error("WinHTTP handle failed");}~Internet(){WinHttpCloseHandle(h);}Internet(const Internet&)=delete;};
 std::string httpGetRaw(const wchar_t* path,size_t limit){
- Internet session(WinHttpOpen(L"L4D2DangoMusic/0.9.7",WINHTTP_ACCESS_TYPE_NO_PROXY,WINHTTP_NO_PROXY_NAME,WINHTTP_NO_PROXY_BYPASS,0));
+ Internet session(WinHttpOpen(L"L4D2DangoMusic/0.9.8-preview1",WINHTTP_ACCESS_TYPE_NO_PROXY,WINHTTP_NO_PROXY_NAME,WINHTTP_NO_PROXY_BYPASS,0));
  WinHttpSetTimeouts(session.h,500,500,500,500);
  Internet connection(WinHttpConnect(session.h,L"127.0.0.1",static_cast<INTERNET_PORT>(cfg.port),0));
  Internet request(WinHttpOpenRequest(connection.h,L"GET",path,nullptr,WINHTTP_NO_REFERER,WINHTTP_DEFAULT_ACCEPT_TYPES,0));
@@ -180,14 +182,14 @@ Image image(IDirect3DDevice9* dev,const std::string& text){auto it=cache.find(te
 struct Vertex{float x,y,z,rhw;DWORD color;float u,v;};
 void draw(IDirect3DDevice9* dev,Image im,float x,float y,float scale,float alpha,DWORD tint=0xffffff,float rotation=0){if(!im.texture||alpha<=0)return;float r=x+im.width*scale,b=y+im.height*scale;DWORD color=(DWORD(std::clamp(alpha,0.f,1.f)*255)<<24)|(tint&0xffffff);Vertex v[]={{x-.5f,y-.5f,0,1,color,0,0},{r-.5f,y-.5f,0,1,color,1,0},{x-.5f,b-.5f,0,1,color,0,1},{r-.5f,b-.5f,0,1,color,1,1}};if(rotation!=0){float cx=(x+r)*.5f,cy=(y+b)*.5f;for(auto& point:v){float dx=point.x-cx,dy=point.y-cy;point.x=cx+dx*std::cos(rotation)-dy*std::sin(rotation);point.y=cy+dx*std::sin(rotation)+dy*std::cos(rotation);}}dev->SetTexture(0,im.texture);if(checked(dev->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP,2,v,sizeof(Vertex)),6,"DrawPrimitiveUP")&&!drewPixels){drewPixels=true;note("L4D2DangoMusic first textured draw submitted");}}
 uint32_t lyricTint(size_t index,size_t count,double clock){return chroma::sample(cfg.textColor,cfg.accent,cfg.colorEffect,count>1?float(index)/float(count-1):.5f,clock,cfg.colorSpeed,cfg.colorAmount);}
-void styled(IDirect3DDevice9* dev,Image im,float x,float y,float scale,float alpha,DWORD color,float rotation=0){
+void styled(IDirect3DDevice9* dev,Image im,float x,float y,float scale,float alpha,DWORD color,float rotation=0,float glowAmount=1,DWORD haloColor=0xffffffff){
  if(alpha<=.002f||!im.texture)return;
- if(cfg.glow&&cfg.glowStrength>0&&im.halo){auto glow=im;glow.texture=im.halo;draw(dev,glow,x,y,scale,alpha*std::min(1.f,cfg.glowStrength*2),cfg.accent,rotation);}
+ if(cfg.glow&&cfg.glowStrength>0&&im.halo){auto glow=im;glow.texture=im.halo;draw(dev,glow,x,y,scale,alpha*std::min(1.f,cfg.glowStrength*2)*glowAmount,haloColor==0xffffffff?cfg.accent:haloColor,rotation);}
  if(cfg.outline){for(auto dx:{-1.f,1.f})for(auto dy:{-1.f,1.f})draw(dev,im,x+dx*scale,y+dy*scale,scale,alpha*.8f,0x101018,rotation);}
  draw(dev,im,x,y,scale,alpha,color,rotation);
 }
 struct PeakEntry {
- uint64_t leaseId=0;Line line;peak::Animation animation,translated;peak::VisibleAnimation motion,translationMotion;peak::Layout layout,translationLayout;int index,slot=0,exitLinger=0,exitFade=1;double born,retired=-1,lastPlaced;movement::Travel travel;bool world=true;uint64_t measureRevision=0;Vec3 anchor;uint32_t epoch;
+ uint64_t leaseId=0;Line line;peak::Animation animation,translated;peak::VisibleAnimation motion,translationMotion;peak::Layout layout,translationLayout;int index,slot=0,exitLinger=0,exitFade=1;double born,retired=-1,lastPlaced;movement::Travel travel;visual::Smooth sizeMotion;bool world=true;uint64_t measureRevision=0;Vec3 anchor;uint32_t epoch;
  PeakEntry(const Line& l,int64_t next,int i,double tick,Vec3 point,uint32_t e):line(l),animation(l,next),translated(peak::translationAnimation(animation,l.translation,next)),motion(animation.glyphs.size()),translationMotion(translated.glyphs.size()),index(i),born(tick),lastPlaced(tick),anchor(point),epoch(e){}
 };
 std::vector<std::unique_ptr<PeakEntry>> worldPeakEntries,entityPeakEntries;float entityWidth=0,entityHeight=0;bool entityWorldMode=true;int peakIndex=-1;bool lastWorldMode=false;float lastWidth=0,lastHeight=0;
@@ -202,7 +204,7 @@ void peakFrame(IDirect3DDevice9* dev,const State& state,int at,int64_t song,bool
  // An attached target is a single subtitle surface: replace its current
  // sentence immediately instead of piling outgoing leases onto the same anchor.
  if(outgoingOnly)lifecycle.expire(clock);else lifecycle.update(state.key,at,text,clock,attached?0:cfg.lingerMs,attached?0:cfg.transition,false,attached?1:cfg.layout.lyricCount,attached!=nullptr);
- Vec3 previousPoint{};bool previousReady=false;for(auto it=peakEntries.rbegin();it!=peakEntries.rend();++it)if((*it)->retired<0){previousPoint=(*it)->travel.active?(*it)->travel.at(clock,cfg.moveMs/1000.f,cfg.moveCurve):(*it)->world?(*it)->anchor:Vec3{cfg.layout.lyrics[(*it)->slot].x,cfg.layout.lyrics[(*it)->slot].y,0};previousReady=true;break;}
+ float previousSize=0;Vec3 previousPoint{};bool previousReady=false;for(auto it=peakEntries.rbegin();it!=peakEntries.rend();++it)if((*it)->retired<0){previousPoint=(*it)->travel.active?(*it)->travel.at(clock,cfg.moveMs/1000.f,cfg.moveCurve):(*it)->world?(*it)->anchor:Vec3{cfg.layout.lyrics[(*it)->slot].x,cfg.layout.lyrics[(*it)->slot].y,0};previousSize=(*it)->sizeMotion.value;previousReady=true;break;}
  peakEntries.erase(std::remove_if(peakEntries.begin(),peakEntries.end(),[&](auto& entry){return std::none_of(lifecycle.entries.begin(),lifecycle.entries.end(),[&](auto& lease){return lease.id==entry->leaseId;});}),peakEntries.end());
  for(auto& lease:lifecycle.entries){auto existing=std::find_if(peakEntries.begin(),peakEntries.end(),[&](auto& e){return e->leaseId==lease.id;});
  if(existing!=peakEntries.end()){(*existing)->retired=lease.retired;(*existing)->exitLinger=lease.lingerMs;(*existing)->exitFade=lease.fadeMs;continue;}
@@ -210,7 +212,7 @@ void peakFrame(IDirect3DDevice9* dev,const State& state,int at,int64_t song,bool
  auto entry=std::make_unique<PeakEntry>(line,next,lease.index,clock,world?(attached?*attached:anchors.current):Vec3{},camera.epoch);entry->leaseId=lease.id;entry->retired=lease.retired;entry->exitLinger=lease.lingerMs;entry->exitFade=lease.fadeMs;entry->slot=lease.slot;entry->world=world;
  if(world&&!attached&&cfg.keepAway){entry->anchor=peak::keepDistance(entry->anchor,pose,cfg.layout.lyrics[lease.slot].distance);if(lease.retired<0){anchors.slots.remember(lease.slot,entry->anchor);anchors.current=entry->anchor;}}
  auto position=attached?ComponentPosition{.5f,.44f,200,attachmentSize}:cfg.layout.lyrics[lease.slot];auto initial=screenComponent(position,width,height,cfg.size);if(world)worldComponent(camera,entry->anchor,position,width,height,cfg.worldHeight,cfg.size,initial);float maxPixels=width*cfg.width*cfg.lineWidthScale/std::max(initial.scale,.02f);
- entry->layout=peak::layout(entry->animation.glyphs,[&](const std::string& glyph){return image(dev,glyph).advance;},maxPixels,cfg.size*1.35f);entry->translationLayout=peak::layout(entry->translated.glyphs,[&](const std::string& glyph){return image(dev,glyph).advance;},maxPixels/.72f,cfg.size*1.35f);entry->measureRevision=layoutGeneration;if(!attached&&cfg.lyricMove&&previousReady){Vec3 destination=world?entry->anchor:Vec3{position.x,position.y,0};entry->travel.begin(previousPoint,destination,clock);}peakEntries.push_back(std::move(entry));}
+ entry->layout=peak::layout(entry->animation.glyphs,[&](const std::string& glyph){return image(dev,glyph).advance;},maxPixels,cfg.size*1.35f);entry->translationLayout=peak::layout(entry->translated.glyphs,[&](const std::string& glyph){return image(dev,glyph).advance;},maxPixels/cfg.visual.translationSize,cfg.size*1.35f);entry->measureRevision=layoutGeneration;if(cfg.visual.smoothScale&&previousSize>0){entry->sizeMotion.value=previousSize;entry->sizeMotion.last=clock-1./60.;}if(!attached&&cfg.lyricMove&&previousReady){Vec3 destination=world?entry->anchor:Vec3{position.x,position.y,0};entry->travel.begin(previousPoint,destination,clock);}peakEntries.push_back(std::move(entry));}
  visibleLyricIndex=at;
  for(size_t i=0;i<peakEntries.size();){auto& entry=*peakEntries[i];ExitFrame life;if(entry.retired>=0)life=exitFrame((clock-entry.retired)*1000,entry.exitLinger,entry.exitFade);
  if(life.done){peakEntries.erase(peakEntries.begin()+i);continue;}++i;
@@ -219,42 +221,51 @@ void peakFrame(IDirect3DDevice9* dev,const State& state,int at,int64_t song,bool
  if(world){if(attached){entry.anchor=*attached;}
  if(!attached&&entry.retired<0&&refreshWorldComponentAnchor(camera,pose,position,entry.anchor,cfg.reuseVisibleAnchor,cfg.reuseDistanceFactor,clock,entry.lastPlaced,cfg.reanchorMs)){anchors.slots.remember(entry.slot,entry.anchor);anchors.current=entry.anchor;}
  if(!attached&&cfg.keepAway){entry.anchor=peak::keepDistance(entry.anchor,pose,position.distance);if(entry.retired<0){anchors.slots.remember(entry.slot,entry.anchor);anchors.current=entry.anchor;}}if(!worldComponent(camera,(!attached&&entry.travel.active)?entry.travel.at(clock,cfg.moveMs/1000.f,cfg.moveCurve):entry.anchor,position,width,height,cfg.worldHeight,cfg.size,place))continue;}
- if(entry.measureRevision!=layoutGeneration){float maxPixels=width*cfg.width*cfg.lineWidthScale/std::max(place.scale,.02f);entry.layout=peak::layout(entry.animation.glyphs,[&](const std::string& glyph){return image(dev,glyph).advance;},maxPixels,cfg.size*1.35f);entry.translationLayout=peak::layout(entry.translated.glyphs,[&](const std::string& glyph){return image(dev,glyph).advance;},maxPixels/.72f,cfg.size*1.35f);entry.measureRevision=layoutGeneration;}
- float scale=place.scale,center=place.x,top=place.y-entry.layout.height*scale*.5f;
- top-=life.lift*(world?20.f*scale*cfg.size/cfg.worldHeight:height*.025f);
- for(auto& glyph:entry.layout.glyphs){auto frame=peak::revealFrame(entry.motion,entry.animation,glyph.index,song,clock,cfg.animationSpeed,cfg.progressiveReveal,cfg.pop,cfg.wiggle,cfg.wiggleFrequency,cfg.wiggleAmount,cfg.fallbackReveal);if(frame.alpha<=0)continue;
- auto im=image(dev,entry.animation.glyphs[glyph.index].text);float size=scale*frame.scale;float x=center+(glyph.x+glyph.width*.5f)*scale+frame.x*height/1080.f-im.width*size*.5f;float y=top+(glyph.y+cfg.size*.5f)*scale+frame.y*height/1080.f-im.height*size*.5f;
- styled(dev,im,x,y,size,life.alpha*frame.alpha*cfg.opacity,lyricTint(glyph.index,entry.animation.glyphs.size(),clock),frame.rotation);}
- if(cfg.translation&&!entry.line.translation.empty()){float ts=scale*.72f;
- for(auto& glyph:entry.translationLayout.glyphs){auto frame=peak::revealFrame(entry.translationMotion,entry.translated,glyph.index,song,clock,cfg.animationSpeed,cfg.progressiveReveal,false,false,8,0,cfg.fallbackReveal);if(frame.alpha<=0)continue;
- auto tr=image(dev,entry.translated.glyphs[glyph.index].text);styled(dev,tr,center+(glyph.x+glyph.width*.5f)*ts-tr.width*ts*.5f,top+entry.layout.height*scale+8+glyph.y*ts,ts,life.alpha*frame.alpha*cfg.opacity,lyricTint(glyph.index,entry.translated.glyphs.size(),clock));}}
+ if(entry.measureRevision!=layoutGeneration){float maxPixels=width*cfg.width*cfg.lineWidthScale/std::max(place.scale,.02f);entry.layout=peak::layout(entry.animation.glyphs,[&](const std::string& glyph){return image(dev,glyph).advance;},maxPixels,cfg.size*1.35f);entry.translationLayout=peak::layout(entry.translated.glyphs,[&](const std::string& glyph){return image(dev,glyph).advance;},maxPixels/cfg.visual.translationSize,cfg.size*1.35f);entry.measureRevision=layoutGeneration;}
+ float scale=entry.sizeMotion.sample(place.scale*cfg.size,clock,cfg.visual.smoothScale,cfg.visual.smoothMs)/cfg.size,center=place.x,top=place.y-entry.layout.height*scale*.5f;top+=visual::bobOffset(cfg.visual,clock,0)*height;
+ top-=(cfg.visual.exit==0?life.lift:0)*(world?20.f*scale*cfg.size/cfg.worldHeight:height*.025f);
+ auto drawLine=[&](const peak::Animation& animation,peak::VisibleAnimation& motion,const peak::Layout& layout,bool translated){
+ float textScale=scale*(translated?cfg.visual.translationSize:1);float baseTop=translated?top+entry.layout.height*scale+cfg.visual.translationGap:top;
+ for(const auto& glyph:layout.glyphs){auto frame=peak::revealFrame(motion,animation,glyph.index,song,clock,cfg.animationSpeed,cfg.progressiveReveal,!translated&&cfg.pop,!translated&&cfg.wiggle,cfg.wiggleFrequency,cfg.wiggleAmount,cfg.fallbackReveal);if(frame.alpha<=0)continue;frame.alpha*=visual::entrance(cfg.visual,motion,glyph.index,clock);
+ if(!translated&&cfg.pop)frame.scale=1+(frame.scale-1)*cfg.visual.popStrength;
+ float fraction=animation.glyphs.size()>1?float(glyph.index)/float(animation.glyphs.size()-1):0;auto exit=visual::retire(cfg.visual.exit,life.alpha,fraction,animation.textSeed+uint32_t(glyph.index)*257);auto tone=visual::shade(cfg.visual,animation,glyph.index,song,lyricTint(glyph.index,animation.glyphs.size(),clock),translated);
+ auto im=image(dev,animation.glyphs[glyph.index].text);float size=textScale*frame.scale*exit.scale;
+ float x=center+(glyph.x+glyph.width*.5f)*textScale+(frame.x+exit.x)*height/1080.f-im.width*size*.5f;
+ float y=baseTop+(glyph.y+(translated?0:cfg.size*.5f))*textScale+(frame.y+exit.y)*height/1080.f-(translated?0:im.height*size*.5f);
+ styled(dev,im,x,y,size,exit.alpha*frame.alpha*cfg.opacity*tone.alpha,tone.color,frame.rotation,tone.glow,translated&&!cfg.visual.translationFollow?cfg.visual.translationColor:cfg.accent);
+ }};
+ drawLine(entry.animation,entry.motion,entry.layout,false);
+ if(cfg.translation&&!entry.line.translation.empty())drawLine(entry.translated,entry.translationMotion,entry.translationLayout,true);
  }
 }
-void drawPositionedText(IDirect3DDevice9* dev,const std::string& text,const ComponentPosition& position,const GameCameraFrame& camera,bool world,const CameraPose& pose,float width,float height,DWORD color,float maxWidth,const Vec3* fixed=nullptr){
+void drawPositionedText(IDirect3DDevice9* dev,const std::string& text,const ComponentPosition& position,const GameCameraFrame& camera,bool world,const CameraPose& pose,float width,float height,DWORD color,float maxWidth,const Vec3* fixed=nullptr,visual::Smooth* smooth=nullptr){
  if(text.empty())return;auto place=screenComponent(position,width,height,cfg.size);
  if(world){Vec3 anchor;if(fixed)anchor=*fixed;else if(!componentAnchor(camera,pose,position,anchor))return;if(!worldComponent(camera,anchor,position,width,height,cfg.worldHeight,cfg.size,place))return;}
- auto im=image(dev,text);float scale=std::min(place.scale,width*maxWidth/std::max(im.width,1));styled(dev,im,place.x-im.width*scale*.5f,place.y-im.height*scale*.5f,scale,cfg.opacity,color);
+ place.scale*=cfg.visual.metadataSize;if(smooth)place.scale=smooth->sample(place.scale*cfg.size,now()/1000.,cfg.visual.smoothScale,cfg.visual.smoothMs)/cfg.size;auto im=image(dev,text);float scale=std::min(place.scale,width*maxWidth/std::max(im.width,1));styled(dev,im,place.x-im.width*scale*.5f,place.y-im.height*scale*.5f,scale,cfg.opacity,color);
 }
 void drawPositionPreview(IDirect3DDevice9* dev,const GameCameraFrame& camera,bool world,const CameraPose& pose,float width,float height){
- static double started=0;static uint64_t generation=0;static std::shared_ptr<const Config> previous;static bool wasMoving=false;static std::array<peak::VisibleAnimation,MaxLyricSlots> motions;
- double clock=now()/1000.;bool moving=positionPreviewMotion.load();if(generation!=layoutGeneration||previous!=renderedSettings||moving!=wasMoving||clock-started>=4){started=clock;generation=layoutGeneration;previous=renderedSettings;wasMoving=moving;for(auto& motion:motions)motion=peak::VisibleAnimation{};}
+ static double started=0;static uint64_t generation=0;static std::shared_ptr<const Config> previous;static bool wasMoving=false;static std::array<peak::VisibleAnimation,MaxLyricSlots> motions,translationMotions;
+ double clock=now()/1000.;bool moving=positionPreviewMotion.load();if(generation!=layoutGeneration||previous!=renderedSettings||moving!=wasMoving||clock-started>=3+std::max(.7,cfg.transition/1000.)){started=clock;generation=layoutGeneration;previous=renderedSettings;wasMoving=moving;for(auto& motion:motions)motion=peak::VisibleAnimation{};for(auto& motion:translationMotions)motion=peak::VisibleAnimation{};}
  int64_t song=int64_t((clock-started)*1000);
  drawPositionedText(dev,u8"歌名 · Song Title",cfg.layout.title,camera,world,pose,width,height,cfg.textColor,.7f);
  drawPositionedText(dev,u8"作者 · Artist",cfg.layout.artist,camera,world,pose,width,height,cfg.accent,.7f);
  for(int i=0;i<cfg.layout.lyricCount;++i){const auto& position=cfg.layout.lyrics[i];auto place=screenComponent(position,width,height,cfg.size);
  if(world){Vec3 anchor;if(!componentAnchor(camera,pose,position,anchor)||!worldComponent(camera,anchor,position,width,height,cfg.worldHeight,cfg.size,place))continue;}
- Line line;line.text=u8"歌词 "+std::to_string(i+1)+u8" · 这是一句预览歌词";peak::Animation animation(line,3000);auto& glyphs=animation.glyphs;auto layout=peak::layout(glyphs,[&](const std::string& glyph){return image(dev,glyph).advance;},width*cfg.width*cfg.lineWidthScale/std::max(place.scale,.02f),cfg.size*1.35f);
- float top=place.y-layout.height*place.scale*.5f;for(auto& glyph:layout.glyphs){auto frame=moving?peak::revealFrame(motions[i],animation,glyph.index,song,clock,cfg.animationSpeed,cfg.progressiveReveal,cfg.pop,cfg.wiggle,cfg.wiggleFrequency,cfg.wiggleAmount,cfg.fallbackReveal):peak::GlyphFrame{1,1,0,0,0};if(frame.alpha<=0)continue;auto im=image(dev,glyphs[glyph.index].text);float size=place.scale*frame.scale;styled(dev,im,place.x+(glyph.x+glyph.width*.5f)*place.scale-im.width*size*.5f+frame.x*height/1080.f,top+(glyph.y+cfg.size*.5f)*place.scale-im.height*size*.5f+frame.y*height/1080.f,size,cfg.opacity*frame.alpha,lyricTint(glyph.index,glyphs.size(),clock),frame.rotation);}
+ Line line;line.text=u8"歌词 "+std::to_string(i+1)+u8" · 这是一句预览歌词";line.translation="Translation preview · "+std::to_string(i+1);auto chars=graphemes(line.text);int ordinal=0;for(auto& ch:chars)if(!peak::blank(ch)){int64_t onset=int64_t(ordinal++)*180;line.words.push_back({onset,180,ch.text});}peak::Animation animation(line,4000);auto translated=peak::translationAnimation(animation,line.translation,4000);
+ auto measure=[&](const std::string& glyph){return image(dev,glyph).advance;};float maxWidth=width*cfg.width*cfg.lineWidthScale/std::max(place.scale,.02f);auto layout=peak::layout(animation.glyphs,measure,maxWidth,cfg.size*1.35f);auto translatedLayout=peak::layout(translated.glyphs,measure,maxWidth/cfg.visual.translationSize,cfg.size*1.35f);
+ float top=place.y-layout.height*place.scale*.5f+(moving?visual::bobOffset(cfg.visual,clock,0)*height:0);float life=moving&&song>=3000?exitFrame(double(song-3000),0,cfg.transition).alpha:1;
+ auto previewLine=[&](const peak::Animation& text,peak::VisibleAnimation& motion,const peak::Layout& measured,bool tr){float textScale=place.scale*(tr?cfg.visual.translationSize:1);for(const auto& glyph:measured.glyphs){auto frame=moving?peak::revealFrame(motion,text,glyph.index,song,clock,cfg.animationSpeed,cfg.progressiveReveal,!tr&&cfg.pop,!tr&&cfg.wiggle,cfg.wiggleFrequency,cfg.wiggleAmount,cfg.fallbackReveal):peak::GlyphFrame{1,1,0,0,0};if(frame.alpha<=0)continue;if(moving)frame.alpha*=visual::entrance(cfg.visual,motion,glyph.index,clock);if(!tr&&cfg.pop)frame.scale=1+(frame.scale-1)*cfg.visual.popStrength;auto tone=visual::shade(cfg.visual,text,glyph.index,song,lyricTint(glyph.index,text.glyphs.size(),clock),tr);auto exit=visual::retire(cfg.visual.exit,life,text.glyphs.size()>1?float(glyph.index)/float(text.glyphs.size()-1):0,text.textSeed+uint32_t(glyph.index)*257);auto im=image(dev,text.glyphs[glyph.index].text);float size=textScale*frame.scale*exit.scale;float y=top+(tr?layout.height*place.scale+cfg.visual.translationGap:0)+(glyph.y+cfg.size*.5f)*textScale-im.height*size*.5f+(frame.y+exit.y)*height/1080.f;styled(dev,im,place.x+(glyph.x+glyph.width*.5f)*textScale-im.width*size*.5f+(frame.x+exit.x)*height/1080.f,y,size,cfg.opacity*frame.alpha*exit.alpha*tone.alpha,tone.color,frame.rotation,tone.glow,tr&&!cfg.visual.translationFollow?cfg.visual.translationColor:cfg.accent);}};
+ previewLine(animation,motions[i],layout,false);if(moving||cfg.translation)previewLine(translated,translationMotions[i],translatedLayout,true);
  }
 }
 void drawSongInfo(IDirect3DDevice9* dev,const State& state,const GameCameraFrame& camera,bool valid,const CameraPose& pose,float width,float height){
- static std::string song;static Vec3 titleAnchor,artistAnchor;static uint32_t epoch=0;static int64_t placed=0;static std::shared_ptr<const Config> lastSettings;static uint64_t generation=0;
+ static std::string song;static Vec3 titleAnchor,artistAnchor;static visual::Smooth titleSize,artistSize;static uint32_t epoch=0;static int64_t placed=0;static std::shared_ptr<const Config> lastSettings;
  if(!cfg.showTitle&&!cfg.showArtist){song.clear();return;}if(state.key.empty())return;
- if(song!=state.key||epoch!=camera.epoch||!placed||lastSettings!=renderedSettings||generation!=layoutGeneration||(cfg.reanchorMs>0&&now()-placed>=cfg.reanchorMs)){song=state.key;epoch=camera.epoch;componentAnchor(camera,pose,cfg.layout.title,titleAnchor);componentAnchor(camera,pose,cfg.layout.artist,artistAnchor);placed=now();lastSettings=renderedSettings;generation=layoutGeneration;}
+ if(song!=state.key||epoch!=camera.epoch||!placed||(!lastSettings||visual::metadataAnchorChanged(*lastSettings,cfg))||(cfg.reanchorMs>0&&now()-placed>=cfg.reanchorMs)){song=state.key;epoch=camera.epoch;componentAnchor(camera,pose,cfg.layout.title,titleAnchor);componentAnchor(camera,pose,cfg.layout.artist,artistAnchor);placed=now();lastSettings=renderedSettings;}
  if(valid&&cfg.keepAway){titleAnchor=peak::keepDistance(titleAnchor,pose,cfg.layout.title.distance);artistAnchor=peak::keepDistance(artistAnchor,pose,cfg.layout.artist.distance);}
  auto limited=[](const std::string& text){std::string out;auto chars=graphemes(text);for(size_t i=0;i<std::min<size_t>(80,chars.size());++i)out+=chars[i].text;return out;};
- if(cfg.showTitle)drawPositionedText(dev,limited(state.title),cfg.layout.title,camera,valid,pose,width,height,cfg.textColor,.7f,&titleAnchor);
- if(cfg.showArtist)drawPositionedText(dev,limited(state.artist),cfg.layout.artist,camera,valid,pose,width,height,cfg.accent,.7f,&artistAnchor);
+ if(cfg.showTitle)drawPositionedText(dev,limited(state.title),cfg.layout.title,camera,valid,pose,width,height,cfg.textColor,.7f,&titleAnchor,&titleSize);
+ if(cfg.showArtist)drawPositionedText(dev,limited(state.artist),cfg.layout.artist,camera,valid,pose,width,height,cfg.accent,.7f,&artistAnchor,&artistSize);
  if(!valid){song.clear();placed=0;}
 }
 void wallQuad(IDirect3DDevice9* dev,const wall::Panel& panel,const GameCameraFrame& camera,float width,float height,Image im,DWORD color){
@@ -284,29 +295,34 @@ struct WallTextState {
  }
 } wallTextState;
 void wallGlyphs(IDirect3DDevice9* dev,const wall::Panel& panel,const GameCameraFrame& camera,float width,float height,const peak::Animation& animation,peak::VisibleAnimation& motion,const peak::Layout& layout,float unit,float top,int64_t song,double clock,bool translated,float opacity=1){
- for(const auto& glyph:layout.glyphs){auto frame=peak::revealFrame(motion,animation,glyph.index,song,clock,cfg.animationSpeed,cfg.progressiveReveal,!translated&&cfg.pop,!translated&&cfg.wiggle,cfg.wiggleFrequency,cfg.wiggleAmount,cfg.fallbackReveal);if(frame.alpha<=0)continue;
+ for(const auto& glyph:layout.glyphs){auto frame=peak::revealFrame(motion,animation,glyph.index,song,clock,cfg.animationSpeed,cfg.progressiveReveal,!translated&&cfg.pop,!translated&&cfg.wiggle,cfg.wiggleFrequency,cfg.wiggleAmount,cfg.fallbackReveal);if(frame.alpha<=0)continue;frame.alpha*=visual::entrance(cfg.visual,motion,glyph.index,clock);
+ if(!translated&&cfg.pop)frame.scale=1+(frame.scale-1)*cfg.visual.popStrength;
  auto im=image(dev,animation.glyphs[glyph.index].text);if(!im.texture)continue;auto face=panel;
- face.center=panel.center+panel.right*((glyph.x+glyph.width*.5f+frame.x)*unit)+panel.up*(top-(glyph.y+cfg.size*.5f+frame.y)*unit);
- face.width=im.width*unit*frame.scale;face.height=im.height*unit*frame.scale;
+ auto exit=visual::retire(cfg.visual.exit,opacity,animation.glyphs.size()>1?float(glyph.index)/float(animation.glyphs.size()-1):0,animation.textSeed+uint32_t(glyph.index)*257);
+ auto tone=visual::shade(cfg.visual,animation,glyph.index,song,lyricTint(glyph.index,animation.glyphs.size(),clock),translated);
+ face.center=panel.center+panel.right*((glyph.x+glyph.width*.5f+frame.x+exit.x)*unit)+panel.up*(top-(glyph.y+cfg.size*.5f+frame.y+exit.y)*unit+visual::bobOffset(cfg.visual,clock,0)*panel.height);
+ face.width=im.width*unit*frame.scale*exit.scale;face.height=im.height*unit*frame.scale*exit.scale;
  float angle=frame.rotation;face.right=panel.right*std::cos(angle)+panel.up*std::sin(angle);face.up=panel.up*std::cos(angle)-panel.right*std::sin(angle);
- DWORD color=(DWORD(std::clamp(cfg.opacity*frame.alpha*opacity,0.f,1.f)*255)<<24)|lyricTint(glyph.index,animation.glyphs.size(),clock);wallQuad(dev,face,camera,width,height,im,color);
+ float alpha=std::clamp(cfg.opacity*frame.alpha*exit.alpha*tone.alpha,0.f,1.f);if(cfg.visual.wallEffects&&cfg.glow&&im.halo){auto halo=im;halo.texture=im.halo;wallQuad(dev,face,camera,width,height,halo,(DWORD(std::clamp(alpha*std::min(1.f,cfg.glowStrength*2)*tone.glow,0.f,1.f)*255)<<24)|(translated&&!cfg.visual.translationFollow?cfg.visual.translationColor:cfg.accent));}
+ if(cfg.visual.wallEffects&&cfg.outline)for(float x:{-1.f,1.f})for(float y:{-1.f,1.f}){auto border=face;border.center=face.center+panel.right*(x*unit)+panel.up*(y*unit);wallQuad(dev,border,camera,width,height,im,(DWORD(alpha*.8f*255)<<24)|0x101018);}
+ wallQuad(dev,face,camera,width,height,im,(DWORD(alpha*255)<<24)|tone.color);
  }
 }
 void wallPositionedText(IDirect3DDevice9* dev,const wall::Panel& panel,const GameCameraFrame& camera,float width,float height,const std::string& text,const WallTextPosition& position,float maxHeight,DWORD color){
- auto im=image(dev,text);if(!im.texture)return;auto face=wallTextPanel(panel,position);face.width=panel.width*.9f*position.size;face.height=face.width*im.height/std::max(im.width,1);
- if(face.height>panel.height*maxHeight*position.size){face.width*=panel.height*maxHeight*position.size/face.height;face.height=panel.height*maxHeight*position.size;}wallQuad(dev,face,camera,width,height,im,color);
+ auto im=image(dev,text);if(!im.texture)return;auto face=wallTextPanel(panel,position);face.width=panel.width*.9f*position.size*cfg.visual.metadataSize;face.height=face.width*im.height/std::max(im.width,1);
+ if(face.height>panel.height*maxHeight*position.size*cfg.visual.metadataSize){face.width*=panel.height*maxHeight*position.size*cfg.visual.metadataSize/face.height;face.height=panel.height*maxHeight*position.size*cfg.visual.metadataSize;}wallQuad(dev,face,camera,width,height,im,color);
 }
 void drawWallContents(IDirect3DDevice9* dev,const wall::Panel& panel,const GameCameraFrame& camera,float width,float height,WallSentence& sentence,int64_t song,double clock,float opacity,bool preview=false){
  auto limited=[](const std::string& text){std::string result;auto chars=graphemes(text);for(size_t i=0;i<std::min<size_t>(chars.size(),80);++i)result+=chars[i].text;return result;};
  if(preview||cfg.showTitle)wallPositionedText(dev,panel,camera,width,height,limited(sentence.title),cfg.wallLayout.title,.12f,(DWORD(255*opacity)<<24)|(cfg.textColor&0xffffff));
  if(preview||cfg.showArtist)wallPositionedText(dev,panel,camera,width,height,limited(sentence.artist),cfg.wallLayout.artist,.09f,(DWORD(255*opacity)<<24)|(cfg.accent&0xffffff));
  auto measure=[&](const std::string& text){return image(dev,text).advance;};float maxPixels=cfg.size*18.f*cfg.lineWidthScale;
- auto original=peak::layout(sentence.original.glyphs,measure,maxPixels,cfg.size*1.35f);auto translation=peak::layout(sentence.translated.glyphs,measure,maxPixels/.72f,cfg.size*1.35f);
- bool showTranslation=(preview||cfg.translation)&&!translation.glyphs.empty();float widest=1;for(auto row:original.rows)widest=std::max(widest,row);if(showTranslation)for(auto row:translation.rows)widest=std::max(widest,row*.72f);
- float contentHeight=original.height+(showTranslation?cfg.size*.25f+translation.height*.72f:0);float unit=std::min(panel.width*.9f/widest,panel.height*.62f/std::max(contentHeight,1.f));unit=std::min(unit,panel.height*.27f/std::max(cfg.size,1))*cfg.wallLayout.lyrics.size;
+ auto original=peak::layout(sentence.original.glyphs,measure,maxPixels,cfg.size*1.35f);auto translation=peak::layout(sentence.translated.glyphs,measure,maxPixels/cfg.visual.translationSize,cfg.size*1.35f);
+ bool showTranslation=(preview||cfg.translation)&&!translation.glyphs.empty();float widest=1;for(auto row:original.rows)widest=std::max(widest,row);if(showTranslation)for(auto row:translation.rows)widest=std::max(widest,row*cfg.visual.translationSize);
+ float contentHeight=original.height+(showTranslation?cfg.visual.translationGap+translation.height*cfg.visual.translationSize:0);float unit=std::min(panel.width*.9f/widest,panel.height*.62f/std::max(contentHeight,1.f));unit=std::min(unit,panel.height*.27f/std::max(cfg.size,1))*cfg.wallLayout.lyrics.size;
  auto face=wallTextPanel(panel,cfg.wallLayout.lyrics);float top=contentHeight*unit*.5f;
  wallGlyphs(dev,face,camera,width,height,sentence.original,sentence.originalMotion,original,unit,top,song,clock,false,opacity);
- if(showTranslation)wallGlyphs(dev,face,camera,width,height,sentence.translated,sentence.translatedMotion,translation,unit*.72f,top-(original.height+cfg.size*.25f)*unit,song,clock,true,opacity);
+ if(showTranslation)wallGlyphs(dev,face,camera,width,height,sentence.translated,sentence.translatedMotion,translation,unit*cfg.visual.translationSize,top-(original.height+cfg.visual.translationGap)*unit,song,clock,true,opacity);
 }
 void drawWallLayoutPreview(IDirect3DDevice9* dev,GameCameraFrame camera,bool valid,const CameraPose& pose,float width,float height){
  CameraPose view=pose;if(!valid){camera.active=1;camera.epoch=1;camera.worldToView={0,-1,0,0,0,0,1,0,1,0,0,0,0,0,0,1};camera.worldToClip={0,-1,0,0,0,0,1,0,1.0001f,0,0,-1.0001f,1,0,0,0};if(!cameraPose(camera,view))return;}
@@ -377,7 +393,7 @@ void WINAPI render(IDirect3DDevice9* dev,const PresentInfo* present){
  for(auto stage:{D3DTSS_COLOROP,D3DTSS_ALPHAOP})dev->SetTextureStageState(0,stage,D3DTOP_MODULATE);
  dev->SetTextureStageState(0,D3DTSS_COLORARG1,D3DTA_TEXTURE);dev->SetTextureStageState(0,D3DTSS_COLORARG2,D3DTA_DIFFUSE);dev->SetTextureStageState(0,D3DTSS_ALPHAARG1,D3DTA_TEXTURE);dev->SetTextureStageState(0,D3DTSS_ALPHAARG2,D3DTA_DIFFUSE);dev->SetTextureStageState(0,D3DTSS_TEXCOORDINDEX,0);dev->SetTextureStageState(0,D3DTSS_TEXTURETRANSFORMFLAGS,D3DTTFF_DISABLE);dev->SetTextureStageState(1,D3DTSS_COLOROP,D3DTOP_DISABLE);dev->SetTextureStageState(1,D3DTSS_ALPHAOP,D3DTOP_DISABLE);
  dev->SetSamplerState(0,D3DSAMP_MINFILTER,D3DTEXF_LINEAR);dev->SetSamplerState(0,D3DSAMP_MAGFILTER,D3DTEXF_LINEAR);dev->SetSamplerState(0,D3DSAMP_ADDRESSU,D3DTADDRESS_CLAMP);dev->SetSamplerState(0,D3DSAMP_ADDRESSV,D3DTADDRESS_CLAMP);dev->SetSamplerState(0,D3DSAMP_SRGBTEXTURE,FALSE);
- if(cfg.enabled&&cfg.demo&&!preview&&!wallMode){auto banner=image(dev,"L4D2DangoMusic 0.9.7 DEMO - "+std::string(path?"SwapChain":"Device"));draw(dev,banner,16,16,std::min(1.f,desc.Width*.9f/std::max(banner.width,1)),1.f);}
+ if(cfg.enabled&&cfg.demo&&!preview&&!wallMode){auto banner=image(dev,"L4D2DangoMusic 0.9.8-preview1 DEMO - "+std::string(path?"SwapChain":"Device"));draw(dev,banner,16,16,std::min(1.f,desc.Width*.9f/std::max(banner.width,1)),1.f);}
  auto camera=std::atomic_load(&source_camera::snapshot);const auto& gameFrame=*camera;CameraPose pose;
  bool cameraGood=usableCamera(gameFrame,now())&&cameraPose(gameFrame,pose);bool cameraValid=cfg.worldLyrics&&cameraGood;
  auto chosenFrame=std::atomic_load(&source_entities::followSnapshot);auto chosenRequest=followState->target;follow::Pose chosen;bool automaticChosen=false;
@@ -419,7 +435,7 @@ bool load(const std::filesystem::path& pluginDirectory){try{directory=pluginDire
  if(std::filesystem::exists(path)){std::ifstream f(path);cfg=decodeConfig(nlohmann::json::parse(f));}
  std::atomic_store(&settings,std::make_shared<const Config>(cfg));std::atomic_store(&savedSettings,std::filesystem::exists(path)?std::make_shared<const Config>(cfg):std::shared_ptr<const Config>{});source_walls::configure(cfg);nativeHud.loadAppearance(cfg.hud);
 
- note("L4D2DangoMusic 0.9.7 config="+path.u8string()+" mode="+(cfg.demo?"DEMO":"BLF/LX")+" port="+std::to_string(cfg.port)+" offsetMs="+std::to_string(cfg.offset)+" displayMode="+cfg.mode);
+ note("L4D2DangoMusic 0.9.8-preview1 config="+path.u8string()+" mode="+(cfg.demo?"DEMO":"BLF/LX")+" port="+std::to_string(cfg.port)+" offsetMs="+std::to_string(cfg.offset)+" displayMode="+cfg.mode);
  note("Steam sync fix1: in-game SteamClient user/pipe lifecycle probes disabled");
  stopping=false;worker=std::thread(run);return TRUE;}catch(const std::exception& e){if(logger)logger(LDB_HOST_LOG_ERROR,e.what());return FALSE;}catch(...){return FALSE;}}
 void releasePresentationBackup();
@@ -453,7 +469,7 @@ template<class Present> HRESULT paintAndPresent(IDirect3DDevice9* device,IDirect
 }
 struct Patch {void** slot;void* original;void* replacement;};
 std::array<Patch,64> patches{};std::atomic<size_t> patchCount{0};SRWLOCK patchLock=SRWLOCK_INIT;std::filesystem::path pluginDirectory;
-void fileLog(int,const char* message){std::error_code error;auto dataDirectory=pluginDirectory/L"L4D2DangoMusic";std::filesystem::create_directories(dataDirectory,error);if(error)return;std::ofstream file(dataDirectory/L"L4D2DangoMusic.log",std::ios::app);file<<"L4D2DangoMusic 0.9.7 "<<message<<'\n';}
+void fileLog(int,const char* message){std::error_code error;auto dataDirectory=pluginDirectory/L"L4D2DangoMusic";std::filesystem::create_directories(dataDirectory,error);if(error)return;std::ofstream file(dataDirectory/L"L4D2DangoMusic.log",std::ios::app);file<<"L4D2DangoMusic 0.9.8-preview1 "<<message<<'\n';}
 bool patch(void** table,size_t slot,void* replacement){
  if(!TryAcquireSRWLockExclusive(&patchLock))return false;auto count=patchCount.load(std::memory_order_acquire);
  for(size_t i=0;i<count;++i)if(patches[i].slot==table+slot){bool same=patches[i].replacement==replacement;ReleaseSRWLockExclusive(&patchLock);return same;}
@@ -491,14 +507,14 @@ const char* menuPage(const hud::Document& doc){std::string rows;for(auto& row:do
 std::vector<std::string> relatedModules(){std::vector<std::string> paths;HANDLE snapshot=CreateToolhelp32Snapshot(TH32CS_SNAPMODULE|TH32CS_SNAPMODULE32,GetCurrentProcessId());if(snapshot==INVALID_HANDLE_VALUE)return paths;MODULEENTRY32W entry{};entry.dwSize=sizeof(entry);
  if(Module32FirstW(snapshot,&entry))do{if(entry.hModule==ownModule)continue;std::wstring name=entry.szModule;std::transform(name.begin(),name.end(),name.begin(),[](wchar_t c){return c>=L'A'&&c<=L'Z'?c+32:c;});
  if(name.find(L"dango")!=std::wstring::npos||GetProcAddress(entry.hModule,"L4D2DangoMusicShutdown")||GetProcAddress(entry.hModule,"LDBDangoMusicShutdown"))paths.push_back(std::filesystem::path(entry.szExePath).u8string());}while(Module32NextW(snapshot,&entry));CloseHandle(snapshot);return paths;}
-const char* diagnosticMenu(bool audit=true){std::string rows=item(u8"版本：0.9.7；进程："+std::to_string(GetCurrentProcessId()),0)+item(u8"当前 DLL："+ownPath.u8string(),0);auto others=relatedModules();
+const char* diagnosticMenu(bool audit=true){std::string rows=item(u8"版本：0.9.8-preview1；进程："+std::to_string(GetCurrentProcessId()),0)+item(u8"当前 DLL："+ownPath.u8string(),0);auto others=relatedModules();
  if(audit)note("Runtime audit pid="+std::to_string(GetCurrentProcessId())+" dll="+ownPath.u8string()+" related_modules="+std::to_string(others.size()));
  for(auto& path:others){rows+=item(u8"其他歌词模块："+path,0);if(audit)note("Other lyric module: "+path);}
  if(others.empty())rows+=item(u8"当前进程未发现其他相关模块（Host 需另查）",0);
  auto music=std::atomic_load(&snapshot);rows+=item(std::string(u8"播放器：")+(music->connected?(music->playing?u8"播放中":u8"暂停/停止"):u8"未连接")+u8"；会话 "+std::to_string(music->generation)+u8"；歌词 "+std::to_string(music->timeline.size()),0);
- return page(u8"L4D2DangoMusic 0.9.7 · 诊断",rows+item(u8"返回主菜单",0));}
+ return page(u8"L4D2DangoMusic 0.9.8-preview1 · 诊断",rows+item(u8"返回主菜单",0));}
 #else
-const char* diagnosticMenu(bool=true){return page(u8"版本与路径",item("L4D2DangoMusic 0.9.7",0)+item(ownPath.u8string(),0));}
+const char* diagnosticMenu(bool=true){return page(u8"版本与路径",item("L4D2DangoMusic 0.9.8-preview1",0)+item(ownPath.u8string(),0));}
 #endif
 void changeSettings(const Config& next){auto published=next;if(!next.sync.enabled||!next.sync.discover)source_roster::enabled=false;auto previous=std::atomic_load(&settings);published.playbackSourceRevision=previous->playbackSourceRevision+((previous->musicSource!=next.musicSource||previous->demo!=next.demo)?1:0);source_walls::configure(published);std::atomic_store(&settings,std::make_shared<const Config>(published));note("Settings applied enabled="+std::to_string(next.enabled)+" preset="+std::to_string(next.presetId)+" preview="+std::to_string(positionPreview.load()));}
 std::string on(bool v){return v?u8"开":u8"关";}
@@ -565,6 +581,35 @@ const char* menuActionImpl(void* argument){uintptr_t id=reinterpret_cast<uintptr
  if(id>=40000&&id<=42304){int code=int(id-40000),i=code/1000,axis=code%1000/100,choice=code%100;if(i>2||axis>3||choice>4)return nullptr;positionPreview=false;wallPositionPreview=true;adjustWallText(c.wallLayout,i,axis,choice);changeSettings(c);return wallAxisMenu(c,i,axis);}
  if(id==0||id==2099){positionPreview=false;return rootMenu(false);}
  if(id==2098){saveState=1;std::atomic_store(&pendingSave,std::make_shared<const Config>(c));positionPreview=false;return page(u8"保存设置 · 已恢复当前歌词",item(u8"已提交后台保存，返回查看结果",0));}
+ if(id==1300){std::string rows;for(int i=0;i<7;++i)rows+=item(visual::presetName(i),1310+i);return page(u8"完整视觉预设 · 分项应用",rows+item(u8"我的预设（八个槽位）",1340)+item(u8"动画与样式预览",27));}
+ if(id>=1310&&id<=1316){int index=int(id-1310);std::string rows;const char* scope[]={u8"整套外观",u8"只应用颜色与柔光",u8"只应用动画与退场",u8"只应用字号与排版"};for(int i=0;i<4;++i)rows+=item(scope[i],1500+index*10+i);return page(visual::presetName(index),rows+item(u8"预览当前效果",27));}
+ if(id==1340){std::string rows;for(int i=0;i<8;++i)rows+=item(u8"槽位 "+std::to_string(i+1)+(visual::occupied(c,i)?u8" · 已记录":u8" · 空"),1350+i);return page(u8"我的外观收藏 · 保存设置后持久保留",rows);}
+ if(id>=1350&&id<=1357){int slot=int(id-1350);std::string rows=item(u8"保存当前外观到此槽（覆盖）",1600+slot*10);if(visual::occupied(c,slot)){const char* scopes[]={u8"整套应用",u8"只应用颜色",u8"只应用动画",u8"只应用排版"};for(int i=0;i<4;++i)rows+=item(scopes[i],1601+slot*10+i);rows+=item(u8"清空此槽",1605+slot*10);}return page(u8"自定义槽位 "+std::to_string(slot+1),rows+item(u8"返回主菜单后请保存设置",0));}
+ if(id==1370)return page(u8"原文与翻译独立样式",item(u8"原文字号、透明度与行宽",1373)+item(u8"翻译大小、间距与颜色",1374)+item(u8"逐字明暗与动态柔光",1380)+item(u8"七套预设与自定义收藏",1300)+item(u8"预览当前效果",27));
+ if(id==1373)return page(u8"原文 · 字号 "+std::to_string(c.size)+u8" · 透明度 "+positionValue(c.visual.originalOpacity)+u8" · 行宽 "+positionValue(c.lineWidthScale)+u8" · 歌名 "+positionValue(c.visual.metadataSize),item(u8"字号 -2",1780)+item(u8"字号 +2",1781)+item(u8"原文透明度 -0.1",1782)+item(u8"原文透明度 +0.1",1783)+item(u8"单行宽度 -0.1",1784)+item(u8"单行宽度 +0.1",1785)+item(u8"歌名作者缩放 -0.05",1786)+item(u8"歌名作者缩放 +0.05",1787)+item(u8"预览当前效果",27));
+ if(id==1374)return page(u8"翻译 · 大小 "+positionValue(c.visual.translationSize)+u8" · 透明度 "+positionValue(c.visual.translationOpacity)+u8" · 间距 "+positionValue(c.visual.translationGap),item(u8"翻译大小 -0.05",1700)+item(u8"翻译大小 +0.05",1701)+item(u8"翻译透明度 -0.1",1702)+item(u8"翻译透明度 +0.1",1703)+item(u8"翻译间距 -2",1704)+item(u8"翻译间距 +2",1705)+item(u8"独立翻译颜色",1371)+item(menus::value(u8"翻译沿用原文配色",on(c.visual.translationFollow)),1706)+item(u8"原文和翻译预览",27));
+ if(id==1371||id==1372){const char* names[]={u8"暖白",u8"纯白",u8"樱花粉",u8"冰蓝",u8"金色",u8"薄荷绿",u8"淡紫",u8"橘红"};std::string rows;for(int i=0;i<8;++i)rows+=item(names[i],(id==1371?1720:1730)+i);return page(id==1371?u8"翻译独立颜色":u8"当前词高光颜色",rows+item(u8"自定义 RGB",id==1371?1375:1379));}
+ if(id==1375||id==1379){auto color=id==1375?c.visual.translationColor:c.visual.highlight;int base=id==1375?1376:1381;return page(std::string(id==1375?u8"翻译 RGB · ":u8"高光 RGB · ")+colorText(color),item("R: "+std::to_string((color>>16)&255),base)+item("G: "+std::to_string((color>>8)&255),base+1)+item("B: "+std::to_string(color&255),base+2));}
+ if((id>=1376&&id<=1378)||(id>=1381&&id<=1383)){bool tr=id<=1378;int channel=int(id-(tr?1376:1381));const char* choices[]={"-16","-1","+1","+16","0","64","128","192","255"};std::string rows;for(int i=0;i<9;++i)rows+=item(choices[i],(tr?1800:1830)+channel*10+i);auto color=tr?c.visual.translationColor:c.visual.highlight;return page(std::string(tr?u8"翻译颜色 ":u8"高光颜色 ")+"RGB"[channel]+": "+std::to_string((color>>((2-channel)*8))&255),rows);}
+ if(id>=1800&&id<=1858){int code=int(id-(id<1830?1800:1830)),channel=code/10,choice=code%10;if(channel>2||choice>8)return nullptr;auto& color=id<1830?c.visual.translationColor:c.visual.highlight;int shift=(2-channel)*8,value=(color>>shift)&255;int deltas[]={-16,-1,1,16},fixed[]={0,64,128,192,255};value=choice<4?std::clamp(value+deltas[choice],0,255):fixed[choice-4];color=(color&~(255u<<shift))|(uint32_t(value)<<shift);if(id<1830)c.visual.translationFollow=false;changeSettings(c);return nullptr;}
+ if(id==1380)return page(u8"逐字分层 · 未唱 "+positionValue(c.visual.pending)+u8" · 已唱 "+positionValue(c.visual.sung),item(menus::value(u8"逐字明暗分层",on(c.visual.tone)),1750)+item(menus::value(u8"动态柔光",on(c.visual.dynamicGlow)),1751)+item(u8"未唱亮度 -0.1",1752)+item(u8"未唱亮度 +0.1",1753)+item(u8"已唱亮度 -0.1",1754)+item(u8"已唱亮度 +0.1",1755)+item(u8"当前词高光颜色",1372)+item(menus::value(u8"挂画柔光与描边",on(c.visual.wallEffects)),1756)+item(u8"逐字与翻译预览",27));
+ if(id==1390){std::string rows;for(int i=0;i<5;++i)rows+=item(std::string(c.visual.exit==i?u8"当前 · ":"")+visual::exitName(i),1740+i);return page(u8"退场 · 平滑 "+std::to_string(c.visual.smoothMs)+"ms",rows+item(menus::value(u8"距离尺寸平滑",on(c.visual.smoothScale)),1760)+item(u8"平滑耗时 -50ms",1761)+item(u8"平滑耗时 +50ms",1762)+item(u8"预览退场与样式",27));}
+ if(id==1395)return page(u8"整句悬浮 · 周期 "+positionValue(c.visual.bobPeriod)+u8"秒 · 幅度 "+positionValue(c.visual.bobAmount*1000)+u8"‰ · 弹跳 "+positionValue(c.visual.popStrength),item(menus::value(u8"整句缓慢悬浮",on(c.visual.bob)),1770)+item(u8"周期 -0.2秒",1771)+item(u8"周期 +0.2秒",1772)+item(u8"幅度 -1‰",1773)+item(u8"幅度 +1‰",1774)+item(u8"弹跳幅度 -0.1",1775)+item(u8"弹跳幅度 +0.1",1776)+item(menus::value(u8"柔和渐入",on(c.visual.softEntrance)),1777)+item(u8"预览当前效果",27));
+ if(id>=1500&&id<=1563){int code=int(id-1500);if(code%10>3)return nullptr;try{c=visual::apply(c,visual::builtin(code/10),visual::Scope(code%10));changeSettings(c);}catch(const std::exception& e){note(std::string("Visual preset rejected: ")+e.what());}return nullptr;}
+ if(id>=1600&&id<=1675){int code=int(id-1600),slot=code/10,action=code%10;try{if(action==0)visual::save(c,slot);else if(action>=1&&action<=4&&visual::occupied(c,slot))c=visual::apply(c,c.visualPresets.at(slot),visual::Scope(action-1));else if(action==5&&visual::occupied(c,slot))c.visualPresets[slot]=nullptr;else return nullptr;changeSettings(c);}catch(const std::exception& e){note(std::string("Saved visual preset rejected: ")+e.what());}return nullptr;}
+ if(id>=1700&&id<=1787){auto adjust=[](float value,float delta,float low,float high){return std::clamp(std::round((value+delta)*1000)/1000,low,high);};
+ if(id==1700||id==1701)c.visual.translationSize=adjust(c.visual.translationSize,id==1700?-.05f:.05f,.35f,1.5f);
+ else if(id==1702||id==1703)c.visual.translationOpacity=adjust(c.visual.translationOpacity,id==1702?-.1f:.1f,.1f,1);
+ else if(id==1704||id==1705)c.visual.translationGap=adjust(c.visual.translationGap,id==1704?-2:2,0,64);
+ else if(id==1706)c.visual.translationFollow=!c.visual.translationFollow;
+ else if((id>=1720&&id<=1727)||(id>=1730&&id<=1737)){const uint32_t colors[]={0xf7e1d7,0xffffff,0xff99cc,0x70d6ff,0xffcc66,0x99ffcc,0xc5a3ff,0xff8855};if(id<1730){c.visual.translationColor=colors[id-1720];c.visual.translationFollow=false;}else c.visual.highlight=colors[id-1730];}
+ else if(id>=1740&&id<=1744)c.visual.exit=int(id-1740);
+ else if(id==1750)c.visual.tone=!c.visual.tone;else if(id==1751)c.visual.dynamicGlow=!c.visual.dynamicGlow;else if(id==1756)c.visual.wallEffects=!c.visual.wallEffects;
+ else if(id==1752||id==1753)c.visual.pending=adjust(c.visual.pending,id==1752?-.1f:.1f,.1f,1);else if(id==1754||id==1755)c.visual.sung=adjust(c.visual.sung,id==1754?-.1f:.1f,.1f,1);
+ else if(id==1760)c.visual.smoothScale=!c.visual.smoothScale;else if(id==1761||id==1762)c.visual.smoothMs=std::clamp(c.visual.smoothMs+(id==1761?-50:50),50,1000);
+ else if(id==1777)c.visual.softEntrance=!c.visual.softEntrance;else if(id==1770)c.visual.bob=!c.visual.bob;else if(id==1771||id==1772)c.visual.bobPeriod=adjust(c.visual.bobPeriod,id==1771?-.2f:.2f,.2f,20);else if(id==1773||id==1774)c.visual.bobAmount=adjust(c.visual.bobAmount,id==1773?-.001f:.001f,0,.05f);else if(id==1775||id==1776)c.visual.popStrength=adjust(c.visual.popStrength,id==1775?-.1f:.1f,0,1.5f);
+ else if(id==1780||id==1781)c.size=std::clamp(c.size+(id==1780?-2:2),12,96);else if(id==1782||id==1783)c.visual.originalOpacity=adjust(c.visual.originalOpacity,id==1782?-.1f:.1f,.1f,1);else if(id==1784||id==1785)c.lineWidthScale=adjust(c.lineWidthScale,id==1784?-.1f:.1f,.5f,4);else if(id==1786||id==1787)c.visual.metadataSize=adjust(c.visual.metadataSize,id==1786?-.05f:.05f,.4f,1.5f);else return nullptr;
+ changeSettings(c);return nullptr;}
  if(id==27){positionPreview=true;positionPreviewMotion=true;return positionHome(c);}
  if(id==23||id==2000){positionPreview=true;return positionHome(c);}
  if(id==2006){positionPreview=true;positionPreviewMotion=!positionPreviewMotion.load();return positionHome(c);}
@@ -678,7 +723,7 @@ const char* menuActionImpl(void* argument){uintptr_t id=reinterpret_cast<uintptr
  if(id==31)return page(u8"单行长度（不改变字号和距离） · "+positionValue(c.lineWidthScale)+"x",item("0.75x",600)+item(u8"1x（默认）",601)+item("1.5x",602)+item("2x",603)+item("3x",604)+item("4x",605)+item(u8"返回主菜单",0));
  if(id==19)return page(u8"长句回到当前视野 · "+reanchorSeconds(c.reanchorMs)+u8" 秒",item(u8"关闭",580)+item(u8"每 3 秒",581)+item(u8"每 5 秒",582)+item(u8"每 10 秒",583)+item(u8"自定义秒数（当前 "+reanchorSeconds(c.reanchorMs)+u8" 秒）",34));
  if(id==34)return page(u8"自定义回归间隔 · "+reanchorSeconds(c.reanchorMs)+u8" 秒",item(u8"-10 秒",584)+item(u8"-1 秒",585)+item(u8"-0.1 秒",586)+item(u8"+0.1 秒",587)+item(u8"+1 秒",588)+item(u8"+10 秒",589)+item(u8"重设为 3 秒",590)+item(u8"关闭回归",591)+item(u8"范围 0.1～300 秒；0 为关闭",0));
- if(id==10){std::string rows;for(int i=0;i<6;++i)rows+=item(presetName(i),100+i);return page(std::string(u8"歌词预设 · ")+colorPresetLabel(c),rows);}
+ if(id==10){std::string rows;for(int i=0;i<6;++i)rows+=item(presetName(i),100+i);return page(std::string(u8"原有六套配色 · ")+visual::paletteLabel(c),rows);}
  if(id==11||id==12)return menuPage(menus::palette(c,id==12));
  if(id==40||id==41)return menuPage(menus::channels(c,id==41));
  if(id>=400&&id<=402)return channelMenu(c,false,unsigned(id-400));if(id>=410&&id<=412)return channelMenu(c,true,unsigned(id-410));
@@ -752,7 +797,7 @@ void updateHudAppearance(const hud::Appearance& appearance){std::lock_guard<std:
 std::string nativeMenuNotice(){auto notice=std::atomic_load(&menuNotice);auto tick=uint64_t(now());return tick>=notice->tick&&tick-notice->tick<2000?notice->text:std::string{};}
 const char* openNativeMenu(void*){nativeHud.open();return nullptr;}
 const char* nativeEntryMenu(){static std::string entry;char callback[32];std::snprintf(callback,sizeof(callback),"0x%lx",static_cast<unsigned long>(reinterpret_cast<uintptr_t>(&openNativeMenu)));entry="\"L4D2DangoMusic\" { \"打开歌词控制面板\" { \"callback\" \""+std::string(callback)+"\" \"user_data\" \"0x0\" } }";return entry.c_str();}
-const char* rootMenu(bool title){if(title)return "L4D2DangoMusic 0.9.7";positionPreview=false;wallPositionPreview=false;auto c=*std::atomic_load(&settings);auto saved=std::atomic_load(&savedSettings);auto state=saveState.load();bool saving=state==1||bool(std::atomic_load(&pendingSave));return menuPage(menus::root(c,menus::saveLabel(c,saved?*saved:Config{},saving,state<0,bool(saved)),(std::atomic_load(&followSettings)->enabled||c.autoFollow.enabled)));}
+const char* rootMenu(bool title){if(title)return "L4D2DangoMusic 0.9.8-preview1";positionPreview=false;wallPositionPreview=false;auto c=*std::atomic_load(&settings);auto saved=std::atomic_load(&savedSettings);auto state=saveState.load();bool saving=state==1||bool(std::atomic_load(&pendingSave));return menuPage(menus::root(c,menus::saveLabel(c,saved?*saved:Config{},saving,state<0,bool(saved)),(std::atomic_load(&followSettings)->enabled||c.autoFollow.enabled)));}
 
 void captureSourceFeatures(const GameCameraFrame& frame){
  auto current=std::atomic_load(&settings);source_roster::enabled=current->sync.enabled&&current->sync.discover&&!current->demo&&current->musicSource<=1;source_roster::capture(frame);
@@ -767,8 +812,8 @@ class LyricsPlugin final:public IL4NPlugin {
  bool started=false,attempted=false,duplicate=false;HANDLE renderOwner=nullptr;
 public:
  const char* GetName()override{return "L4D2DangoMusic";}
- const char* GetVersion()override{return "0.9.7";}
- const char* RequestHudMenu(bool title)override{start();if(duplicate){if(title)return u8"L4D2DangoMusic 0.9.7 · 重复副本已阻止";return page(u8"重复副本未启用绘制",item(u8"查看实际 DLL 路径与其他模块",24));}if(title)return "L4D2DangoMusic 0.9.7";nativeHud.open();return nativeEntryMenu();}
+ const char* GetVersion()override{return "0.9.8-preview1";}
+ const char* RequestHudMenu(bool title)override{start();if(duplicate){if(title)return u8"L4D2DangoMusic 0.9.8-preview1 · 重复副本已阻止";return page(u8"重复副本未启用绘制",item(u8"查看实际 DLL 路径与其他模块",24));}if(title)return "L4D2DangoMusic 0.9.8-preview1";nativeHud.open();return nativeEntryMenu();}
  void start(){if(attempted)return;attempted=true;GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,reinterpret_cast<const wchar_t*>(&fileLog),&ownModule);wchar_t path[32768]{};if(!GetModuleFileNameW(ownModule,path,32768))return;ownPath=path;pluginDirectory=ownPath.parent_path();logger=fileLog;nativeHud.configure(buildNativeMenu,activateNativeMenu,closeNativeMenu,nativeMenuNotice,note,updateHudAppearance);
  std::wstring ownerName=L"Local\\L4D2DangoMusic-render-"+std::to_wstring(GetCurrentProcessId());SetLastError(ERROR_SUCCESS);renderOwner=CreateMutexW(nullptr,FALSE,ownerName.c_str());DWORD ownerError=GetLastError();
  if(!renderOwner||ownerError==ERROR_ALREADY_EXISTS){duplicate=true;if(renderOwner)CloseHandle(renderOwner);renderOwner=nullptr;note("Duplicate renderer blocked pid="+std::to_string(GetCurrentProcessId())+" dll="+ownPath.u8string());return;}
