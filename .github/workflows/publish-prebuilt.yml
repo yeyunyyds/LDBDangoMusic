@@ -1,0 +1,64 @@
+name: Publish verified prebuilt hotfix
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tested release tag with installers on the zip branch
+        required: true
+        type: string
+permissions:
+  contents: write
+concurrency:
+  group: prebuilt-${{ inputs.tag }}
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify prebuilt installers against the release tag
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          python3 - <<'PY'
+          import hashlib,json,os,re,struct,subprocess,zipfile
+          from pathlib import Path
+          tag=os.environ['RELEASE_TAG']
+          if not re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+',tag): raise SystemExit('Invalid version tag')
+          commit=subprocess.check_output(['git','rev-parse','--verify',f'refs/tags/{tag}^{{commit}}'],text=True).strip()
+          subprocess.run(['git','fetch','origin','zip'],check=True)
+          Path('release-assets').mkdir()
+          for variant in ('l4n','diagnostics'):
+              name=f'L4D2DangoMusic-{tag[1:]}-{variant}.zip'
+              blob=subprocess.check_output(['git','show',f'origin/zip:{name}'])
+              checksum=subprocess.check_output(['git','show',f'origin/zip:{name}.sha256']).decode()
+              if checksum.split()!=[hashlib.sha256(blob).hexdigest(),name]: raise SystemExit('Checksum mismatch')
+              path=Path('release-assets')/name;path.write_bytes(blob)
+              with zipfile.ZipFile(path) as archive:
+                  if set(archive.namelist())!={'README.md','bin/neko/plugins/L4D2DangoMusic.dll','bin/neko/plugins/L4D2DangoMusic/config.json'}: raise SystemExit('Unexpected payload')
+                  readme=archive.read('README.md').decode()
+                  if '/tree/'+commit not in readme or '不保证 VAC 安全' not in readme: raise SystemExit('Source/disclaimer mismatch')
+                  config=json.loads(archive.read('bin/neko/plugins/L4D2DangoMusic/config.json'))
+                  if any(config['steamSync'][k] for k in ('enabled','discover','autoSearch','apply')): raise SystemExit('Experimental defaults must be off')
+                  dll=archive.read('bin/neko/plugins/L4D2DangoMusic.dll')
+                  pe=struct.unpack_from('<I',dll,0x3c)[0]
+                  if dll[:2]!=b'MZ' or dll[pe:pe+4]!=b'PE\0\0' or struct.unpack_from('<H',dll,pe+4)[0]!=0x14c: raise SystemExit('Not x86 PE')
+                  marker=b'DANGO_DIAGNOSTICS_ENABLED' if variant=='diagnostics' else b'DANGO_PRODUCTION_NO_DIAGNOSTICS'
+                  if marker not in dll: raise SystemExit('Build flavor mismatch')
+              Path('release-assets',name+'.sha256').write_text(checksum)
+          notes=subprocess.check_output(['git','show',f'{tag}:docs/releases/{tag}.md'])
+          Path('release-notes.md').write_bytes(notes)
+          PY
+      - name: Publish hotfix
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" --verify-tag --title "L4D2DangoMusic $RELEASE_TAG" --notes-file release-notes.md --draft
+          fi
+          gh release upload "$RELEASE_TAG" release-assets/* --clobber
+          gh release edit "$RELEASE_TAG" --notes-file release-notes.md --draft=false --latest
