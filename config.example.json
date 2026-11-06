@@ -182,6 +182,7 @@
     "highlight": "#FFFFFF",
     "metadataSize": 1.0,
     "originalOpacity": 1.0,
+    "originalSize": 1.0,
     "pending": 0.44999998807907104,
     "popStrength": 1.0,
     "smoothMs": 180,
