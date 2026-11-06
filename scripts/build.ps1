@@ -1,10 +1,14 @@
-param([switch]$NativeNetEase,[switch]$WithMediaBridge)
+param([switch]$NativeNetEase,[switch]$WithMediaBridge,[switch]$Diagnostics)
 $ErrorActionPreference = 'Stop'
 Set-Location (Join-Path $PSScriptRoot '..')
 New-Item -ItemType Directory -Force build | Out-Null
+$diagnosticFlags = @()
+$dllOutput = "build/L4D2DangoMusic.dll"
+if ($Diagnostics) { New-Item -ItemType Directory -Force build/diagnostics | Out-Null; $diagnosticFlags = @("/DDANGO_DIAGNOSTICS=1"); $dllOutput = "build/diagnostics/L4D2DangoMusic.dll" }
 # Run from an x86 Native Tools / MSVC developer PowerShell.
-& cl.exe /nologo /std:c++17 /EHsc /utf-8 /W4 /O2 /MD /LD /Isrc /Ivendor /Ivendor/imgui src/plugin.cpp vendor/imgui/imgui.cpp vendor/imgui/imgui_draw.cpp vendor/imgui/imgui_tables.cpp vendor/imgui/imgui_widgets.cpp vendor/imgui/backends/imgui_impl_dx9.cpp /Fobuild/ /link /DEF:src/L4D2DangoMusic.def /OUT:build/L4D2DangoMusic.dll winhttp.lib d3d9.lib gdi32.lib user32.lib dxguid.lib comctl32.lib shell32.lib
+& cl.exe @diagnosticFlags /nologo /std:c++17 /EHsc /utf-8 /W4 /O2 /MD /LD /Isrc /Ivendor /Ivendor/imgui src/plugin.cpp vendor/imgui/imgui.cpp vendor/imgui/imgui_draw.cpp vendor/imgui/imgui_tables.cpp vendor/imgui/imgui_widgets.cpp vendor/imgui/backends/imgui_impl_dx9.cpp /Fobuild/ /link /DEF:src/L4D2DangoMusic.def /OUT:$dllOutput winhttp.lib d3d9.lib gdi32.lib user32.lib dxguid.lib comctl32.lib shell32.lib
 if ($LASTEXITCODE -ne 0) { throw 'x86 L4N plugin build failed' }
+if ($Diagnostics) { return }
 & cl.exe /nologo /std:c++17 /EHsc /utf-8 /W4 /Isrc /Ivendor tests/core_test.cpp /Fobuild/core_test.obj /Febuild/core_test.exe
 if ($LASTEXITCODE -ne 0) { throw 'Core build failed' }
 & ./build/core_test.exe
@@ -66,3 +70,8 @@ if ($LASTEXITCODE -ne 0) { throw 'NetEase elog tests failed' }
 if ($LASTEXITCODE -ne 0) { throw "Auto listening tests build failed" }
 & ./build/auto_listening_test.exe
 if ($LASTEXITCODE -ne 0) { throw "Auto listening tests failed" }
+
+& cl.exe /nologo /std:c++17 /EHsc /utf-8 /W4 /Itests /Isrc /Ivendor tests/network_isolation_test.cpp /Fobuild/network_isolation_test.obj /Febuild/network_isolation_test.exe
+if ($LASTEXITCODE -ne 0) { throw "Network isolation test build failed" }
+& ./build/network_isolation_test.exe
+if ($LASTEXITCODE -ne 0) { throw "Network isolation test failed" }

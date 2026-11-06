@@ -1,5 +1,15 @@
 {
-  "steamSync": {"enabled": false, "discover": true, "autoSearch": true, "role": 0, "apply": false, "thresholdMs": 350, "host": "", "peers": []},
+  "steamSync": {
+    "enabled": false,
+    "discover": false,
+    "autoSearch": false,
+    "role": 0,
+    "apply": false,
+    "thresholdMs": 350,
+    "host": "",
+    "peers": [],
+    "optInVersion": 1
+  },
   "musicSource": 0,
   "port": 23330,
   "demo": false,

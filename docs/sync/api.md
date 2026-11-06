@@ -64,10 +64,16 @@ UI 回调通过 Requests.push 提交，返回值只表示队列有容量，不�
 
 Runtime.tick 接收 SourceContext（provider、revision、epoch）、Roster 快照及可选固定 Scheme 调度回调；默认上下文不给予 LX 控制权限。集成层必须按实际使用的播放器填入，不能仅根据“本机安装了 LX”判断。Requests 的本机控制命令也要携带 sourceRevision/sourceEpoch。来源切换、自动回退、断线或旧命令代次不符时，丢弃命令、取消回读并重建同步会话。
 
-仅 SourceContext::LX 可以启用 Session 与执行控制，网易云/Windows/示例上下文不初始化进度会话或访问 LX 写 API；来源无关的同局插件发现仍可运行，只公告不具备 LX 参与资格。实际集成在每次 HTTP 操作前再次比较不可变配置的 playbackSourceRevision，避免切换来源与后台执行之间的竞争。此运行时字段不写入用户配置文件。
+仅 SourceContext::LX 可以启用 Session 与执行控制，网易云/Windows/示例上下文不初始化进度会话或访问 LX 写 API；v0.9.7 的总开关、发现开关和实际 LX 来源共同授权网络，任一条件不满足就停止发现与进度链路。实际集成在每次 HTTP 操作前再次比较不可变配置的 playbackSourceRevision，避免切换来源与后台执行之间的竞争。此运行时字段不写入用户配置文件。
 
 ## 自动房间与切歌
 
 `Discovery(transport, roster, nonce, now)` 使用专用发现传输；每轮 `tick(enabled, actualLX, now)`，`leader()` 提供 id/term/boot，`participants()` 仅返回当前已确认且具备 LX 资格的对端。描述符、名单或来源代次变化时重建 Session。`claim(now)` 和 `rescan(now)` 对应用户菜单操作。
 
 `Session::remote(now)` 只返回新鲜且已校时的房主状态；`SongSwitch::tick(track, playing, local, now, dispatch)` 对不同曲目构造受限 URI，通过注入调度器交给 LX。只有后续本机歌曲实际匹配时，Session::correction 才会提供有效进度计划。调用者必须对调度器再次执行来源检查，不能让远端指定任意 URI。
+
+## v0.9.7 总开关与诊断构建
+
+Settings 的 enabled/discover/autoSearch/apply 均默认 false。readSettings 要求 optInVersion=1 才保留已保存的网络授权；旧版本全部撤销。Runtime 在任何请求处理、Steam 绑定和发现前执行关闭门禁，撤销时丢弃队列、销毁会话及传输。传输 connect/send/pump 还检查即时许可回调，阻止菜单关停或换源与后台执行之间的旧请求。已建通道关闭时允许一次释放，之后无后台轮询。
+
+生产编译不包含诊断操作，旧 action 0/1/3/4/5/7 不能执行；常规同步仅保留选主、重扫和重新搜索动作，且受总开关约束。DANGO_DIAGNOSTICS=1 构建才包含手动控制测试和 Steam 诊断，且仍不能越过总开关。构建产物与安装包标识隔离。

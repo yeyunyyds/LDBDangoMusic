@@ -1,3 +1,4 @@
+#define DANGO_DIAGNOSTICS 1
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include "source_entities.hpp"

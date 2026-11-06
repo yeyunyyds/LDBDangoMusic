@@ -1,4 +1,5 @@
 #pragma once
+#include "build_features.hpp"
 #include <windows.h>
 #include <memory>
 #include <string>
@@ -67,7 +68,9 @@ inline void connect(){
  static int previousAvailability=-1;int availability=(client?1:0)|(engine?2:0);
  if(availability!=previousAvailability){previousAvailability=availability;
  log("Camera query: VClient016="+std::string(client?"found":"missing")+" VEngineClient013="+(engine?"found":"missing"));
+ #if DANGO_DIAGNOSTICS
  log("Client factory inventory: "+inventory(cf,"VClient"));log("Engine factory inventory: "+inventory(ef,"VEngineClient"));
+ #endif
  log("Inventory is names only. Unverified interface versions will NOT be called or hooked.");}
  if(!client||!engine){reason=!client?(!engine?4:2):3;return;}reason=5;
  if(!readable(client,sizeof(void*))||!readable(engine,sizeof(void*)))return;table=*reinterpret_cast<void***>(client);auto et=*reinterpret_cast<void***>(engine);

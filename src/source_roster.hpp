@@ -2,7 +2,7 @@
 #include "source_camera.hpp"
 #include "sync/roster.hpp"
 namespace source_roster {
-inline std::atomic<bool> enabled{true};
+inline std::atomic<bool> enabled{false};
 inline std::shared_ptr<const dango::sync::Roster> snapshot=std::make_shared<dango::sync::Roster>();
 inline uint64_t nextCapture=0,generation=1;inline uint32_t lastEpoch=0;inline HMODULE checkedModule=nullptr;inline bool validated=false;
 // Static inspection of the uploaded engine image: GetPlayerInfo copies/clears

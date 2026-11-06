@@ -1,4 +1,5 @@
 #pragma once
+#include "build_features.hpp"
 #include "source_camera.hpp"
 #include "source_entity_contract.hpp"
 #include "source_entity_profile.hpp"
@@ -150,6 +151,7 @@ inline void onFrame(const GameCameraFrame& camera)noexcept{
  if((enabled.load()||browseRequested.load()||autoRequested.load())&&camera.tick>=nextCapture){nextCapture=camera.tick+200;capture(camera);}
  }catch(...){faulted=true;log("Capture stopped after an exception; toggle diagnostics to retry");}
 }
+#if DANGO_DIAGNOSTICS
 inline nlohmann::json jsonFrame(const Frame& f){
  nlohmann::json out={{"schema",1},{"diagnostic_build",10},{"epoch",f.epoch},{"tick",f.tick},{"status",f.status},{"pose_space","network_raw"},{"occupied",f.occupied},{"unknown_class",f.unknownClass},{"unknown_base",f.unknownBase},{"unknown_tables",f.unknownTables},{"getter_hints",f.getterHints},{"binding_checks",f.bindingChecks},{"model_lookup_available",f.modelLookup},{"objects",nlohmann::json::array()}};
  out["requested_follow_handle"]=f.requestedFollowHandle;out["followed_handle"]=f.followedHandle;out["follow_route"]=f.followRoute;
@@ -165,4 +167,7 @@ inline void drain(const std::filesystem::path& directory){
  try{std::filesystem::create_directories(directory);auto output=jsonFrame(*frame);auto request=std::atomic_load(&followRequest);if(request->enabled){auto target=std::atomic_load(&followSnapshot);output["follow"]={{"request_epoch",request->epoch},{"request_handle",request->handle},{"snapshot",jsonFrame(*target)}};}auto automatic=std::atomic_load(&automaticRequest);if(autoRequested.load()||automatic->enabled)output["automatic_follow"]={{"request_epoch",automatic->epoch},{"request_handle",automatic->handle},{"enabled",automatic->enabled},{"snapshot",jsonFrame(*std::atomic_load(&automaticSnapshot))}};std::ofstream file(directory/L"entities.jsonl",std::ios::app|std::ios::binary);file<<output.dump(-1,' ',false,nlohmann::json::error_handler_t::replace)<<'\n';file.flush();if(!file)throw std::runtime_error("write failed");last=frame->tick;++fileFrames;}
  catch(const std::exception& e){enabled=false;log(std::string("Diagnostic output failed: ")+e.what());}
 }
+#else
+inline void drain(const std::filesystem::path&){}
+#endif
 }

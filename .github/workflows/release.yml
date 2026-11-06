@@ -51,8 +51,15 @@ jobs:
         env:
           DANGO_CXX: i686-w64-mingw32-g++-posix
         run: bash scripts/build-mingw.sh
+      - name: Build separate diagnostic DLL
+        env:
+          DANGO_CXX: i686-w64-mingw32-g++-posix
+          DANGO_DIAGNOSTICS: 1
+        run: bash scripts/build-mingw.sh
       - name: Package minimal installer
-        run: python3 scripts/package.py
+        run: |
+          python3 scripts/package.py
+          python3 scripts/package.py --variant diagnostics
       - name: Publish release and installer
         env:
           GH_TOKEN: ${{ github.token }}

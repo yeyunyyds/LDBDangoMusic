@@ -1,9 +1,15 @@
 #pragma once
-#include "steam_transport.hpp"
+#include "../build_features.hpp"
+#ifndef DANGO_SYNC_STEAM_HEADER
+#define DANGO_SYNC_STEAM_HEADER "steam_transport.hpp"
+#endif
+#include DANGO_SYNC_STEAM_HEADER
 #include "session.hpp"
 #include "lx_control.hpp"
 #include "settings.hpp"
+#if DANGO_DIAGNOSTICS
 #include "simulation.hpp"
+#endif
 #include "source_policy.hpp"
 #include "discovery.hpp"
 #include "song_switch.hpp"
@@ -17,6 +23,8 @@ struct Status {
 };
 class Runtime {
  struct RetryPending:std::runtime_error{using std::runtime_error::runtime_error;};
+ bool networkOpen=false;std::function<bool()> networkGuard;
+ bool allowed()const{return networkOpen&&(!networkGuard||networkGuard());}
  Requests& requests;
  std::unique_ptr<steam::Transport> transport,roomTransport;
  std::unique_ptr<Discovery> discovery;std::unique_ptr<Session> session;
@@ -25,22 +33,32 @@ class Runtime {
  uint64_t commandId=0,lastSourceEpoch=0,lastSourceRevision=0;bool lastSourceLx=false;
  std::deque<lx::Command> commands;lx::Executor executor;SongSwitch songSwitch;Status report;
  void(*log)(const std::string&);bool enabledBefore=false,executorAutomatic=false;
- void ensure(int64_t now){if(transport)return;if(now<retryAt)throw RetryPending("Steam bind retry cooling down");retryAt=now+5000;auto next=std::make_unique<steam::Transport>();next->connect();transport=std::move(next);if(log)log("Steam progress bound self="+std::to_string(transport->self())+" "+transport->binding);}
- void ensureRoom(int64_t now){if(roomTransport)return;if(now<roomRetryAt)throw RetryPending("Steam discovery bind retry cooling down");roomRetryAt=now+5000;auto next=std::make_unique<steam::Transport>(45630);next->connect();roomTransport=std::move(next);if(log)log("Steam discovery bound self="+std::to_string(roomTransport->self())+" channel=45630");}
+ void ensure(int64_t now){if(transport)return;if(now<retryAt)throw RetryPending("Steam bind retry cooling down");retryAt=now+5000;auto next=std::make_unique<steam::Transport>(45631,[this](){return allowed();});next->connect();transport=std::move(next);if(log)log("Steam progress bound self="+std::to_string(transport->self())+" "+transport->binding);}
+ void ensureRoom(int64_t now){if(roomTransport)return;if(now<roomRetryAt)throw RetryPending("Steam discovery bind retry cooling down");roomRetryAt=now+5000;auto next=std::make_unique<steam::Transport>(45630,[this](){return allowed();});next->connect();roomTransport=std::move(next);if(log)log("Steam discovery bound self="+std::to_string(roomTransport->self())+" channel=45630");}
  void clearAutomatic(){commands.erase(std::remove_if(commands.begin(),commands.end(),[](const lx::Command& c){return c.automatic;}),commands.end());if(executorAutomatic)executor.cancel();songSwitch.reset();nextCorrection=0;}
 public:
  explicit Runtime(Requests& q,void(*logger)(const std::string&)):requests(q),log(logger){}
- template<class Read,class Http> Status tick(const Settings& cfg,const State& state,int64_t now,Read readStatus,Http http,SourceContext source={},const Roster& roster={},const std::function<void(const std::string&)>& scheme={}){
+ template<class Read,class Http> Status tick(const Settings& cfg,const State& state,int64_t now,Read readStatus,Http http,SourceContext source={},const Roster& roster={},const std::function<void(const std::string&)>& scheme={},const std::function<bool()>& permission={}){
   bool lxActive=lxAllowed(source);report.activeSource=providerName(source.provider);report.lxActive=lxActive;report.sourceRevision=source.revision;report.sourceEpoch=source.epoch;
   if(lastSourceEpoch!=source.epoch||lastSourceRevision!=source.revision||lastSourceLx!=lxActive){commands.clear();executor.cancel();session.reset();signature.clear();songSwitch.reset();lastSourceEpoch=source.epoch;lastSourceRevision=source.revision;lastSourceLx=lxActive;}
+  networkOpen=cfg.enabled&&cfg.discover&&lxActive;networkGuard=permission;
+  if(!allowed()){
+   auto pending=requests.drain();bool blockedUser=false;for(auto& request:pending)if(request.action==2)blockedUser=true;
+   session.reset();discovery.reset();transport.reset();roomTransport.reset();signature.clear();scopeSignature.clear();memberDigest.clear();commands.clear();executor.cancel();songSwitch.reset();claimUntil=0;retryAt=roomRetryAt=0;enabledBefore=false;
+   report=Status{};report.activeSource=providerName(source.provider);report.lxActive=lxActive;report.sourceRevision=source.revision;report.sourceEpoch=source.epoch;report.progress="Networking disabled; no plugin Steam/P2P activity";report.search="Search blocked while networking is disabled";if(blockedUser)report.create="BLOCKED: Steam user lifecycle APIs removed";return report;
+  }
   bool rescan=false,retrySearch=false;
   for(auto& request:requests.drain()){
+   #if DANGO_DIAGNOSTICS
    if(request.action==0){if(!currentCommand(source,request.command.sourceRevision,request.command.sourceEpoch)){report.control="LX-only control blocked: source changed or is not LX";continue;}if(commands.size()<16)commands.push_back(std::move(request.command));continue;}
    if(request.action==2){report.create="BLOCKED: Steam user lifecycle APIs removed";if(log)log("Legacy user probe rejected before SDK binding");continue;}
    if(request.action==5){try{report.simulated=virtualPlayersTest();}catch(const std::exception& e){report.simulated=e.what();}if(log)log(report.simulated);continue;}
+   #endif
    if(request.action==6){claimUntil=now+5000;continue;}if(request.action==8){rescan=true;continue;}if(request.action==9){retrySearch=true;continue;}
+   #if DANGO_DIAGNOSTICS
    if(request.action==7){try{if(!currentCommand(source,request.command.sourceRevision,request.command.sourceEpoch)||request.command.expectedTrack!=state.key||state.at(now)<0||!scheme)throw std::runtime_error("LX Scheme unavailable for this source");scheme(searchPlayUri(request.track));report.search="Current song searchPlay dispatched; verify actual LX track";if(log)log("LX Scheme current-song test dispatched");}catch(const std::exception& e){report.search=e.what();}continue;}
    try{if(log)log("Steam diagnostic begin action="+std::to_string(request.action));ensure(now);if(request.action==1)transport->selfTest(now);if(request.action==3)transport->socketPairTest(now);}catch(const std::exception& e){report.network=e.what();if(log)log(report.network);}
+   #endif
   }
   auto observed=executor.observe(state,now);if(observed.id&&!observed.message.empty()){report.control=observed.message;if(log)log("LX callback id="+std::to_string(observed.id)+" verified="+std::to_string(observed.verified)+" "+observed.message);}
   report.roster=roster.status;report.members.clear();Leader leader;std::set<Peer> peers;
@@ -67,7 +85,11 @@ public:
    if(participating)ensure(now);
    for(auto peer:peers)key+="/"+std::to_string(peer);
    if(signature!=key){session.reset();clearAutomatic();if(transport)transport->allow(participating?peers:std::set<Peer>{});signature=key;if(participating){session=std::make_unique<Session>(*transport,leader.id==transport->self()?Role::Host:Role::Follower,peers,leader.id,steam::nonce(),roster.cohort());if(log)log("Steam room host="+std::to_string(leader.id)+" term="+std::to_string(leader.term)+" members="+std::to_string(peers.size()+1));}}
-   if(transport){transport->pump(now);report.identity=transport->self();if(log&&report.self!=transport->selfResult)log("Steam self test: "+transport->selfResult);if(log&&report.pair!=transport->pairResult)log("Steam CreateSocketPair: "+transport->pairResult);report.self=transport->selfResult;report.pair=transport->pairResult;report.network=transport->binding;}
+   if(transport){transport->pump(now);report.identity=transport->self();
+ #if DANGO_DIAGNOSTICS
+ if(log&&report.self!=transport->selfResult)log("Steam self test: "+transport->selfResult);if(log&&report.pair!=transport->pairResult)log("Steam CreateSocketPair: "+transport->pairResult);report.self=transport->selfResult;report.pair=transport->pairResult;
+ #endif
+ report.network=transport->binding;}
    if(session){
     session->tick(state,now);report.network=session->status+" sendFailures="+std::to_string(session->sendFailures);report.sent=session->sent;report.received=session->received;report.rejected=session->rejected;report.rtt=session->timing().rtt;
     auto decision=session->correction(state,now,cfg.threshold);report.drift=decision.drift;bool follower=leader.id!=report.identity;report.progress=follower?decision.reason+(cfg.apply?"; APPLY":"; DRY RUN"):"Publishing local LX progress";

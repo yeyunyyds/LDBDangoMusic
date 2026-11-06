@@ -1,4 +1,5 @@
 #pragma once
+#include "build_features.hpp"
 #include "json.hpp"
 #include "component_layout.hpp"
 #include "hud_appearance.hpp"
@@ -45,6 +46,7 @@ inline Config decodeConfig(const nlohmann::json& j){
 #undef BOOL_FIELD
  auto integer=[&](const char* key,int value,int lo,int hi){return std::clamp(j.value(key,value),lo,hi);};
  auto number=[&](const char* key,float value,float lo,float hi){float n=j.value(key,value);if(!std::isfinite(n))throw std::runtime_error("Non-finite setting");return std::clamp(n,lo,hi);};
+ if(!build::diagnostics)c.cameraDiagnostics=c.debugOverlay=c.worldTestAnchor=c.wallDebug=false;
  if(j.contains("steamSync"))c.sync=sync::readSettings(j["steamSync"]);
  if(j.contains("autoFollow"))c.autoFollow=readAutoFollow(j["autoFollow"]);c.moveCurve=integer("moveCurve",0,0,4);c.moveMs=integer("moveMs",350,100,2000);
  c.musicSource=integer("musicSource",0,0,7);if(c.musicSource!=0&&c.musicSource!=1&&c.musicSource!=3)c.musicSource=0;

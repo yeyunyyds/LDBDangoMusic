@@ -1,6 +1,6 @@
 # L4D2DangoMusic
 
-> 当前正式版：[v0.9.6](https://github.com/yeyunyyds/LDBDangoMusic/releases/tag/v0.9.6)。提供普通世界/屏幕歌词、场景挂画，以及可选的手动/自动实体跟随；支持平滑移动、原生 HUD 菜单和可选彩色效果。
+> 当前正式版：[v0.9.7](https://github.com/yeyunyyds/LDBDangoMusic/releases/tag/v0.9.7)。提供普通世界/屏幕歌词、场景挂画，以及可选的手动/自动实体跟随；支持平滑移动、原生 HUD 菜单和可选彩色效果。
 
 为《求生之路 2》（Left 4 Dead 2）提供音乐歌词显示的 L4N 插件。通过兼容 LX / BLF 的本地音乐 API 获取播放进度和歌词，在游戏中呈现带逐字动画的歌词，并支持世界空间定位、歌名与作者显示以及游戏内调节。
 
@@ -15,6 +15,12 @@
 **不保证 VAC 安全：本项目没有获得 Valve、Steam 或 VAC 的官方认可、安全认证或反作弊兼容保证。** 插件在游戏进程中运行并使用游戏及 Steam 接口，无法保证不会触发 VAC、服务器或其他第三方反作弊检测，也无法保证不会导致踢出、限制或账号封禁。单机测试成功、他人正常使用或发布为正式版，均不构成 VAC 安全证明。
 
 本软件按“现状”提供，不对适用性、稳定性、数据安全或反作弊兼容性作出保证。使用者应自行了解并遵守平台和服务器规则，评估并承担使用风险。在适用法律允许的范围内，项目开发者与贡献者不对使用本软件导致的账号处罚、数据丢失或其他损失承担责任；本声明不排除法律规定不得排除的责任。
+
+## v0.9.7 联机隔离修正
+
+一起听、同局自动发现、自动搜索和进度应用均默认关闭。关闭一起听总开关时，本插件不绑定 Steam 网络接口、不读取玩家名单、不探测、不收发或轮询 P2P，也不执行自动选曲及控制；已开启后再关闭，仅清理一次本插件通道，随后停止。游戏自身联网和普通歌词所需的相机/绘制功能不受此开关控制。
+
+升级会撤销旧版联机授权，旧配置中的开关不会自动恢复，需重新主动开启并保存。正式 DLL 不包含 Steam/LX 测试、相机矩阵导出、实体快照导出及诊断探测菜单；这些功能仅在独立 diagnostics 包中构建，不能与正式 DLL 同时加载。普通运行日志保留。关闭联机仍不构成 VAC 安全保证。
 
 ## 功能
 
@@ -46,7 +52,7 @@
 
 ## 安装
 
-[下载 L4D2DangoMusic v0.9.6](https://github.com/yeyunyyds/LDBDangoMusic/releases/download/v0.9.6/L4D2DangoMusic-0.9.6-l4n.zip) · [Release 说明](https://github.com/yeyunyyds/LDBDangoMusic/releases/tag/v0.9.6)
+[下载 L4D2DangoMusic v0.9.7](https://github.com/yeyunyyds/LDBDangoMusic/releases/download/v0.9.7/L4D2DangoMusic-0.9.7-l4n.zip) · [Release 说明](https://github.com/yeyunyyds/LDBDangoMusic/releases/tag/v0.9.7)
 
 安装压缩包内仅包含 **bin 文件夹和 README.md**，不附带源码、构建工具、测试程序或额外依赖。
 
@@ -70,7 +76,7 @@ bin/neko/plugins/L4D2DangoMusic/config.json
 
 ## 一起听
 
-两端安装同版本插件、开启 LX OpenAPI，加入同一游戏后，在“更多设置 → 一起听与播放控制”确认同局发现，再各自开启一起听。可选择“我来当房主”，跟随端使用 LX 官方 Scheme 搜索房主歌曲，实际曲目匹配后才同步进度。网易云不参与一起听。详见[使用指南](docs/sync/README.md)及上方免责声明。
+两端安装同版本插件、开启 LX OpenAPI，加入同一游戏后，在“更多设置 → 一起听（实验，默认关闭）”确认同局发现，再各自开启一起听。可选择“我来当房主”，跟随端使用 LX 官方 Scheme 搜索房主歌曲，实际曲目匹配后才同步进度。网易云不参与一起听。详见[使用指南](docs/sync/README.md)及上方免责声明。
 
 ## 使用与设置
 

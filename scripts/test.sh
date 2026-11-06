@@ -78,3 +78,6 @@ g++ -std=c++17 -O2 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc -Iven
 
 g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc -Ivendor tests/auto_listening_test.cpp -o build/auto_listening_test
 ./build/auto_listening_test
+
+g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Itests -Isrc -Ivendor tests/network_isolation_test.cpp -o build/network_isolation_test
+./build/network_isolation_test
