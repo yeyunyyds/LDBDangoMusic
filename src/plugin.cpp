@@ -611,7 +611,7 @@ const char* menuActionImpl(void* argument){uintptr_t id=reinterpret_cast<uintptr
  else if(id==1780||id==1781)c.size=std::clamp(c.size+(id==1780?-2:2),12,96);else if(id==1782||id==1783)c.visual.originalOpacity=adjust(c.visual.originalOpacity,id==1782?-.1f:.1f,.1f,1);else if(id==1784||id==1785)c.lineWidthScale=adjust(c.lineWidthScale,id==1784?-.1f:.1f,.5f,4);else if(id==1786||id==1787)c.visual.metadataSize=adjust(c.visual.metadataSize,id==1786?-.05f:.05f,.4f,1.5f);else return nullptr;
  changeSettings(c);return nullptr;}
  if(id==27){positionPreview=true;positionPreviewMotion=true;return positionHome(c);}
- if(id==23||id==2000){positionPreview=true;return positionHome(c);}
+ if(id==23||id==2000){positionPreview=true;if(id==23)positionPreviewMotion=false;return positionHome(c);}
  if(id==2006){positionPreview=true;positionPreviewMotion=!positionPreviewMotion.load();return positionHome(c);}
  if(id>=3200&&id<=3203){positionPreview=true;return positionAxisMenu(c,2+MaxLyricSlots,int(id-3200));}
  if(id==2001||id==2002){positionPreview=true;return positionGroup(c,id==2001);}
@@ -792,12 +792,12 @@ std::string buildNativeMenu(uintptr_t id){
  auto result=menuActionImpl(reinterpret_cast<void*>(id));return result?result:std::string{};
 }
 void activateNativeMenu(uintptr_t id){menuAction(reinterpret_cast<void*>(id));}
-void closeNativeMenu(){followPositionPreview=false;positionPreview=false;wallPositionPreview=false;source_entities::browseRequested=false;}
+void closeNativeMenu(){followPositionPreview=false;positionPreview=false;positionPreviewMotion=false;wallPositionPreview=false;source_entities::browseRequested=false;}
 void updateHudAppearance(const hud::Appearance& appearance){std::lock_guard<std::mutex> lock(settingsMutex);auto c=*std::atomic_load(&settings);c.hud=appearance;changeSettings(c);}
 std::string nativeMenuNotice(){auto notice=std::atomic_load(&menuNotice);auto tick=uint64_t(now());return tick>=notice->tick&&tick-notice->tick<2000?notice->text:std::string{};}
 const char* openNativeMenu(void*){nativeHud.open();return nullptr;}
 const char* nativeEntryMenu(){static std::string entry;char callback[32];std::snprintf(callback,sizeof(callback),"0x%lx",static_cast<unsigned long>(reinterpret_cast<uintptr_t>(&openNativeMenu)));entry="\"L4D2DangoMusic\" { \"打开歌词控制面板\" { \"callback\" \""+std::string(callback)+"\" \"user_data\" \"0x0\" } }";return entry.c_str();}
-const char* rootMenu(bool title){if(title)return "L4D2DangoMusic 0.9.8-preview1";positionPreview=false;wallPositionPreview=false;auto c=*std::atomic_load(&settings);auto saved=std::atomic_load(&savedSettings);auto state=saveState.load();bool saving=state==1||bool(std::atomic_load(&pendingSave));return menuPage(menus::root(c,menus::saveLabel(c,saved?*saved:Config{},saving,state<0,bool(saved)),(std::atomic_load(&followSettings)->enabled||c.autoFollow.enabled)));}
+const char* rootMenu(bool title){if(title)return "L4D2DangoMusic 0.9.8-preview1";positionPreview=false;positionPreviewMotion=false;wallPositionPreview=false;auto c=*std::atomic_load(&settings);auto saved=std::atomic_load(&savedSettings);auto state=saveState.load();bool saving=state==1||bool(std::atomic_load(&pendingSave));return menuPage(menus::root(c,menus::saveLabel(c,saved?*saved:Config{},saving,state<0,bool(saved)),(std::atomic_load(&followSettings)->enabled||c.autoFollow.enabled)));}
 
 void captureSourceFeatures(const GameCameraFrame& frame){
  auto current=std::atomic_load(&settings);source_roster::enabled=current->sync.enabled&&current->sync.discover&&!current->demo&&current->musicSource<=1;source_roster::capture(frame);
