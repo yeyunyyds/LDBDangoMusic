@@ -8,7 +8,7 @@ from pathlib import Path
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = '0.9.8-preview2'
+VERSION = '0.9.8'
 
 
 def main():
