@@ -13,16 +13,16 @@ VERSION = '0.9.8'
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--variant', choices=['native-hud', 'music-platforms', 'netease-native', 'steam-sync', 'combined', 'auto-listening', 'diagnostics', 'visual-preview', 'menu-preview'], help='Name a preview package separately from stable installs')
+    parser.add_argument('--variant', choices=['native-hud', 'music-platforms', 'netease-native', 'steam-sync', 'combined', 'auto-listening', 'visual-preview', 'menu-preview'], help='Name a preview package separately from stable installs')
     parser.add_argument('--output-dir', type=Path, default=ROOT / 'build/packages')
     args = parser.parse_args()
-    dll = ROOT / ('build/diagnostics/L4D2DangoMusic.dll' if args.variant == 'diagnostics' else 'build/L4D2DangoMusic.dll')
+    dll = ROOT / 'build/L4D2DangoMusic.dll'
     blob = dll.read_bytes()
     if len(blob) < 64 or blob[:2] != b'MZ':
         raise RuntimeError('Build the Windows DLL before packaging')
     diagnostic_blob = b'DANGO_DIAGNOSTICS_ENABLED' in blob
-    if diagnostic_blob != (args.variant == 'diagnostics'):
-        raise RuntimeError('Diagnostic DLL must only be packaged as diagnostics; production package rejects it')
+    if diagnostic_blob:
+        raise RuntimeError('Diagnostics are archived and cannot be packaged on main')
     if not diagnostic_blob and b'DANGO_PRODUCTION_NO_DIAGNOSTICS' not in blob:
         raise RuntimeError('Missing production build marker')
     pe = struct.unpack_from('<I', blob, 0x3c)[0]
@@ -33,8 +33,6 @@ def main():
     native = args.variant != 'music-platforms'
     template = 'README-menu-preview.md' if args.variant == 'menu-preview' else 'README-visual-preview.md' if args.variant == 'visual-preview' else ('README-combined.md' if args.variant != 'music-platforms' else 'README.md')
     readme = (ROOT / 'packaging' / template).read_text(encoding='utf-8').replace('@VERSION@', VERSION).replace('@SOURCE_URL@', source_url)
-    if args.variant == 'diagnostics':
-        readme = '# 独立诊断构建，仅用于手动排查\n\n包含 Steam/LX/相机/实体诊断，勿与正式 DLL 同时加载。所有网络诊断也须先主动开启一起听总开关；此包不是正式安装包。\n\n' + readme
     disclaimer = (ROOT / 'DISCLAIMER.md').read_text(encoding='utf-8')
     if '@DISCLAIMER@' in readme:
         readme = readme.replace('@DISCLAIMER@', disclaimer)

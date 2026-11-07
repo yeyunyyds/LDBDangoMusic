@@ -30,7 +30,7 @@ jobs:
           commit=subprocess.check_output(['git','rev-parse','--verify',f'refs/tags/{tag}^{{commit}}'],text=True).strip()
           subprocess.run(['git','fetch','origin','zip'],check=True)
           Path('release-assets').mkdir()
-          for variant in ('l4n','diagnostics'):
+          for variant in ('l4n',):
               name=f'L4D2DangoMusic-{tag[1:]}-{variant}.zip'
               blob=subprocess.check_output(['git','show',f'origin/zip:{name}'])
               checksum=subprocess.check_output(['git','show',f'origin/zip:{name}.sha256']).decode()
@@ -45,8 +45,8 @@ jobs:
                   dll=archive.read('bin/neko/plugins/L4D2DangoMusic.dll')
                   pe=struct.unpack_from('<I',dll,0x3c)[0]
                   if dll[:2]!=b'MZ' or dll[pe:pe+4]!=b'PE\0\0' or struct.unpack_from('<H',dll,pe+4)[0]!=0x14c: raise SystemExit('Not x86 PE')
-                  marker=b'DANGO_DIAGNOSTICS_ENABLED' if variant=='diagnostics' else b'DANGO_PRODUCTION_NO_DIAGNOSTICS'
-                  if marker not in dll: raise SystemExit('Build flavor mismatch')
+                  marker=b'DANGO_PRODUCTION_NO_DIAGNOSTICS'
+                  if marker not in dll or b'DANGO_DIAGNOSTICS_ENABLED' in dll: raise SystemExit('Build flavor mismatch')
               Path('release-assets',name+'.sha256').write_text(checksum)
           notes=subprocess.check_output(['git','show',f'{tag}:docs/releases/{tag}.md'])
           Path('release-notes.md').write_bytes(notes)
