@@ -80,3 +80,8 @@ if ($LASTEXITCODE -ne 0) { throw "Network isolation test failed" }
 if ($LASTEXITCODE -ne 0) { throw "Visual presets tests build failed" }
 & ./build/visual_presets_test.exe
 if ($LASTEXITCODE -ne 0) { throw "Visual presets tests failed" }
+
+& cl.exe /nologo /std:c++17 /EHsc /utf-8 /W4 /Isrc /Ivendor tests/menu_navigation_test.cpp /Fobuild/menu_navigation_test.obj /Febuild/menu_navigation_test.exe
+if ($LASTEXITCODE -ne 0) { throw "Menu navigation tests build failed" }
+& ./build/menu_navigation_test.exe
+if ($LASTEXITCODE -ne 0) { throw "Menu navigation tests failed" }

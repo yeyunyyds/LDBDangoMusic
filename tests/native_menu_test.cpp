@@ -14,7 +14,7 @@ int main(){
  auto build=[&](){return document(std::string("\"Display\" {\"Translation: ")+(translation?"on":"off")+"\" {\"user_data\" \"0x2\"}}");};
  for(int i=0;i<100;++i){auto current=build();check(menu.select(current,1)==2);translation=!translation;check(build().rows[0].label==(translation?"Translation: on":"Translation: off"));check(menu.frames.size()==2);}
  menu.enter(34);menu.current().sheet=2;menu.back();check(menu.current().page==20&&build().rows[0].label=="Translation: off");
- menu.enter(27);check(menu.current().page==23);menu.back();check(menu.current().page==20);menu.back();check(!menu.back());
+ menu.enter(27);check(menu.current().page==5060);menu.back();check(menu.current().page==20);menu.back();check(!menu.back());
  Document many;for(unsigned i=1;i<=23;++i)many.rows.push_back({std::to_string(i),i});
  menu.reset();menu.next(many.rows.size());check(menu.select(many,1)==10&&menu.select(many,9)==18);menu.next(23);menu.next(23);menu.next(23);check(menu.select(many,1)==19&&menu.select(many,6)==0);menu.clamp(2);check(menu.current().sheet==0);menu.previous();check(menu.current().sheet==0);
  // The key that selected the L4N entry must be released; holding a key is one

@@ -1,9 +1,11 @@
 #pragma once
 #include <cstdint>
+#include "menu_navigation_ids.hpp"
 namespace dango::hud {
 // L4N v2 treats EVERY non-null callback result as a new child menu.
 // Only actual forward navigation may return a KeyValues page.
 inline bool opensChild(uintptr_t id){
+ if(navigation::page(id))return true;
  if(id==1300||(id>=1310&&id<=1316)||id==1340||(id>=1350&&id<=1357)||(id>=1370&&id<=1383)||id==1380||id==1390||id==1395)return true;
  switch(id){case 9500:case 9600:case 9601:case 9602:case 9603:case 9650:case 10:case 11:case 12:case 13:case 14:case 15:case 16:case 19:case 20:case 21:case 22:case 23:case 24:case 27:case 30:case 31:case 33:case 34:case 35:case 36:case 37:case 38:case 39:case 40:case 41:case 800:case 810:case 811:case 812:case 813:case 814:case 815:case 816:case 818:case 819:case 870:case 871:case 872:case 873:case 874:case 875:case 879:case 890:case 891:case 892:case 720:case 721:case 722:case 723:case 711:case 2000:case 2001:case 2002:case 2003:return true;default:break;}
  return (id>=730&&id<=741)||(id>=400&&id<=402)||(id>=410&&id<=412)||(id>=2100&&id<=2110)||(id>=3000&&id<=3103&&id%10<=3)||(id>=3200&&id<=3203);

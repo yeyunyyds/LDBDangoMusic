@@ -38,6 +38,7 @@ class Runtime {
  void clearAutomatic(){commands.erase(std::remove_if(commands.begin(),commands.end(),[](const lx::Command& c){return c.automatic;}),commands.end());if(executorAutomatic)executor.cancel();songSwitch.reset();nextCorrection=0;}
 public:
  explicit Runtime(Requests& q,void(*logger)(const std::string&)):requests(q),log(logger){}
+ void reset(){networkOpen=false;session.reset();discovery.reset();transport.reset();roomTransport.reset();networkGuard={};signature.clear();scopeSignature.clear();memberDigest.clear();commands.clear();executor.cancel();songSwitch.reset();claimUntil=retryAt=roomRetryAt=nextCorrection=0;enabledBefore=false;lastSourceEpoch=lastSourceRevision=0;lastSourceLx=false;report=Status{};}
  template<class Read,class Http> Status tick(const Settings& cfg,const State& state,int64_t now,Read readStatus,Http http,SourceContext source={},const Roster& roster={},const std::function<void(const std::string&)>& scheme={},const std::function<bool()>& permission={}){
   bool lxActive=lxAllowed(source);report.activeSource=providerName(source.provider);report.lxActive=lxActive;report.sourceRevision=source.revision;report.sourceEpoch=source.epoch;
   if(lastSourceEpoch!=source.epoch||lastSourceRevision!=source.revision||lastSourceLx!=lxActive){commands.clear();executor.cancel();session.reset();signature.clear();songSwitch.reset();lastSourceEpoch=source.epoch;lastSourceRevision=source.revision;lastSourceLx=lxActive;}

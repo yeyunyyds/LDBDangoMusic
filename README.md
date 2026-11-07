@@ -1,6 +1,6 @@
 # L4D2DangoMusic
 
-> 视觉测试分支：**0.9.8-preview1**。新增七套预设、八个自定义槽位、分项应用、原文／翻译样式、逐字明暗、动态柔光与可选退场／尺寸平滑。[下载视觉测试包](https://github.com/yeyunyyds/LDBDangoMusic/raw/refs/heads/zip/L4D2DangoMusic-0.9.8-preview1-visual-preview.zip) · [使用说明](docs/visual-presets-preview.md)
+> 菜单重构测试分支：**0.9.8-preview2**。主菜单固定一页，分组整理外观、动画、场景与实体选项，新增恢复默认外观/全部设置，并保留七套新视觉预设及八个收藏。[下载测试包](https://github.com/yeyunyyds/LDBDangoMusic/raw/refs/heads/zip/L4D2DangoMusic-0.9.8-preview2-menu-preview.zip) · [逐级菜单与恢复说明](docs/menu-navigation-preview.md)
 
 > 当前正式版：[v0.9.7](https://github.com/yeyunyyds/LDBDangoMusic/releases/tag/v0.9.7)。提供普通世界/屏幕歌词、场景挂画，以及可选的手动/自动实体跟随；支持平滑移动、原生 HUD 菜单和可选彩色效果。
 

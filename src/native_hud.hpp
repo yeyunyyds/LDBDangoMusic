@@ -24,7 +24,7 @@ class NativeHud {
  using Log=void(*)(const std::string&);
  using AppearanceWrite=void(*)(const Appearance&);
  Builder build=nullptr;Action act=nullptr;Close closed=nullptr;Notice notice=nullptr;Log log=nullptr;AppearanceWrite appearanceWrite=nullptr;
- std::atomic<bool> opened{false},restart{false},f10{false};
+ std::atomic<bool> opened{false},restart{false},backRequested{false},f10{false};
  ImGuiContext* context=nullptr;ImVector<ImWchar> fontRanges;IDirect3DDevice9* device=nullptr;HWND window=nullptr;bool backend=false,subclass=false,hotkeyHeld=false;
  KeyGate gate;MenuStack stack;enum class Page {Settings,Appearance,Position};std::atomic<Page> page{Page::Settings};
  unsigned preset=0,selected=0,step=8;float opacity=.48f,fontPixels=22,x=8,y=14;bool centerY=true;std::array<bool,4> arrows{};uint64_t retryAfter=0;bool submitted=false,fontReady=false;
@@ -53,7 +53,7 @@ class NativeHud {
  void close(){opened=false;gate.reset();if(closed)closed();}
  void applyPreset(){if(preset==0){background={.015f,.018f,.020f,1};opacity=.48f;}if(preset==1){background={.10f,.105f,.11f,1};opacity=.42f;}if(preset==2){background={.055f,.065f,.075f,1};opacity=.66f;}if(preset==3){background={.01f,.012f,.014f,1};opacity=.28f;}}
  static void text(const std::string& s,ImVec4 color={.94f,.94f,.91f,1}){ImGui::PushStyleColor(ImGuiCol_Text,color);ImGui::TextWrapped("%s",s.c_str());ImGui::PopStyleColor();}
- static void row(unsigned n,const std::string& s,bool enabled=true,uintptr_t action=0){auto tone=rowTone(s,action,enabled);ImVec4 color(1,1,1,1);if(tone==RowTone::Enabled)color={.38f,.95f,.48f,1};else if(tone==RowTone::Disabled)color={1,.38f,.36f,1};else if(tone==RowTone::Partial)color={1,.78f,.25f,1};else if(tone==RowTone::Muted)color={.58f,.60f,.60f,1};text((enabled?"["+std::to_string(n)+"]  ":"     ")+s,color);ImGui::Dummy({1,3});}
+ static void row(unsigned n,const std::string& s,bool enabled=true,uintptr_t action=0){auto tone=rowTone(s,action,enabled);ImVec4 color(1,1,1,1);if(tone==RowTone::Enabled)color={.38f,.95f,.48f,1};else if(tone==RowTone::Disabled)color={1,.38f,.36f,1};else if(tone==RowTone::Partial)color={1,.78f,.25f,1};else if(tone==RowTone::Muted)color={.58f,.60f,.60f,1};text((enabled?"["+std::to_string(n)+"]  ":"     ")+s+((opensChild(action)||action==9000)?u8"  →":""),color);ImGui::Dummy({1,3});}
  void font(){auto& io=ImGui::GetIO();menuFontRanges(*io.Fonts,fontRanges);char windows[MAX_PATH]{};if(GetWindowsDirectoryA(windows,MAX_PATH))for(auto name:{"msyh.ttc","msyhbd.ttc","simhei.ttf"}){
  auto path=std::string(windows)+"\\Fonts\\"+name;if(GetFileAttributesA(path.c_str())!=INVALID_FILE_ATTRIBUTES&&io.Fonts->AddFontFromFileTTF(path.c_str(),24,nullptr,fontRanges.Data))return;}
  io.Fonts->AddFontDefault();if(log)log("Native HUD Chinese font unavailable; using fallback");}
@@ -84,12 +84,15 @@ public:
  Appearance appearanceValue()const{Appearance a;a.preset=preset;a.step=step;a.opacity=opacity;a.font=fontPixels;a.x=x;a.y=y;a.centerY=centerY;a.f10=f10;return a;}
  void loadAppearance(const Appearance& a){preset=a.preset;applyPreset();opacity=a.opacity;fontPixels=a.font;x=a.x;y=a.y;centerY=a.centerY;step=a.step;f10=a.f10;}
  bool isOpen()const{return opened.load();}
+ void requestRoot(){backRequested=false;restart=true;}
+ void requestBack(){backRequested=true;}
  void open(){if(!opened.exchange(true)){restart=true;if(log)log("Native HUD open requested");}}
  void pollHotkey(IDirect3DDevice9* d){if(!f10)return;bool held=down(VK_F10);HWND target=window;if(!target){D3DDEVICE_CREATION_PARAMETERS c{};if(SUCCEEDED(d->GetCreationParameters(&c)))target=c.hFocusWindow;}
  auto foreground=GetForegroundWindow();bool focused=target&&(foreground==target||foreground==GetAncestor(target,GA_ROOT));if(focused&&held&&!hotkeyHeld){if(isOpen())close();else open();}hotkeyHeld=held;}
  void frame(IDirect3DDevice9* d,float width,float height){
  if(!isOpen()||!build||!act)return;if(GetTickCount64()<retryAfter)return;if(!attach(d)){retryAfter=GetTickCount64()+1000;return;}retryAfter=0;ContextScope scope(context);auto originalAppearance=appearanceValue();
  if(restart.exchange(false)){stack.reset();page=Page::Settings;gate.reset();arrows.fill(false);}
+ if(backRequested.exchange(false)){stack.back();gate.reset();}
  if(!localWindow(window))window=findWindow(d);auto foreground=GetForegroundWindow();bool focused=localWindow(foreground)&&(!window||foreground==window||foreground==GetAncestor(window,GA_ROOT));
  auto edge=gate.update(keys(),focused);if(edge[10]||edge[11]){close();return;}
  if(edge[0]){if(page==Page::Position)page=Page::Appearance;else if(page==Page::Appearance)page=Page::Settings;else if(!stack.back()){close();return;}}
@@ -100,11 +103,11 @@ public:
  uintptr_t action=0;bool openAppearance=false;
  if(ImGui::Begin("L4D2DangoMusic Native HUD",nullptr,ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoSavedSettings|ImGuiWindowFlags_NoScrollbar|ImGuiWindowFlags_AlwaysAutoResize)){
  ImGui::SetWindowFontScale(fontPixels/24.f);
- if(page==Page::Settings){auto doc=document(build(stack.current().page));stack.clamp(doc.rows.size());
- if(edge[12])stack.previous();if(edge[13])stack.next(doc.rows.size());
- text(doc.title,{1,.84f,.22f,1});ImGui::Separator();size_t first=stack.current().sheet*MenuStack::PageSize;
- for(size_t i=first;i<doc.rows.size()&&i<first+MenuStack::PageSize;++i){auto& item=doc.rows[i];unsigned n=unsigned(i-first+1);row(n,item.label,item.action!=0,item.action);if(edge[n]&&item.action)action=item.action;}
- size_t count=std::max<size_t>(1,(doc.rows.size()+MenuStack::PageSize-1)/MenuStack::PageSize);if(count>1)text(u8"[-] 上页    [=] 下页    "+std::to_string(stack.current().sheet+1)+" / "+std::to_string(count),{.58f,.60f,.60f,1});
+ if(page==Page::Settings){auto doc=document(build(stack.current().page));stack.clamp(doc);
+ if(edge[12])stack.previous();if(edge[13])stack.next(doc);
+ text(doc.title,{1,.84f,.22f,1});if(!doc.note.empty())text(doc.note,{.64f,.66f,.66f,1});ImGui::Separator();auto indices=stack.visible(doc);
+ for(size_t n=0;n<indices.size();++n){auto& item=doc.rows[indices[n]];row(unsigned(n+1),item.label,item.action!=0,item.action);if(edge[n+1]&&item.action)action=item.action;}
+ size_t count=pageRanges(doc).size();if(count>1)text(u8"[-] 上页    [=] 下页    "+std::to_string(stack.current().sheet+1)+" / "+std::to_string(count),{.58f,.60f,.60f,1});
  openAppearance=action==9000;
  }else if(page==Page::Appearance){text(u8"菜单外观",{1,.84f,.22f,1});ImGui::Separator();appearance(edge);
  }else{text(u8"调整菜单位置",{1,.84f,.22f,1});ImGui::Separator();if(edge[12]&&step>1)--step;if(edge[13]&&step<64)++step;if(edge[1]){x=8;y=14;centerY=true;}move(focused);text(u8"位置："+std::to_string(int(x))+", "+std::to_string(int(centerY?ImGui::GetWindowPos().y:y)));text(u8"方向键移动菜单；[- / =] 步宽："+std::to_string(step)+" px",{1,.84f,.22f,1});row(1,u8"重置到默认位置");}
