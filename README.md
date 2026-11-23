@@ -1,5 +1,7 @@
 # L4D2DangoMusic
 
+> **Folia 实验分支**：本分支新增可选「Folia（SMTC + 歌词 API）」音乐来源，仅使用 Windows SMTC 读取播放状态和 Folia 本机 `32109/v1/lyric` 读取同步歌词。需要单独安装 `DangoMediaBridge.exe`；本功能仍未实机验证，不属于下述正式版 v0.9.8。 [Folia 实验包安装与限制](packaging/README-folia-smtc.md) · [Folia 预览 CI](https://github.com/yeyunyyds/LDBDangoMusic/actions/workflows/folia-smtc-preview.yml)。
+>
 > 当前正式版：[v0.9.8](https://github.com/yeyunyyds/LDBDangoMusic/releases/tag/v0.9.8)。新增七套视觉预设、八个外观收藏与分项应用，整理原生 HUD 菜单，提供恢复默认外观/全部设置。[菜单使用说明](docs/menu-navigation-preview.md)
 
 为《求生之路 2》（Left 4 Dead 2）提供音乐歌词显示的 L4N 插件。通过兼容 LX / BLF 的本地音乐 API 获取播放进度和歌词，在游戏中呈现带逐字动画的歌词，并支持世界空间定位、歌名与作者显示以及游戏内调节。
