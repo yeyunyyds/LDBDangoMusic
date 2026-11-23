@@ -743,8 +743,8 @@ const char* menuActionImpl(void* argument){uintptr_t id=reinterpret_cast<uintptr
  if(id==9634){if(!c.sync.enabled)return nullptr;c.sync.discover=!c.sync.discover;if(!c.sync.discover)c.sync.enabled=c.sync.apply=false;changeSettings(c);return nullptr;}
  if(id==9635){c.sync.autoSearch=!c.sync.autoSearch;changeSettings(c);return nullptr;}
  if(id==9636||id==9637){sync::Request request;request.action=id==9636?8:9;syncRequests.push(request);wake.notify_all();return nullptr;}
- if(id==9500){std::string rows;for(int i:{0,1,3})rows+=item(std::string(c.musicSource==i?u8"当前 · ":"")+media::sourceName(i),9510+i);auto music=std::atomic_load(&snapshot);rows+=item(u8"状态："+music->message,0);return page(u8"音乐来源",rows);}
- if(id==9510||id==9511||id==9513){c.musicSource=int(id-9510);c.demo=false;changeSettings(c);return nullptr;}
+ if(id==9500){std::string rows;for(int i:{0,1,3,8})rows+=item(std::string(c.musicSource==i?u8"当前 · ":"")+media::sourceName(i),9510+i);auto music=std::atomic_load(&snapshot);rows+=item(u8"状态："+music->message,0);return page(u8"音乐来源",rows);}
+ if(id==9510||id==9511||id==9513||id==9518){c.musicSource=int(id-9510);c.demo=false;changeSettings(c);return nullptr;}
  if(id==24)return diagnosticMenu();
  if(id==20)return displayMenu(c);
  if(id==21)return colorMenu(c);
