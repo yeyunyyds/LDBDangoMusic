@@ -13,7 +13,7 @@ VERSION = '0.9.8'
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--variant', choices=['native-hud', 'music-platforms', 'netease-native', 'steam-sync', 'combined', 'auto-listening', 'visual-preview', 'menu-preview'], help='Name a preview package separately from stable installs')
+    parser.add_argument('--variant', choices=['native-hud', 'music-platforms', 'netease-native', 'steam-sync', 'combined', 'auto-listening', 'visual-preview', 'menu-preview', 'folia-smtc'], help='Name a preview package separately from stable installs')
     parser.add_argument('--output-dir', type=Path, default=ROOT / 'build/packages')
     args = parser.parse_args()
     dll = ROOT / 'build/L4D2DangoMusic.dll'
@@ -30,8 +30,8 @@ def main():
         raise RuntimeError('The install DLL must be Windows x86')
     commit = subprocess.check_output(['git', 'rev-parse', '--verify', 'HEAD^{commit}'], cwd=ROOT, text=True).strip()
     source_url = f'https://github.com/yeyunyyds/LDBDangoMusic/tree/{commit}'
-    native = args.variant != 'music-platforms'
-    template = 'README-menu-preview.md' if args.variant == 'menu-preview' else 'README-visual-preview.md' if args.variant == 'visual-preview' else ('README-combined.md' if args.variant != 'music-platforms' else 'README.md')
+    native = args.variant not in ('music-platforms', 'folia-smtc')
+    template = 'README-folia-smtc.md' if args.variant == 'folia-smtc' else 'README-menu-preview.md' if args.variant == 'menu-preview' else 'README-visual-preview.md' if args.variant == 'visual-preview' else ('README-combined.md' if args.variant != 'music-platforms' else 'README.md')
     readme = (ROOT / 'packaging' / template).read_text(encoding='utf-8').replace('@VERSION@', VERSION).replace('@SOURCE_URL@', source_url)
     disclaimer = (ROOT / 'DISCLAIMER.md').read_text(encoding='utf-8')
     if '@DISCLAIMER@' in readme:
@@ -44,9 +44,10 @@ def main():
     for title, file in notices:
         readme += f'\n\n## {title}\n\n' + (ROOT / file).read_text(encoding='utf-8')
     config = (ROOT / 'config.example.json').read_bytes()
-    if args.variant == 'netease-native':
+    if args.variant in ('netease-native', 'folia-smtc'):
         defaults = json.loads(config)
-        defaults['musicSource'] = 3
+        defaults['musicSource'] = 8 if args.variant == 'folia-smtc' else 3
+        defaults['demo'] = False
         config = (json.dumps(defaults, ensure_ascii=False, indent=2) + '\n').encode('utf-8')
     files = {
         'bin/neko/plugins/L4D2DangoMusic.dll': blob,
