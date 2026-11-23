@@ -30,17 +30,18 @@ public sealed class FoliaLyrics : IDisposable
 
     public async Task<List<LrcLine>?> FetchAsync(string smtcTitle, string smtcArtist)
     {
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(2));
         using var request = new HttpRequestMessage(HttpMethod.Get, Endpoint);
-        using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
+        using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deadline.Token);
         response.EnsureSuccessStatusCode();
         const int limit = 2 * 1024 * 1024;
         if (response.Content.Headers.ContentLength > limit)
             throw new InvalidDataException("Folia lyric response is too large");
-        await using var stream = await response.Content.ReadAsStreamAsync();
+        await using var stream = await response.Content.ReadAsStreamAsync(deadline.Token);
         using var buffer = new MemoryStream();
         var chunk = new byte[8192];
         int received;
-        while ((received = await stream.ReadAsync(chunk)) != 0)
+        while ((received = await stream.ReadAsync(chunk.AsMemory(0, chunk.Length), deadline.Token)) != 0)
         {
             if (buffer.Length + received > limit) throw new InvalidDataException("Folia lyric response is too large");
             buffer.Write(chunk, 0, received);
