@@ -2,6 +2,7 @@
 int main(){
  L4D2VisualCameraStatusV1 s{};
  (void)dango::visualcamera::status(s);
+ L4D2VisualCameraPoseV1 p{};(void)dango::visualcamera::getPose(p);
  (void)dango::visualcamera::externallyControlling();
  // Without L4N/Visual present, all API calls are safe and do nothing.
  (void)dango::visualcamera::request(false);
