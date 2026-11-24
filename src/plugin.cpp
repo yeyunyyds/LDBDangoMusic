@@ -36,6 +36,7 @@ extern "C" __declspec(dllexport) const char DangoBuildFlavor[]="DANGO_PRODUCTION
 #include "sync/runtime.hpp"
 #include "media_bridge.hpp"
 #include "visual_camera_client.hpp"
+#include "cinematic_camera.hpp"
 #include "netease_native.hpp"
 #include "camera_diagnostics.hpp"
 #include "source_camera.hpp"
@@ -56,6 +57,7 @@ namespace {
 using namespace dango;
 void captureSourceFeatures(const GameCameraFrame& frame);
 void stopExternalCameraTest();
+void startExternalCameraTest();
 void tickExternalCameraTest(const GameCameraFrame& frame);
 hud::NativeHud nativeHud;
 std::shared_ptr<const follow::Settings> followSettings=std::make_shared<follow::Settings>();
@@ -80,13 +82,13 @@ HMODULE ownModule=nullptr;std::filesystem::path ownPath;
 std::filesystem::path directory;using LogFn=void(*)(int,const char*);LogFn logger=nullptr;
 constexpr int LDB_HOST_LOG_INFO=0,LDB_HOST_LOG_WARNING=1,LDB_HOST_LOG_ERROR=2;
 // Explicit, opt-in ABI demonstration; never auto-starts during normal lyrics.
-std::atomic<bool> externalCameraTest{false};
-std::atomic<bool> externalCameraInitialized{false};
-std::atomic<std::uint64_t> externalCameraSampleAt{0};
-Vec3 externalCameraEye{};
-float externalCameraYaw=0.f,externalCameraPitch=0.f;
-std::uint64_t externalCameraStarted=0;
+std::atomic<bool> externalCameraTest{false},externalCameraActive{false},externalCameraLyricSync{true};
+std::mutex externalCameraMutex;
+bool externalCameraInitialized=false,externalCameraTraceProbed=false;
+std::uint64_t externalCameraLastFrame=0;
 std::uint32_t externalCameraEpoch=0;
+void* externalCameraTrace=nullptr;
+cinematic::Director externalDirector;
 std::atomic<bool> positionPreview{false},wallPositionPreview{false},positionPreviewMotion{false};bool lastPositionPreview=false,lastWallMode=false,escapeHeld=false;uint64_t layoutGeneration=0;
 PlaybackDisplay playbackDisplay;
 PlaybackCursor playbackCursor;LyricLifecycle worldLyricLifecycle,entityLyricLifecycle;std::atomic<int> visibleLyricIndex{-1};std::atomic<uint64_t> presentationCount{0},restoreErrors{0};
@@ -212,6 +214,7 @@ void peakFrame(IDirect3DDevice9* dev,const State& state,int at,int64_t song,bool
  auto& peakEntries=attached?entityPeakEntries:worldPeakEntries;auto& lifecycle=attached?entityLyricLifecycle:worldLyricLifecycle;
  auto& worldMode=attached?entityWorldMode:lastWorldMode;auto& oldWidth=attached?entityWidth:lastWidth;auto& oldHeight=attached?entityHeight:lastHeight;
  double clock=now()/1000.;
+ const bool cameraLinked=world&&!attached&&!outgoingOnly&&externalCameraActive.load()&&externalCameraLyricSync.load();
  bool contextChanged=worldMode!=world||oldWidth!=width||oldHeight!=height||(!peakEntries.empty()&&world&&peakEntries.back()->epoch!=camera.epoch);
  worldMode=world;oldWidth=width;oldHeight=height;
  if(contextChanged){lifecycle.reset();peakEntries.clear();}
@@ -234,8 +237,9 @@ void peakFrame(IDirect3DDevice9* dev,const State& state,int at,int64_t song,bool
  auto position=attached?ComponentPosition{.5f,.44f,200,attachmentSize}:cfg.layout.lyrics[entry.slot];Placement place=screenComponent(position,width,height,cfg.size);
  if(!attached&&entry.travel.active){if(entry.retired<0)entry.travel.to=world?entry.anchor:Vec3{position.x,position.y,0};auto moving=entry.travel.at(clock,cfg.moveMs/1000.f,cfg.moveCurve);if(!world){place.x=moving.x*width;place.y=moving.y*height;}}
  if(world){if(attached){entry.anchor=*attached;}
- if(!attached&&entry.retired<0&&refreshWorldComponentAnchor(camera,pose,position,entry.anchor,cfg.reuseVisibleAnchor,cfg.reuseDistanceFactor,clock,entry.lastPlaced,cfg.reanchorMs)){anchors.slots.remember(entry.slot,entry.anchor);anchors.current=entry.anchor;}
- if(!attached&&cfg.keepAway){entry.anchor=peak::keepDistance(entry.anchor,pose,position.distance);if(entry.retired<0){anchors.slots.remember(entry.slot,entry.anchor);anchors.current=entry.anchor;}}if(!worldComponent(camera,(!attached&&entry.travel.active)?entry.travel.at(clock,cfg.moveMs/1000.f,cfg.moveCurve):entry.anchor,position,width,height,cfg.worldHeight,cfg.size,place))continue;}
+ if(cameraLinked){Vec3 current{};if(!componentAnchor(camera,pose,position,current))continue;entry.anchor=current;entry.travel.active=false;}
+ if(!cameraLinked&&!attached&&entry.retired<0&&refreshWorldComponentAnchor(camera,pose,position,entry.anchor,cfg.reuseVisibleAnchor,cfg.reuseDistanceFactor,clock,entry.lastPlaced,cfg.reanchorMs)){anchors.slots.remember(entry.slot,entry.anchor);anchors.current=entry.anchor;}
+ if(!cameraLinked&&!attached&&cfg.keepAway){entry.anchor=peak::keepDistance(entry.anchor,pose,position.distance);if(entry.retired<0){anchors.slots.remember(entry.slot,entry.anchor);anchors.current=entry.anchor;}}if(!worldComponent(camera,(!attached&&entry.travel.active)?entry.travel.at(clock,cfg.moveMs/1000.f,cfg.moveCurve):entry.anchor,position,width,height,cfg.worldHeight,cfg.size,place))continue;}
  if(entry.measureRevision!=layoutGeneration){float maxPixels=width*cfg.width*cfg.lineWidthScale/std::max(place.scale,.02f);entry.layout=peak::layout(entry.animation.glyphs,[&](const std::string& glyph){return image(dev,glyph).advance;},maxPixels/cfg.visual.originalSize,cfg.size*1.35f);entry.translationLayout=peak::layout(entry.translated.glyphs,[&](const std::string& glyph){return image(dev,glyph).advance;},maxPixels/cfg.visual.translationSize,cfg.size*1.35f);entry.measureRevision=layoutGeneration;}
  float scale=entry.sizeMotion.sample(place.scale*cfg.size,clock,cfg.visual.smoothScale,cfg.visual.smoothMs)/cfg.size,center=place.x,top=place.y-entry.layout.height*scale*cfg.visual.originalSize*.5f;top+=visual::bobOffset(cfg.visual,clock,0)*height;
  top-=(cfg.visual.exit==0?life.lift:0)*(world?20.f*scale*cfg.size/cfg.worldHeight:height*.025f);
@@ -279,8 +283,9 @@ void drawSongInfo(IDirect3DDevice9* dev,const State& state,const GameCameraFrame
  if(song!=state.key||epoch!=camera.epoch||!placed||(!lastSettings||visual::metadataAnchorChanged(*lastSettings,cfg))||(cfg.reanchorMs>0&&now()-placed>=cfg.reanchorMs)){song=state.key;epoch=camera.epoch;componentAnchor(camera,pose,cfg.layout.title,titleAnchor);componentAnchor(camera,pose,cfg.layout.artist,artistAnchor);placed=now();lastSettings=renderedSettings;}
  if(valid&&cfg.keepAway){titleAnchor=peak::keepDistance(titleAnchor,pose,cfg.layout.title.distance);artistAnchor=peak::keepDistance(artistAnchor,pose,cfg.layout.artist.distance);}
  auto limited=[](const std::string& text){std::string out;auto chars=graphemes(text);for(size_t i=0;i<std::min<size_t>(80,chars.size());++i)out+=chars[i].text;return out;};
- if(cfg.showTitle)drawPositionedText(dev,limited(state.title),cfg.layout.title,camera,valid,pose,width,height,cfg.textColor,.7f,&titleAnchor,&titleSize);
- if(cfg.showArtist)drawPositionedText(dev,limited(state.artist),cfg.layout.artist,camera,valid,pose,width,height,cfg.accent,.7f,&artistAnchor,&artistSize);
+ const bool cameraLinked=valid&&externalCameraActive.load()&&externalCameraLyricSync.load();
+ if(cfg.showTitle)drawPositionedText(dev,limited(state.title),cfg.layout.title,camera,valid,pose,width,height,cfg.textColor,.7f,cameraLinked?nullptr:&titleAnchor,&titleSize);
+ if(cfg.showArtist)drawPositionedText(dev,limited(state.artist),cfg.layout.artist,camera,valid,pose,width,height,cfg.accent,.7f,cameraLinked?nullptr:&artistAnchor,&artistSize);
  if(!valid){song.clear();placed=0;}
 }
 void wallQuad(IDirect3DDevice9* dev,const wall::Panel& panel,const GameCameraFrame& camera,float width,float height,Image im,DWORD color){
@@ -594,6 +599,7 @@ catalog::State menuCatalogState(const Config& c){catalog::State state;state.scop
  auto position=music->at(now());auto at=position<0?-1:indexAt(music->timeline,lyricPosition(position,c.demo?0:c.offset));if(at>=0&&size_t(at)<music->timeline.size()){const auto& line=music->timeline[size_t(at)];auto next=size_t(at+1)<music->timeline.size()?music->timeline[size_t(at+1)].start:line.start+5000;state.wordTiming=peak::Animation(line,next).hasWordTiming;}return state;}
 void selectPreviewPage(uintptr_t id){bool effect=id==5060||id==27;positionPreview=effect||navigation::ordinaryPreview(id);positionPreviewMotion=effect;wallPositionPreview=navigation::wallPreview(id);followPositionPreview=navigation::followPreview(id);}
 void restoreAllState(const Config& current){
+ stopExternalCameraTest();externalCameraLyricSync=true;
  auto next=reset::all(current);auto revision=current.playbackSourceRevision+1;resetDisplayRevision=revision;syncResetRequested=true;source_roster::enabled=false;syncRequests.drain();
  positionPreview=false;positionPreviewMotion=false;wallPositionPreview=false;followPositionPreview=false;
  source_entities::browseRequested=false;source_entities::autoRequested=false;source_entities::enabled=false;source_entities::dumpRequested=false;source_entities::resetRequested=true;
@@ -602,25 +608,23 @@ void restoreAllState(const Config& current){
 const char* menuActionImpl(void* argument){uintptr_t id=reinterpret_cast<uintptr_t>(argument);std::lock_guard<std::mutex> lock(settingsMutex);auto c=*std::atomic_load(&settings);wallPositionPreview=false;
  if(id==9751){
   if(externalCameraTest.load())stopExternalCameraTest();
-  else{
-   externalCameraInitialized=false;
-   externalCameraSampleAt=0;
-   externalCameraTest=true;
-  }
+  else startExternalCameraTest();
  }
- if(id==9750||id==9751){
+ if(id==9752)externalCameraLyricSync=!externalCameraLyricSync.load();
+ if(id==9750||id==9751||id==9752){
   L4D2VisualCameraStatusV1 s{};
   const bool found=visualcamera::status(s);
   const char* owner=found?(s.owner==L4D2VISUAL_CAMERA_OWNER_EXTERNAL?"DangoMusic":s.owner==L4D2VISUAL_CAMERA_OWNER_USER?"User FreeCamera":"Native"):"Unavailable";
   std::string rows;
-  rows+=item(externalCameraTest.load()?u8"关闭测试运镜":u8"启动测试运镜（仅离线开阔区域）",9751);
+  rows+=item(externalCameraTest.load()?u8"关闭运镜":u8"启动运镜（实验）",9751);
+  rows+=item(externalCameraLyricSync.load()?u8"运镜与歌词联动：[开]":u8"运镜与歌词联动：[关]",9752);
   rows+=item(std::string(u8"Visual ABI：")+(found?u8"已连接":u8"未找到或版本不匹配"),0);
   rows+=item(std::string(u8"接口授权：")+(found?(s.external_allowed?u8"允许":u8"关闭"):u8"不可用"),0);
   rows+=item(std::string(u8"当前控制权：")+owner,0);
   rows+=item(std::string(u8"用户放开键鼠交还：")+(found?std::to_string(s.idle_seconds)+"s":u8"未知"),0);
-  rows+=item(u8"测试：自动轻微平移和转向；移动鼠标暂停，闲置恢复",0);
+  rows+=item(u8"键鼠接管，闲置恢复；FreeCamera 快捷键关闭会结束运镜",0);
   rows+=item(u8"先在 Visual 的 FreeCamera 菜单授权外部接口",0);
-  return page(u8"外部 FreeCamera ABI 连通测试",rows);
+  return page(u8"闲置运镜（实验）",rows);
  }
 
  if(id==6000){presetScope=(presetScope+1)%4;return nullptr;}
@@ -826,6 +830,8 @@ const char* menuAction(void* argument){
  if(!hud::opensChild(id)&&id){auto c=*std::atomic_load(&settings);std::string text=u8"设置已实时应用";
  auto status=[&](const char* label,bool value){text=std::string(label)+(value?u8"：已开启":u8"：已关闭");};
  switch(id){case 847:case 820:case 821:case 822:case 823:case 824:case 825:case 826:case 827:case 828:case 829:case 830:case 831:case 832:case 833:case 840:case 841:case 842:case 843:case 844:case 845:case 846:text=followNotice.empty()?u8"实体跟随设置已应用":followNotice;break;case 801:status(u8"实体诊断采集",source_entities::enabled.load());break;case 802:text=u8"已请求后台导出当前实体快照";break;case 1:status(u8"歌词显示",c.enabled);break;case 2:status(u8"翻译",c.translation);break;case 3:status(u8"抖动",c.wiggle);break;case 4:status(u8"弹跳",c.pop);break;case 5:status(u8"歌名",c.showTitle);break;case 6:status(u8"作者",c.showArtist);break;case 7:status(u8"世界歌词",c.worldLyrics);break;case 8:status(u8"柔光",c.glow);break;case 9:status(u8"靠近后退（悬浮世界歌词）",c.keepAway);break;case 28:status(u8"按演唱进度显字",c.progressiveReveal);break;case 29:status(u8"沿用可见锚点",c.reuseVisibleAnchor);break;case 32:text=c.fallbackReveal?u8"无逐字时间轴：估算渐显":u8"无逐字时间轴：整句显示";break;case 18:case 2098:text=u8"已提交保存设置";break;case 2099:text=u8"已结束位置预览";break;case 700:status(u8"场景挂画",c.wallEnabled);break;case 702:text=c.wallLiveLyrics?u8"挂画内容：歌词轮换":u8"挂画内容：固定示例";break;case 703:status(u8"挂画背景",c.wallBackdrop);break;case 705:status(u8"挂画调试标识",c.wallDebug);break;case 709:text=c.wallAutomatic?u8"自动寻找墙面":u8"手动挂画轮换";break;case 710:status(u8"新句无墙面时固定世界歌词",c.wallFallback);break;case 704:text=u8"已请求清空挂画，下一句重新寻找墙面";break;default:break;}
+ if(id==9751)text=externalCameraTest.load()?u8"运镜已启动，关闭菜单后等待接管":u8"运镜已关闭";
+ if(id==9752)text=externalCameraLyricSync.load()?u8"歌词联动已开启":u8"歌词联动已关闭";
  if(id==6900)text=u8"已恢复默认外观，布局与收藏保留；有改动请保存设置";
  if(id==6901)text=u8"已恢复全部设置，联机关闭、收藏保留；请保存设置";
  if(id==6902)text=u8"已取消恢复设置";
@@ -874,57 +880,109 @@ const char* openNativeMenu(void*){nativeHud.open();return nullptr;}
 const char* nativeEntryMenu(){static std::string entry;char callback[32];std::snprintf(callback,sizeof(callback),"0x%lx",static_cast<unsigned long>(reinterpret_cast<uintptr_t>(&openNativeMenu)));entry="\"L4D2DangoMusic\" { \"打开歌词控制面板\" { \"callback\" \""+std::string(callback)+"\" \"user_data\" \"0x0\" } }";return entry.c_str();}
 const char* rootMenu(bool title){if(title)return "L4D2DangoMusic 0.9.8";positionPreview=false;positionPreviewMotion=false;wallPositionPreview=false;auto c=*std::atomic_load(&settings);auto saved=std::atomic_load(&savedSettings);auto state=saveState.load();bool saving=state==1||bool(std::atomic_load(&pendingSave));return menuPage(catalog::root(c,menus::saveLabel(c,saved?*saved:Config{},saving,state<0,bool(saved)),(std::atomic_load(&followSettings)->enabled||c.autoFollow.enabled)));}
 
-// Small fixed-origin orbit to demonstrate the ABI without a new EXE.
-// Not a cinematic feature and deliberately off until a menu action requests it.
+// One session; explicit camera OFF ends it. Permission OFF instead waits
+// for reauthorization, then a fresh session starts. No stale poses survive.
+void resetExternalCameraLocked(bool release,bool disarm){
+ if(release&&externalCameraInitialized)(void)visualcamera::request(false);
+ if(disarm)externalCameraTest=false;
+ externalCameraInitialized=false;externalCameraActive=false;
+ externalCameraLastFrame=0;externalCameraEpoch=0;
+ externalCameraTrace=nullptr;externalCameraTraceProbed=false;
+ externalDirector.reset();
+}
 void stopExternalCameraTest(){
- externalCameraTest=false;
- externalCameraInitialized=false;
- (void)visualcamera::request(false);
+ std::lock_guard<std::mutex> lock(externalCameraMutex);
+ resetExternalCameraLocked(true,true);
+}
+void startExternalCameraTest(){
+ std::lock_guard<std::mutex> lock(externalCameraMutex);
+ resetExternalCameraLocked(true,false);
+ externalCameraTest=true;
+}
+bool cinematicPathClear(Vec3 from,Vec3 to){
+ if(!externalCameraTrace||!wall::finite(from)||!wall::finite(to))return false;
+ // Bounded world-only clearance sampling, not a full swept hull. No new hooks.
+ constexpr Vec3 offsets[]={{0,0,0},{5,0,0},{-5,0,0},{0,5,0},{0,-5,0},{0,0,5},{0,0,-5}};
+ for(const auto offset:offsets){
+  trace::Result result;
+  if(!source_walls::castWorld(externalCameraTrace,from+offset,to+offset,result)){
+   externalCameraTrace=nullptr;note("Cinematic trace rejected; rotation-only fallback");return false;
+  }
+  if(result.startSolid||result.allSolid||result.fraction<.999f)return false;
+ }
+ return true;
 }
 void tickExternalCameraTest(const GameCameraFrame& frame){
  if(!externalCameraTest.load(std::memory_order_acquire))return;
- if(!frame.active){
-  stopExternalCameraTest();
-  return;
- }
+ std::lock_guard<std::mutex> lock(externalCameraMutex);
+ if(!externalCameraTest.load())return;
+ if(!frame.active){resetExternalCameraLocked(true,true);return;}
+ if(externalCameraInitialized&&externalCameraEpoch!=frame.epoch){resetExternalCameraLocked(true,true);return;}
  const auto at=uint64_t(now());
- if(at-externalCameraSampleAt.load(std::memory_order_relaxed)<33)return;
- externalCameraSampleAt.store(at,std::memory_order_relaxed);
- L4D2VisualCameraStatusV1 status{};
- if(!visualcamera::status(status)||!status.external_allowed){
-  // Do not request camera unless the user explicitly enabled the Visual menu.
-  if(externalCameraInitialized.load())stopExternalCameraTest();
+ const auto api=visualcamera::resolve();
+ L4D2VisualCameraStatusV1 status{};status.size=sizeof(status);
+ if(!api||!api.getStatus(&status)||!status.external_allowed){
+  if(externalCameraInitialized)note("Cinematic session waiting for renewed Visual ABI permission");
+  resetExternalCameraLocked(false,false);
   return;
  }
- if(!externalCameraInitialized.load()){
+ if(externalCameraInitialized&&!status.external_requested){
+  // F6/menu/emergency OFF or expiry: never re-arm until a new user request.
+  note("Cinematic session ended by shared FreeCamera switch");
+  resetExternalCameraLocked(false,true);return;
+ }
+ if(!externalCameraInitialized){
   CameraPose start{};
-  if(!cameraPose(frame,start))return;
-  const auto forward=start.forward;
-  constexpr float degrees=57.29577951308232f;
-  externalCameraEye=start.eye;
-  externalCameraYaw=std::atan2(forward.y,forward.x)*degrees;
-  externalCameraPitch=std::clamp(std::atan2(-forward.z,
-       std::hypot(forward.x,forward.y))*degrees,-88.f,88.f);
-  externalCameraStarted=at;
-  externalCameraEpoch=frame.epoch;
-  if(!visualcamera::pose(start.eye.x,start.eye.y,start.eye.z,
-                          externalCameraPitch,externalCameraYaw)||
-     !visualcamera::request(true)){
-   return;
+  if(!cameraPose(frame,start)||!api.setActive(1))return;
+  externalCameraInitialized=true;externalCameraEpoch=frame.epoch;
+  note("Cinematic requested shared FreeCamera ON");
+  status.owner=L4D2VISUAL_CAMERA_OWNER_USER;
+ }
+ L4D2VisualCameraPoseV1 actual{};actual.size=sizeof(actual);
+ if(!api.getPose(&actual)){
+  // Startup heartbeat: never write stale coordinates into an active view.
+  externalCameraActive=false;externalDirector.reset();
+  if(status.owner==L4D2VISUAL_CAMERA_OWNER_USER){
+   CameraPose view{};
+   if(cameraPose(frame,view)){
+    actual.origin[0]=view.eye.x;actual.origin[1]=view.eye.y;actual.origin[2]=view.eye.z;
+    actual.angles[0]=std::clamp(std::atan2(-view.forward.z,std::hypot(view.forward.x,view.forward.y))*180.f/cinematic::pi,-89.f,89.f);
+    actual.angles[1]=std::atan2(view.forward.y,view.forward.x)*180.f/cinematic::pi;
+    if(!api.setPose(&actual))resetExternalCameraLocked(false,true);
+   }
   }
-  externalCameraInitialized=true;
-  note("External FreeCamera ABI smoke: requested orbit around initial camera");
+  return;
  }
- if(frame.epoch!=externalCameraEpoch){stopExternalCameraTest();return;}
- const float elapsed=float(at-externalCameraStarted)*.001f;
- // <=12 Source-unit motion suitable only for open-space offline testing.
- const float dx=12.f*std::sin(elapsed*.5f);
- const float dy=12.f*(1.f-std::cos(elapsed*.5f));
- const float yaw=externalCameraYaw+18.f*std::sin(elapsed*.55f);
- if(!visualcamera::pose(externalCameraEye.x+dx,externalCameraEye.y+dy,
-                        externalCameraEye.z,externalCameraPitch,yaw)){
-  stopExternalCameraTest();
+ if(status.owner!=L4D2VISUAL_CAMERA_OWNER_EXTERNAL||!status.camera_active||nativeHud.isOpen()){
+  externalCameraActive=false;externalDirector.reset();externalCameraLastFrame=0;
+  // Visual discards user-owned pose coordinates; this only keeps the lease.
+  if(!api.setPose(&actual))resetExternalCameraLocked(false,true);
+  return;
  }
+ if(externalCameraLastFrame&&at-externalCameraLastFrame>500)externalDirector.reset();
+ externalCameraLastFrame=at;
+ if(!externalDirector.ready){
+  const cinematic::Pose current{{actual.origin[0],actual.origin[1],actual.origin[2]},
+      actual.angles[0],actual.angles[1],actual.angles[2]};
+  if(!externalDirector.start(current)){resetExternalCameraLocked(true,true);return;}
+  note("Cinematic acquired camera from actual GetPose()");
+ }
+ if(!externalCameraTraceProbed){
+  externalCameraTraceProbed=true;
+  externalCameraTrace=source_walls::resolveWorldTrace();
+  if(!externalCameraTrace)note("Cinematic world trace unavailable; rotation-only fallback");
+ }
+ unsigned duration=6000;
+ if(externalCameraLyricSync.load()&&(!externalDirector.planned||at-externalDirector.begin>=externalDirector.span)){
+  const auto music=std::atomic_load(&snapshot);
+  const auto settingsNow=std::atomic_load(&settings);
+  const auto song=music->at(static_cast<int64_t>(at));
+  if(music->playing&&song>=0)duration=cinematic::duration(music->timeline,song+(settingsNow->demo?0:settingsNow->offset),music->rate);
+ }
+ const auto p=externalDirector.step(at,duration,cinematicPathClear);
+ L4D2VisualCameraPoseV1 target{sizeof(target),{p.eye.x,p.eye.y,p.eye.z},{p.pitch,p.yaw,p.roll}};
+ if(!api.setPose(&target)){resetExternalCameraLocked(false,true);return;}
+ externalCameraActive=true;
 }
 void captureSourceFeatures(const GameCameraFrame& frame){
  tickExternalCameraTest(frame);
