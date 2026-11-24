@@ -1,42 +1,42 @@
 {
-  "sha256": "8a6d468059394bf4cfce32f11dcba12ef45de88da1373084d5a2916d0bf7ba86",
-  "timestamp": 1782845142,
+  "sha256": "d451800729322f25bfc65d58a408edb4f4243a8ea8c26fabccbba4bc7ecc1db3",
+  "timestamp": 1794946460,
   "image_size": 7598080,
   "interfaces": [
     {
       "name": "EngineTraceServer003",
-      "name_rva": "0x3876a8",
-      "registration_rva": "0x340e40",
-      "factory_rva": "0x1774d0",
+      "name_rva": "0x3876e8",
+      "registration_rva": "0x340fb0",
+      "factory_rva": "0x177520",
       "object_rva": "0x42fa40",
-      "vtable_rva": "0x3873fc",
+      "vtable_rva": "0x38743c",
       "first_8_method_rvas": [
-        "0x177630",
-        "0x177600",
-        "0x178950",
-        "0x177990",
-        "0x179ff0",
-        "0x179760",
-        "0x177d60",
-        "0x177da0"
+        "0x177680",
+        "0x177650",
+        "0x178990",
+        "0x1779e0",
+        "0x17a030",
+        "0x1797a0",
+        "0x177db0",
+        "0x177df0"
       ]
     },
     {
       "name": "EngineTraceClient003",
-      "name_rva": "0x3876c0",
-      "registration_rva": "0x340e60",
-      "factory_rva": "0x1774e0",
+      "name_rva": "0x387700",
+      "registration_rva": "0x340fd0",
+      "factory_rva": "0x177530",
       "object_rva": "0x42fa5c",
-      "vtable_rva": "0x387474",
+      "vtable_rva": "0x3874b4",
       "first_8_method_rvas": [
-        "0x177630",
-        "0x177600",
-        "0x178950",
-        "0x177990",
-        "0x179ff0",
-        "0x179760",
-        "0x177d60",
-        "0x177da0"
+        "0x177680",
+        "0x177650",
+        "0x178990",
+        "0x1779e0",
+        "0x17a030",
+        "0x1797a0",
+        "0x177db0",
+        "0x177df0"
       ]
     }
   ],
