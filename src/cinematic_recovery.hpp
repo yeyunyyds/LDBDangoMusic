@@ -16,7 +16,7 @@ struct Recovery {
   if(!active){active=true;badSince=now;}
   hasTarget=false;
   const auto elapsed=now>=badSince?now-badSince:0;
-  const bool cutAllowed=(!lastCut||now-lastCut>=2000)&&((elapsed>=2500&&distance>1000)||(elapsed>=5000&&distance>400)||distance>2200);
+  const bool cutAllowed=(!lastCut||now-lastCut>=2000)&&((elapsed>=2500&&distance>1000)||elapsed>=5000||distance>2200);
   Vec3 landing{};bool landingReady=false;
   const float heading=actor.yaw*pi/180.f;
   for(float radius:{180.f,112.f,76.f})for(float offset:{pi,pi*.5f,-pi*.5f,0.f,pi*.75f,-pi*.75f}){
@@ -28,7 +28,7 @@ struct Recovery {
    if(clear(current.eye,eye)){target=eye;hasTarget=true;return Action::Follow;}
   }
   if(cutAllowed&&landingReady){target=landing;lastCut=now;active=hasTarget=false;badSince=0;return Action::Cut;}
-  if(elapsed>=6500&&(!landingReady||distance>400))return Action::Native;
+  if(elapsed>=6500)return Action::Native;
   return Action::Hold;
  }
  Pose step(Pose current,const Actor& actor,float dt) const {

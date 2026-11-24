@@ -98,7 +98,7 @@ std::uint32_t externalCameraEpoch=0;
 void* externalCameraTrace=nullptr;
 cinematic::Director externalDirector;
 cinematic::Recovery cinematicRecovery;
-uint64_t cinematicTrackAt=0;bool cinematicPathBlocked=false,cinematicDynamicPanel=false;
+uint64_t cinematicTrackAt=0,cinematicMissingSince=0;bool cinematicPathBlocked=false,cinematicDynamicPanel=false;
 cinematic::Tracker cinematicActor;
 std::optional<int> cinematicCharacter;
 bool cinematicActorFresh=false;
@@ -291,7 +291,7 @@ void peakFrame(IDirect3DDevice9* dev,const State& state,int at,int64_t song,bool
  top-=(cfg.visual.exit==0?life.lift:0)*(world?20.f*scale*cfg.size/cfg.worldHeight:height*.025f);
  auto drawLine=[&](const peak::Animation& animation,peak::VisibleAnimation& motion,const peak::Layout& layout,bool translated){
  float textScale=scale*(translated?cfg.visual.translationSize:cfg.visual.originalSize);float baseTop=translated?top+entry.layout.height*scale*cfg.visual.originalSize+cfg.visual.translationGap:top;
- for(const auto& glyph:layout.glyphs){auto frame=peak::revealFrame(motion,animation,glyph.index,song,clock,cfg.animationSpeed,cfg.progressiveReveal,!translated&&cfg.pop,!translated&&cfg.wiggle,cfg.wiggleFrequency,cfg.wiggleAmount,cfg.fallbackReveal);if(frame.alpha<=0)continue;frame.alpha*=visual::entrance(cfg.visual,motion,glyph.index,clock);
+ for(const auto& glyph:layout.glyphs){auto frame=peak::revealFrame(motion,animation,glyph.index,song,clock,cfg.animationSpeed,cfg.progressiveReveal,!cinematicLayout&&!translated&&cfg.pop,!cinematicLayout&&!translated&&cfg.wiggle,cfg.wiggleFrequency,cfg.wiggleAmount,cfg.fallbackReveal);if(frame.alpha<=0)continue;frame.alpha*=visual::entrance(cfg.visual,motion,glyph.index,clock);
  if(!translated&&cfg.pop)frame.scale=1+(frame.scale-1)*cfg.visual.popStrength;
  float fraction=animation.glyphs.size()>1?float(glyph.index)/float(animation.glyphs.size()-1):0;auto exit=visual::retire(cfg.visual.exit,life.alpha,fraction,animation.textSeed+uint32_t(glyph.index)*257);auto tone=visual::shade(cfg.visual,animation,glyph.index,song,lyricTint(glyph.index,animation.glyphs.size(),clock),translated);
  auto im=image(dev,animation.glyphs[glyph.index].text);float size=textScale*frame.scale*exit.scale;
@@ -359,13 +359,13 @@ struct WallTextState {
  source_walls::submit({session,current,uint64_t(now()),camera.epoch,true,!route.fallback,started});
  }
 } wallTextState;
-void wallGlyphs(IDirect3DDevice9* dev,const wall::Panel& panel,const GameCameraFrame& camera,float width,float height,const peak::Animation& animation,peak::VisibleAnimation& motion,const peak::Layout& layout,float unit,float top,int64_t song,double clock,bool translated,float opacity=1){
+void wallGlyphs(IDirect3DDevice9* dev,const wall::Panel& panel,const GameCameraFrame& camera,float width,float height,const peak::Animation& animation,peak::VisibleAnimation& motion,const peak::Layout& layout,float unit,float top,int64_t song,double clock,bool translated,float opacity=1,bool cinematicLayout=false){
  for(const auto& glyph:layout.glyphs){auto frame=peak::revealFrame(motion,animation,glyph.index,song,clock,cfg.animationSpeed,cfg.progressiveReveal,!translated&&cfg.pop,!translated&&cfg.wiggle,cfg.wiggleFrequency,cfg.wiggleAmount,cfg.fallbackReveal);if(frame.alpha<=0)continue;frame.alpha*=visual::entrance(cfg.visual,motion,glyph.index,clock);
  if(!translated&&cfg.pop)frame.scale=1+(frame.scale-1)*cfg.visual.popStrength;
  auto im=image(dev,animation.glyphs[glyph.index].text);if(!im.texture)continue;auto face=panel;
- auto exit=visual::retire(cfg.visual.exit,opacity,animation.glyphs.size()>1?float(glyph.index)/float(animation.glyphs.size()-1):0,animation.textSeed+uint32_t(glyph.index)*257);
+ auto exit=visual::retire(cinematicLayout?0:cfg.visual.exit,opacity,animation.glyphs.size()>1?float(glyph.index)/float(animation.glyphs.size()-1):0,animation.textSeed+uint32_t(glyph.index)*257);
  auto tone=visual::shade(cfg.visual,animation,glyph.index,song,lyricTint(glyph.index,animation.glyphs.size(),clock),translated);
- face.center=panel.center+panel.right*((glyph.x+glyph.width*.5f+frame.x+exit.x)*unit)+panel.up*(top-(glyph.y+cfg.size*.5f+frame.y+exit.y)*unit+visual::bobOffset(cfg.visual,clock,0)*panel.height);
+ face.center=panel.center+panel.right*((glyph.x+glyph.width*.5f+frame.x+exit.x)*unit)+panel.up*(top-(glyph.y+cfg.size*.5f+frame.y+exit.y)*unit+(!cinematicLayout?visual::bobOffset(cfg.visual,clock,0):0.f)*panel.height);
  face.width=im.width*unit*frame.scale*exit.scale;face.height=im.height*unit*frame.scale*exit.scale;
  float angle=frame.rotation;face.right=panel.right*std::cos(angle)+panel.up*std::sin(angle);face.up=panel.up*std::cos(angle)-panel.right*std::sin(angle);
  float alpha=std::clamp(cfg.opacity*frame.alpha*exit.alpha*tone.alpha,0.f,1.f);if(cfg.visual.wallEffects&&cfg.glow&&im.halo){auto halo=im;halo.texture=im.halo;wallQuad(dev,face,camera,width,height,halo,(DWORD(std::clamp(alpha*std::min(1.f,cfg.glowStrength*2)*tone.glow,0.f,1.f)*255)<<24)|(translated&&!cfg.visual.translationFollow?cfg.visual.translationColor:cfg.accent));}
@@ -387,8 +387,8 @@ void drawWallContents(IDirect3DDevice9* dev,const wall::Panel& panel,const GameC
  bool showTranslation=(preview||cfg.translation)&&!translation.glyphs.empty();float widest=1;for(auto row:original.rows)widest=std::max(widest,row*cfg.visual.originalSize);if(showTranslation)for(auto row:translation.rows)widest=std::max(widest,row*cfg.visual.translationSize);
  float contentHeight=original.height*cfg.visual.originalSize+(showTranslation?cfg.visual.translationGap+translation.height*cfg.visual.translationSize:0);float unit=std::min(panel.width*.9f/widest,panel.height*.62f/std::max(contentHeight,1.f));unit=std::min(unit,panel.height*.27f/std::max(cfg.size,1))*layout.lyrics.size;
  auto face=wallTextPanel(panel,layout.lyrics);float top=contentHeight*unit*.5f;
- wallGlyphs(dev,face,camera,width,height,sentence.original,sentence.originalMotion,original,unit*cfg.visual.originalSize,top,song,clock,false,opacity);
- if(showTranslation)wallGlyphs(dev,face,camera,width,height,sentence.translated,sentence.translatedMotion,translation,unit*cfg.visual.translationSize,top-(original.height*cfg.visual.originalSize+cfg.visual.translationGap)*unit,song,clock,true,opacity);
+ wallGlyphs(dev,face,camera,width,height,sentence.original,sentence.originalMotion,original,unit*cfg.visual.originalSize,top,song,clock,false,opacity,cinematicLayout);
+ if(showTranslation)wallGlyphs(dev,face,camera,width,height,sentence.translated,sentence.translatedMotion,translation,unit*cfg.visual.translationSize,top-(original.height*cfg.visual.originalSize+cfg.visual.translationGap)*unit,song,clock,true,opacity,cinematicLayout);
 }
 bool drawCinematicLyrics(IDirect3DDevice9* dev,const GameCameraFrame& camera,float width,float height,const State& music,const PlaybackDisplayFrame& display,int at){
  struct Entry {uint64_t lease=0;wall::Panel panel;std::unique_ptr<WallSentence> text;};
@@ -995,7 +995,7 @@ void resetExternalCameraLocked(bool release,bool disarm){
  externalCameraInitialized=false;externalCameraActive=false;
  externalCameraLastFrame=0;externalCameraEpoch=0;
  externalCameraTrace=nullptr;externalCameraTraceProbed=false;
- externalDirector.reset();cinematicRecovery.reset();cinematicTrackAt=0;cinematicPathBlocked=false;cinematicDynamicPanel=false;cinematicActor.reset();cinematicCharacter.reset();cinematicActorFresh=false;cinematicSampleAt=0;cinematicLastMissingLog=cinematicLastViewMismatchLog=0;cinematicPanels={};cinematicVisibilityAt=0;
+ externalDirector.reset();cinematicRecovery.reset();cinematicTrackAt=0;cinematicMissingSince=0;cinematicPathBlocked=false;cinematicDynamicPanel=false;cinematicActor.reset();cinematicCharacter.reset();cinematicActorFresh=false;cinematicSampleAt=0;cinematicLastMissingLog=cinematicLastViewMismatchLog=0;cinematicPanels={};cinematicVisibilityAt=0;
  std::atomic_store(&cinematicLyricShot,std::make_shared<const CinematicLyricShot>());
 }
 void stopExternalCameraTest(){
@@ -1158,6 +1158,8 @@ void tickExternalCameraTest(const GameCameraFrame& frame){
  externalCameraLastFrame=at;
  const cinematic::Pose current{{actual.origin[0],actual.origin[1],actual.origin[2]},actual.angles[0],actual.angles[1],actual.angles[2]};
  if(!actor.ready){
+  if(!cinematicMissingSince)cinematicMissingSince=at;
+  if(at-cinematicMissingSince>=3000){note("Cinematic subject lost for 3s; native fallback");resetExternalCameraLocked(true,false);return;}
   // Observer target may be transiently absent during a bot takeover. The
   // actual detached pose remains owned by us; no stale coordinates or flight.
   externalDirector.reset();cinematicRecovery.reset();cinematicTrackAt=0;cinematicPathBlocked=false;clearCinematicComposition();
@@ -1166,6 +1168,8 @@ void tickExternalCameraTest(const GameCameraFrame& frame){
   if(!cinematicLastMissingLog||at-cinematicLastMissingLog>=2000){cinematicLastMissingLog=at;note("AFK subject unavailable; holding external view");}
   return;
  }
+ cinematicMissingSince=0;
+ if(externalDirector.planned&&(externalDirector.actorEpoch!=actor.epoch||externalDirector.actorHandle!=actor.handle)){externalDirector.reset();cinematicRecovery.reset();cinematicPathBlocked=false;clearCinematicComposition();}
  // Compare final rendered view to the ABI view, independently of ownership.
  // If the engine overwrites later, report that rather than guessing new offsets.
  CameraPose rendered{};
@@ -1205,7 +1209,7 @@ void tickExternalCameraTest(const GameCameraFrame& frame){
   if(!planned&&cinematicPanels.hasSecond){cinematicPanels.hasSecond=false;externalDirector.last=current;externalDirector.sequence=shotSequence;cinematicTraceBudget=112;planned=externalDirector.plan(at,span,actor,requested,cinematicPanels,cinematicPathClear,config->cinematicLyrics);}
   if(!planned&&cinematicPanels.ready){clearCinematicComposition();externalDirector.last=current;externalDirector.sequence=shotSequence;cinematicTraceBudget=112;planned=externalDirector.plan(at,span,actor,requested,cinematicPanels,cinematicPathClear,config->cinematicLyrics);}
   if(!planned||!cinematic::surfaceStyle(externalDirector.active))clearCinematicComposition();
-  note("Cinematic shot style="+std::to_string(int(externalDirector.active))+" moving="+std::to_string(planned)+" actor="+std::to_string(actor.handle));
+  note("Cinematic shot style="+std::to_string(int(externalDirector.active))+" moving="+std::to_string(planned)+" actor="+std::to_string(actor.handle)+" requested="+std::to_string(int(shotStyle))+" panels="+std::to_string(cinematicPanels.ready));
  }
  if(!config->cinematicLyrics)clearCinematicComposition();
  // Continuous world-space tracking, independent of artistic shot duration.
