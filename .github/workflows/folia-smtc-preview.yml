@@ -1,15 +1,13 @@
-name: Folia SMTC integration preview
-
+name: Native Folia + AFK cinematic preview
 on:
   push:
-    branches:
-      - feature/folia-smtc-lyrics
-      - feature/visual-freecamera-abi-client
+    branches: [feature/visual-freecamera-abi-client]
   workflow_dispatch:
-
 permissions:
   contents: read
-
+concurrency:
+  group: native-folia-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   verify-and-package:
     runs-on: ubuntu-latest
@@ -21,23 +19,18 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y g++-mingw-w64-i686-posix
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 8.0.x
-      - name: Run native and bridge regression tests
+      - name: Native regression tests
         run: bash scripts/test.sh
       - name: Build L4N x86 plugin
         env:
           DANGO_CXX: i686-w64-mingw32-g++-posix
         run: bash scripts/build-mingw.sh
-      - name: Build Folia-capable x64 bridge
-        run: dotnet publish media-bridge/DangoMediaBridge.csproj -c Release -r win-x64 --self-contained true -o build/media-bridge
-      - name: Package preview only (no public release)
-        run: python3 scripts/package.py --variant folia-smtc
+      - name: Package native Folia preview (single DLL)
+        run: python3 scripts/package.py --variant folia-stage
       - uses: actions/upload-artifact@v4
         with:
-          name: folia-smtc-preview
+          name: folia-stage-cinematic-preview
           path: |
-            build/packages/*-folia-smtc.zip
-            build/packages/*-folia-smtc.zip.sha256
+            build/packages/*-folia-stage.zip
+            build/packages/*-folia-stage.zip.sha256
           if-no-files-found: error
