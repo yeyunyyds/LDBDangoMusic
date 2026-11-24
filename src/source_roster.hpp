@@ -18,6 +18,15 @@ inline bool contract(){
  for(auto& m:methods){auto code=reinterpret_cast<const unsigned char*>(engineModule)+m.rva;if(!readable(code,sizeof(m.prefix))||!executable(code)||std::memcmp(code,m.prefix,sizeof(m.prefix))){log("Roster contract rejected: engine method bytes differ");return false;}}
  validated=true;log("Roster contract verified: playerInfo[8] size=144, localPlayer[12], maxClients[21]; game-thread capture");return true;
 }
+// Read-only local entity index independent of Steam discovery/identity.
+inline int localIndex(){
+ using namespace source_camera;
+ if(!contract())return -1;
+ using Fn=int(__thiscall*)(void*);
+ auto index=reinterpret_cast<Fn>(reinterpret_cast<uintptr_t>(engineModule)+0x5d030)(engine);
+ auto count=reinterpret_cast<Fn>(reinterpret_cast<uintptr_t>(engineModule)+0x5d290)(engine);
+ return count>=1&&count<=64&&index>=1&&index<=count?index:-1;
+}
 inline dango::sync::Peer readPlayer(int index){
  using namespace source_camera;alignas(8)unsigned char guarded[16+144+16];std::memset(guarded,0xa5,sizeof(guarded));std::memset(guarded+16,0,144);
  using Fn=bool(__thiscall*)(void*,int,void*);auto fn=reinterpret_cast<Fn>(reinterpret_cast<uintptr_t>(engineModule)+0x5f4d0);if(!fn(engine,index,guarded+16))return 0;
