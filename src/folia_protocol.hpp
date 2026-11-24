@@ -29,7 +29,7 @@ inline State playback(const Json& j,int64_t now){
  const auto& current=j.at("current");s.title=text(current,"title");s.artist=text(current,"artist");
  s.duration=j.at("durationMs").get<int64_t>();s.position=j.at("positionMs").get<int64_t>();
  if(s.title.empty()||s.duration<=0||s.duration>86400000||s.position<0||s.position>s.duration)throw std::runtime_error("Invalid Folia playback timing");
- s.key="folia\x1f"+text(current,"source")+'\x1f'+text(current,"id")+'\x1f'+s.title+'\x1f'+s.artist;
+ s.key="folia\x1f"+text(current,"source")+'\x1f'+text(current,"id")+'\x1f'+s.title+'\x1f'+s.artist+'\x1f'+std::to_string(s.duration);
  s.playing=state=="PLAYING";return s;
 }
 inline double number(const Json& j,const char* k,double fallback=0){
