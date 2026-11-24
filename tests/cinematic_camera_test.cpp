@@ -1,4 +1,5 @@
 #include "cinematic_camera.hpp"
+#include "cinematic_ground.hpp"
 #include "lyric_lifecycle.hpp"
 #include "plugin_lifetime.hpp"
 #include "cinematic_recovery.hpp"
@@ -28,6 +29,24 @@ static inventory::Record survivor(uint32_t index,uint32_t handle,int character,c
  inventory::Record r;r.index=index;r.handle=handle;r.className=name;r.team=2;r.health=100;r.lifeState=0;r.dormant=false;r.character=character;r.networkOrigin=Vec3{10,0,0};r.networkAngles=Vec3{};return r;
 }
 int main(){
+ Actor groundActor{1,42,0,{0,0,38},{},0,true};
+ auto floor=[](Vec3 a,Vec3 b,trace::Result& r){r={};r.start=a;r.end=b;
+  if(a.z>b.z&&a.z>=0&&b.z<=0){r.fraction=a.z/(a.z-b.z);r.end=a+(b-a)*r.fraction;r.plane.normal={0,0,1};}
+  return true;};
+ wall::Panel groundPanel;unsigned attempts=0;
+ const auto preferred=freePanel(Style::Bird,groundActor,{0,-300,300});
+ assert(findGround(groundActor,{0,-300,300},floor,[&](const wall::Panel& p){++attempts;return wall::dot(p.center-groundActor.center,preferred.right)<0;},groundPanel));
+ assert(attempts==2&&std::abs(groundPanel.center.z-.75f)<.01f);
+ GroundTrack track;unsigned placements=0;
+ auto place=[&](wall::Panel& p){++placements;p=groundPanel;return true;};
+ track.update(1,100,500,true,place);auto fixed=track.anchors.front().panel;
+ groundActor.center.x+=300;groundPanel.center.x+=300;track.update(1,200,500,true,place);
+ assert(placements==1&&length(track.anchors.front().panel.center-fixed.center)<.01f);
+ track.update(2,300,500,true,place);assert(placements==2&&track.anchors.size()==2&&track.anchors.front().expires==800);
+ track.update(2,800,500,true,place);assert(track.anchors.size()==1);
+ track.update(3,900,500,true,[](wall::Panel&){return false;});
+ track.update(3,1000,500,true,place);assert(placements==2&&!track.anchors.back().valid);
+
  {lifetime::Guard guard;assert(guard&&lifetime::callbacks.load()==1);lifetime::requestStop();lifetime::Guard denied;assert(!denied&&lifetime::callbacks.load()==1);}assert(!lifetime::callbacks.load());
  trace::Result facade;assert(building({0,0,80},{200,0,80},facade)&&trace::wallHit(facade));
  wall::Panel roof;assert(roofPanel(facade,1,building,roof));
