@@ -22,20 +22,21 @@ inline Pose look(Vec3 eye,Vec3 focus,float fallbackYaw){
 }
 struct Actor {uint32_t epoch=0,handle=0;uint64_t tick=0;Vec3 center{},velocity{};float yaw=0;bool ready=false;};
 struct Tracker {
- Actor value{};
- void reset(){value={};}
+ Actor value{};Vec3 previousRaw{};
+ void reset(){value={};previousRaw={};}
  Actor sample(uint32_t epoch,uint32_t handle,uint64_t tick,Vec3 center,float yaw){
   if(!wall::finite(center)||!std::isfinite(yaw)){reset();return value;}
   Actor next{epoch,handle,tick,center,{},yaw,true};
   if(value.ready&&value.epoch==epoch&&value.handle==handle){
    if(tick<=value.tick)return value;
-   float dt=float(tick-value.tick)*.001f;auto delta=center-value.center;
+   float dt=float(tick-value.tick)*.001f;auto delta=center-previousRaw;
    if(dt<=.5f&&length(delta)<std::max(96.f,dt*1800.f)){
     auto raw=delta*(1/std::max(dt,.001f));
     next.velocity=mix(value.velocity,raw,1-std::exp(-dt*7.f));
+    next.center=mix(value.center,center,1-std::exp(-dt*12.f));
    }
   }
-  value=next;return value;
+  previousRaw=center;value=next;return value;
  }
 };
 struct Composition {uint32_t epoch=0;uint64_t tick=0,serial=0;bool ready=false;wall::Panel first{},second{};bool hasSecond=false;};
