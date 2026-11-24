@@ -1,4 +1,5 @@
 #include "cinematic_camera.hpp"
+#include "plugin_lifetime.hpp"
 #include "cinematic_recovery.hpp"
 #include "cinematic_architecture.hpp"
 #include "cinematic_subject.hpp"
@@ -26,6 +27,7 @@ static inventory::Record survivor(uint32_t index,uint32_t handle,int character,c
  inventory::Record r;r.index=index;r.handle=handle;r.className=name;r.team=2;r.health=100;r.lifeState=0;r.dormant=false;r.character=character;r.networkOrigin=Vec3{10,0,0};r.networkAngles=Vec3{};return r;
 }
 int main(){
+ {lifetime::Guard guard;assert(guard&&lifetime::callbacks.load()==1);lifetime::requestStop();lifetime::Guard denied;assert(!denied&&lifetime::callbacks.load()==1);}assert(!lifetime::callbacks.load());
  trace::Result facade;assert(building({0,0,80},{200,0,80},facade)&&trace::wallHit(facade));
  wall::Panel roof;assert(roofPanel(facade,1,building,roof));
  assert(roof.center.x>100&&roof.center.z-roof.height*.5f>200&&roof.normal.x<-.99f);

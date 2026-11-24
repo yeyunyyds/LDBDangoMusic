@@ -1,3 +1,4 @@
+#include "plugin_lifetime.hpp"
 #pragma once
 #include <windows.h>
 #include <commctrl.h>
@@ -33,6 +34,7 @@ class NativeHud {
  static constexpr UINT_PTR SubclassId=0x44414e47;
  static bool required(WPARAM key){return (key>='0'&&key<='9')||(key>=VK_NUMPAD0&&key<=VK_NUMPAD9)||key==VK_ESCAPE||key==VK_OEM_2||key==VK_DIVIDE||key==VK_OEM_MINUS||key==VK_OEM_PLUS||key==VK_SUBTRACT||key==VK_ADD;}
  static LRESULT CALLBACK proc(HWND h,UINT m,WPARAM w,LPARAM l,UINT_PTR,DWORD_PTR ref){
+ lifetime::Guard guard;if(!guard)return DefSubclassProc(h,m,w,l);
  auto self=reinterpret_cast<NativeHud*>(ref);
  bool keyboard=m==WM_KEYDOWN||m==WM_KEYUP||m==WM_SYSKEYDOWN||m==WM_SYSKEYUP;
  if(self->isOpen()&&keyboard&&(required(w)||(self->page==Page::Position&&(w>=VK_LEFT&&w<=VK_DOWN))))return 0;

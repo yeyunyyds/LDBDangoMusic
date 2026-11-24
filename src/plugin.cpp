@@ -14,6 +14,8 @@ extern "C" __declspec(dllexport) const char DangoBuildFlavor[]="DANGO_PRODUCTION
 #include <atomic>
 #include <memory>
 #include <thread>
+#include <process.h>
+#include "plugin_lifetime.hpp"
 #include <mutex>
 #include <condition_variable>
 #include <fstream>
@@ -108,7 +110,7 @@ std::shared_ptr<const CinematicLyricShot> cinematicLyricShot=std::make_shared<Ci
 std::atomic<bool> positionPreview{false},wallPositionPreview{false},positionPreviewMotion{false};bool lastPositionPreview=false,lastWallMode=false,escapeHeld=false;uint64_t layoutGeneration=0;
 PlaybackDisplay playbackDisplay;
 PlaybackCursor playbackCursor;LyricLifecycle worldLyricLifecycle,entityLyricLifecycle;std::atomic<int> visibleLyricIndex{-1};std::atomic<uint64_t> presentationCount{0},restoreErrors{0};
-std::atomic<bool> stopping{false};std::thread worker;std::mutex sleepMutex;std::condition_variable wake;
+std::atomic<bool> stopping{false};HANDLE worker=nullptr;std::mutex sleepMutex;std::condition_variable wake;
 std::shared_ptr<const State> snapshot=std::make_shared<State>();
 std::atomic<bool> syncResetRequested{false},displayResetRequested{false};std::atomic<uint64_t> resetDisplayRevision{0};unsigned presetScope=0;
 sync::Requests syncRequests;std::shared_ptr<const sync::Status> syncStatus=std::make_shared<sync::Status>();
@@ -176,6 +178,7 @@ void run() noexcept {
   if(!CopyFileW(path.c_str(),backup.c_str(),FALSE))throw std::runtime_error("CopyFileW error "+std::to_string(GetLastError()));
  }
  },[&](){if(!MoveFileExW(temp.c_str(),path.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH))throw std::runtime_error("Config replace failed: "+std::to_string(GetLastError()));},[](const std::string& warning){note(warning);});std::atomic_store(&savedSettings,requested);saveState=2;note("Settings saved");}catch(const std::exception& e){saveState=-1;note(e.what());}}
+ if(stopping.load())break;
  cameraWriter.drain();source_entities::drain(directory);try{State s;
  if(cfg.demo){provider=sync::Provider::Demo;s.connected=s.playing=true;s.title="Offline demonstration";s.key="demo";s.duration=16000;s.position=(now()-demoStart)%16000;s.sampled=now();s.timeline=parse("[00:01.00]<1000,500>你好 <1500,500>求生之路\n[00:05.00]Left and right floating lyrics\n[00:09.00]暂停、换歌与逐字时间轴\n[00:13.00]L4D2DangoMusic");s.message="Offline demo";}
  else {
@@ -221,6 +224,7 @@ void run() noexcept {
  cameraWriter.drain();
  }catch(...){if(logger)logger(LDB_HOST_LOG_ERROR,"Music worker stopped unexpectedly");}
 }
+unsigned __stdcall musicWorkerMain(void*){run();return 0;}
 std::wstring wide(const std::string& s){int n=MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,s.data(),static_cast<int>(s.size()),nullptr,0);if(n<=0)return L"";std::wstring w(n,0);MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,s.data(),static_cast<int>(s.size()),w.data(),n);return w;}
 struct Image {IDirect3DTexture9* texture=nullptr;int width=0,height=0;IDirect3DTexture9* halo=nullptr;float advance=0;};
 std::map<std::string,Image> cache;
@@ -547,12 +551,12 @@ bool load(const std::filesystem::path& pluginDirectory){try{directory=pluginDire
 
  note("L4D2DangoMusic 0.9.8 config="+path.u8string()+" mode="+(cfg.demo?"DEMO":"BLF/LX")+" port="+std::to_string(cfg.port)+" offsetMs="+std::to_string(cfg.offset)+" displayMode="+cfg.mode);
  note("Steam sync fix1: in-game SteamClient user/pipe lifecycle probes disabled");
- stopping=false;worker=std::thread(run);return TRUE;}catch(const std::exception& e){if(logger)logger(LDB_HOST_LOG_ERROR,e.what());return FALSE;}catch(...){return FALSE;}}
+ if(stopping.load())return FALSE;worker=reinterpret_cast<HANDLE>(_beginthreadex(nullptr,0,&musicWorkerMain,nullptr,0,nullptr));if(!worker){note("Music worker start failed");return FALSE;}return TRUE;}catch(const std::exception& e){if(logger)logger(LDB_HOST_LOG_ERROR,e.what());return FALSE;}catch(...){return FALSE;}}
 void releasePresentationBackup();
 void WINAPI created(IDirect3DDevice9*){nativeHud.release();wallTextState.reset();++deviceGeneration;releasePresentationBackup();anchors.reset();worldPeakEntries.clear();peakIndex=-1;worldLyricLifecycle.reset();clear();reportedErrors=0;drewPixels=false;note("L4D2DangoMusic device lifecycle: created/destroyed; textures cleared");}
 void WINAPI beforeReset(IDirect3DDevice9*,const D3DPRESENT_PARAMETERS*,BOOL){nativeHud.beforeReset();wallTextState.reset();releasePresentationBackup();anchors.reset();worldPeakEntries.clear();peakIndex=-1;worldLyricLifecycle.reset();clear();}
 void WINAPI afterReset(IDirect3DDevice9*,HRESULT hr,BOOL){nativeHud.afterReset(hr);++deviceGeneration;reportedErrors=0;checked(hr,5,"Reset");note("L4D2DangoMusic Reset completed; textures will rebuild");}
-void WINAPI shutdown(){nativeHud.shutdown();source_camera::frameListener=nullptr;source_walls::stop();source_entities::enabled=false;source_entities::browseRequested=false;source_entities::autoRequested=false;std::atomic_store(&source_entities::automaticRequest,std::make_shared<const inventory::FollowRequest>());std::atomic_store(&source_entities::followRequest,std::make_shared<const inventory::FollowRequest>());stopping=true;wake.notify_all();if(worker.joinable())worker.join();releasePresentationBackup();clear();}
+void WINAPI shutdown(){nativeHud.shutdown();source_camera::frameListener=nullptr;source_walls::stop();source_entities::enabled=false;source_entities::browseRequested=false;source_entities::autoRequested=false;std::atomic_store(&source_entities::automaticRequest,std::make_shared<const inventory::FollowRequest>());std::atomic_store(&source_entities::followRequest,std::make_shared<const inventory::FollowRequest>());releasePresentationBackup();clear();}
 }
 namespace {
 struct PresentationBackup {
@@ -566,6 +570,7 @@ struct PresentationBackup {
 PresentationBackup presentationBackup;
 void releasePresentationBackup(){presentationBackup.release();}
 template<class Present> HRESULT paintAndPresent(IDirect3DDevice9* device,IDirect3DSwapChain9* chain,Present present){
+ lifetime::Guard guard;if(!guard)return present();
  nativeHud.pollHotkey(device);
  IDirect3DSurface9* back=nullptr;D3DSURFACE_DESC desc{};PresentInfo info{chain!=nullptr,chain};
  auto capture=[&](){auto config=std::atomic_load(&settings);if(!config->enabled&&!positionPreview.load()&&!wallPositionPreview.load()&&!nativeHud.isOpen())return false;
@@ -581,6 +586,7 @@ struct Patch {void** slot;void* original;void* replacement;};
 std::array<Patch,64> patches{};std::atomic<size_t> patchCount{0};SRWLOCK patchLock=SRWLOCK_INIT;std::filesystem::path pluginDirectory;
 void fileLog(int,const char* message){std::error_code error;auto dataDirectory=pluginDirectory/L"L4D2DangoMusic";std::filesystem::create_directories(dataDirectory,error);if(error)return;std::ofstream file(dataDirectory/L"L4D2DangoMusic.log",std::ios::app);file<<"L4D2DangoMusic 0.9.8 "<<message<<'\n';}
 bool patch(void** table,size_t slot,void* replacement){
+ lifetime::Guard guard;if(!guard)return false;
  if(!TryAcquireSRWLockExclusive(&patchLock))return false;auto count=patchCount.load(std::memory_order_acquire);
  for(size_t i=0;i<count;++i)if(patches[i].slot==table+slot){bool same=patches[i].replacement==replacement;ReleaseSRWLockExclusive(&patchLock);return same;}
  if(count>=patches.size()){ReleaseSRWLockExclusive(&patchLock);return false;}
@@ -604,9 +610,9 @@ HRESULT WINAPI chainPresent(IDirect3DSwapChain9* chain,const RECT* source,const 
 void hookChain(IDirect3DSwapChain9* chain){if(chain&&(*reinterpret_cast<void***>(chain))[3]!=reinterpret_cast<void*>(&chainPresent)&&patch(*reinterpret_cast<void***>(chain),3,reinterpret_cast<void*>(&chainPresent)))note("SwapChain Present attached");}
 HRESULT WINAPI getChain(IDirect3DDevice9* device,UINT index,IDirect3DSwapChain9** chain){auto fn=reinterpret_cast<HRESULT(WINAPI*)(IDirect3DDevice9*,UINT,IDirect3DSwapChain9**)>(original(device,14));auto hr=fn(device,index,chain);if(SUCCEEDED(hr)&&chain&&*chain)hookChain(*chain);return hr;}
 HRESULT WINAPI addChain(IDirect3DDevice9* device,D3DPRESENT_PARAMETERS* params,IDirect3DSwapChain9** chain){auto fn=reinterpret_cast<HRESULT(WINAPI*)(IDirect3DDevice9*,D3DPRESENT_PARAMETERS*,IDirect3DSwapChain9**)>(original(device,13));auto hr=fn(device,params,chain);if(SUCCEEDED(hr)&&chain&&*chain)hookChain(*chain);return hr;}
-HRESULT WINAPI resetDevice(IDirect3DDevice9* device,D3DPRESENT_PARAMETERS* params){auto fn=reinterpret_cast<HRESULT(WINAPI*)(IDirect3DDevice9*,D3DPRESENT_PARAMETERS*)>(original(device,16));beforeReset(device,params,FALSE);auto hr=fn(device,params);afterReset(device,hr,FALSE);if(SUCCEEDED(hr)){IDirect3DSwapChain9* chain=nullptr;if(SUCCEEDED(device->GetSwapChain(0,&chain))){hookChain(chain);chain->Release();}}return hr;}
+HRESULT WINAPI resetDevice(IDirect3DDevice9* device,D3DPRESENT_PARAMETERS* params){auto fn=reinterpret_cast<HRESULT(WINAPI*)(IDirect3DDevice9*,D3DPRESENT_PARAMETERS*)>(original(device,16));lifetime::Guard guard;if(!guard)return fn(device,params);beforeReset(device,params,FALSE);auto hr=fn(device,params);afterReset(device,hr,FALSE);if(SUCCEEDED(hr)){IDirect3DSwapChain9* chain=nullptr;if(SUCCEEDED(device->GetSwapChain(0,&chain))){hookChain(chain);chain->Release();}}return hr;}
 HRESULT WINAPI presentEx(IDirect3DDevice9Ex* device,const RECT* source,const RECT* target,HWND window,const RGNDATA* dirty,DWORD flags){auto fn=reinterpret_cast<HRESULT(WINAPI*)(IDirect3DDevice9Ex*,const RECT*,const RECT*,HWND,const RGNDATA*,DWORD)>(original(device,121));++presentDepth;auto hr=presentDepth==1?paintAndPresent(device,nullptr,[&](){return fn(device,source,target,window,dirty,flags);}):fn(device,source,target,window,dirty,flags);--presentDepth;return hr;}
-HRESULT WINAPI resetEx(IDirect3DDevice9Ex* device,D3DPRESENT_PARAMETERS* params,D3DDISPLAYMODEEX* mode){auto fn=reinterpret_cast<HRESULT(WINAPI*)(IDirect3DDevice9Ex*,D3DPRESENT_PARAMETERS*,D3DDISPLAYMODEEX*)>(original(device,132));beforeReset(device,params,TRUE);auto hr=fn(device,params,mode);afterReset(device,hr,TRUE);return hr;}
+HRESULT WINAPI resetEx(IDirect3DDevice9Ex* device,D3DPRESENT_PARAMETERS* params,D3DDISPLAYMODEEX* mode){auto fn=reinterpret_cast<HRESULT(WINAPI*)(IDirect3DDevice9Ex*,D3DPRESENT_PARAMETERS*,D3DDISPLAYMODEEX*)>(original(device,132));lifetime::Guard guard;if(!guard)return fn(device,params,mode);beforeReset(device,params,TRUE);auto hr=fn(device,params,mode);afterReset(device,hr,TRUE);return hr;}
 std::string menuText;
 const char* menuAction(void*);
 std::string escaped(std::string s){std::string out;for(char c:s){if(c=='"'||c=='\\')out+='\\';if(c!='\r'&&c!='\n')out+=c;}return out;}
@@ -925,6 +931,7 @@ const char* menuActionImpl(void* argument){uintptr_t id=reinterpret_cast<uintptr
  return rootMenu(false);
 }
 const char* menuAction(void* argument){
+ lifetime::Guard guard;if(!guard)return nullptr;
  auto id=reinterpret_cast<uintptr_t>(argument);if(!build::diagnostics&&build::diagnosticAction(id))return nullptr;auto result=menuActionImpl(argument);
  if(!hud::opensChild(id)&&id){auto c=*std::atomic_load(&settings);std::string text=u8"设置已实时应用";
  auto status=[&](const char* label,bool value){text=std::string(label)+(value?u8"：已开启":u8"：已关闭");};
@@ -976,7 +983,7 @@ void activateNativeMenu(uintptr_t id){menuAction(reinterpret_cast<void*>(id));}
 void closeNativeMenu(){followPositionPreview=false;positionPreview=false;positionPreviewMotion=false;wallPositionPreview=false;source_entities::browseRequested=false;}
 void updateHudAppearance(const hud::Appearance& appearance){std::lock_guard<std::mutex> lock(settingsMutex);auto c=*std::atomic_load(&settings);c.hud=appearance;changeSettings(c);}
 std::string nativeMenuNotice(){auto notice=std::atomic_load(&menuNotice);auto tick=uint64_t(now());return tick>=notice->tick&&tick-notice->tick<2000?notice->text:std::string{};}
-const char* openNativeMenu(void*){nativeHud.open();return nullptr;}
+const char* openNativeMenu(void*){lifetime::Guard guard;if(!guard)return nullptr;nativeHud.open();return nullptr;}
 const char* nativeEntryMenu(){static std::string entry;char callback[32];std::snprintf(callback,sizeof(callback),"0x%lx",static_cast<unsigned long>(reinterpret_cast<uintptr_t>(&openNativeMenu)));entry="\"L4D2DangoMusic\" { \"打开歌词控制面板\" { \"callback\" \""+std::string(callback)+"\" \"user_data\" \"0x0\" } }";return entry.c_str();}
 const char* rootMenu(bool title){if(title)return "L4D2DangoMusic 0.9.8";positionPreview=false;positionPreviewMotion=false;wallPositionPreview=false;auto c=*std::atomic_load(&settings);auto saved=std::atomic_load(&savedSettings);auto state=saveState.load();bool saving=state==1||bool(std::atomic_load(&pendingSave));return menuPage(catalog::root(c,menus::saveLabel(c,saved?*saved:Config{},saving,state<0,bool(saved)),(std::atomic_load(&followSettings)->enabled||c.autoFollow.enabled)));}
 
@@ -1248,6 +1255,7 @@ void tickExternalCameraTest(const GameCameraFrame& frame){
  }
 }
 void captureSourceFeatures(const GameCameraFrame& frame){
+ lifetime::Guard guard;if(!guard)return;
  source_entities::cinematicRequested=externalCameraTest.load();
  auto current=std::atomic_load(&settings);source_roster::enabled=!syncResetRequested.load()&&current->sync.enabled&&current->sync.discover&&!current->demo&&current->musicSource<=1;source_roster::capture(frame);
  auto config=std::atomic_load(&settings);bool automatic=config->enabled&&config->autoFollow.enabled&&!config->autoFollow.rules.empty();source_entities::autoRequested=automatic;
@@ -1257,34 +1265,52 @@ void captureSourceFeatures(const GameCameraFrame& frame){
  auto old=std::atomic_load(&source_entities::automaticRequest);if(old->enabled!=request.enabled||old->handle!=request.handle||old->epoch!=request.epoch)std::atomic_store(&source_entities::automaticRequest,std::make_shared<const inventory::FollowRequest>(request));
  source_walls::onFrame(frame);source_entities::onFrame(frame);try{tickExternalCameraTest(frame);}catch(...){std::lock_guard<std::mutex> lock(externalCameraMutex);resetExternalCameraLocked(true,false);note("AFK camera suspended after a planning exception; feature remains enabled");}
 }
+void shutdownFromEngine();
 class LyricsPlugin final:public IL4NPlugin {
- bool started=false,attempted=false,duplicate=false;HANDLE renderOwner=nullptr;
+ bool started=false,attempted=false,duplicate=false;std::atomic<bool> stopStarted{false};HANDLE renderOwner=nullptr;
 public:
  const char* GetName()override{return "L4D2DangoMusic";}
  const char* GetVersion()override{return "0.9.8";}
- const char* RequestHudMenu(bool title)override{start();if(duplicate){if(title)return u8"L4D2DangoMusic 0.9.8 · 重复副本已阻止";return page(u8"重复副本未启用绘制",item(u8"查看实际 DLL 路径与其他模块",24));}if(title)return "L4D2DangoMusic 0.9.8";nativeHud.open();return nativeEntryMenu();}
- void start(){if(attempted)return;attempted=true;GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,reinterpret_cast<const wchar_t*>(&fileLog),&ownModule);wchar_t path[32768]{};if(!GetModuleFileNameW(ownModule,path,32768))return;ownPath=path;pluginDirectory=ownPath.parent_path();logger=fileLog;nativeHud.configure(buildNativeMenu,activateNativeMenu,closeNativeMenu,nativeMenuNotice,note,updateHudAppearance);
+ const char* RequestHudMenu(bool title)override{lifetime::Guard guard;if(!guard)return nullptr;start();if(duplicate){if(title)return u8"L4D2DangoMusic 0.9.8 · 重复副本已阻止";return page(u8"重复副本未启用绘制",item(u8"查看实际 DLL 路径与其他模块",24));}if(title)return "L4D2DangoMusic 0.9.8";nativeHud.open();return nativeEntryMenu();}
+ void start(){if(attempted||lifetime::closing.load())return;attempted=true;GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,reinterpret_cast<const wchar_t*>(&fileLog),&ownModule);wchar_t path[32768]{};if(!GetModuleFileNameW(ownModule,path,32768))return;ownPath=path;pluginDirectory=ownPath.parent_path();logger=fileLog;nativeHud.configure(buildNativeMenu,activateNativeMenu,closeNativeMenu,nativeMenuNotice,note,updateHudAppearance);
  std::wstring ownerName=L"Local\\L4D2DangoMusic-render-"+std::to_wstring(GetCurrentProcessId());SetLastError(ERROR_SUCCESS);renderOwner=CreateMutexW(nullptr,FALSE,ownerName.c_str());DWORD ownerError=GetLastError();
  if(!renderOwner||ownerError==ERROR_ALREADY_EXISTS){duplicate=true;if(renderOwner)CloseHandle(renderOwner);renderOwner=nullptr;note("Duplicate renderer blocked pid="+std::to_string(GetCurrentProcessId())+" dll="+ownPath.u8string());return;}
+ HMODULE pinned=nullptr;if(!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_PIN,reinterpret_cast<LPCWSTR>(&fileLog),&pinned)){CloseHandle(renderOwner);renderOwner=nullptr;note("DLL lifetime pin failed");return;}
  note("Runtime pid="+std::to_string(GetCurrentProcessId())+" dll="+ownPath.u8string());
 #if DANGO_DIAGNOSTICS
  for(auto& other:relatedModules())note("Other lyric module: "+other);
 #endif
- started=load(pluginDirectory);if(!started){CloseHandle(renderOwner);renderOwner=nullptr;}source_camera::logger=note;if(started)source_camera::frameListener=captureSourceFeatures;}
- void OnModuleLoaded(const char* name,std::uintptr_t handle)override{start();if(!started||!name)return;std::string n(name);if(n=="client"||n=="client.dll")source_camera::clientModule=reinterpret_cast<HMODULE>(handle);if(n=="engine"||n=="engine.dll")source_camera::engineModule=reinterpret_cast<HMODULE>(handle);source_camera::connect();}
- void OnGameLaunch()override{start();if(!started)return;if(!source_camera::clientModule)source_camera::clientModule=GetModuleHandleW(L"client.dll");if(!source_camera::engineModule)source_camera::engineModule=GetModuleHandleW(L"engine.dll");source_camera::connect();}
- void OnD3DDeviceCreated(void* pointer,bool)override{start();if(!started||!pointer)return;auto device=static_cast<IDirect3DDevice9*>(pointer);auto table=*reinterpret_cast<void***>(device);
+ started=load(pluginDirectory);if(!started){CloseHandle(renderOwner);renderOwner=nullptr;}source_camera::logger=note;if(started){source_camera::frameListener=captureSourceFeatures;source_camera::shutdownListener=shutdownFromEngine;}}
+ void OnModuleLoaded(const char* name,std::uintptr_t handle)override{lifetime::Guard guard;if(!guard)return;start();if(!started||!name)return;std::string n(name);if(n=="client"||n=="client.dll")source_camera::clientModule=reinterpret_cast<HMODULE>(handle);if(n=="engine"||n=="engine.dll")source_camera::engineModule=reinterpret_cast<HMODULE>(handle);source_camera::connect();}
+ void OnGameLaunch()override{lifetime::Guard guard;if(!guard)return;start();if(!started)return;if(!source_camera::clientModule)source_camera::clientModule=GetModuleHandleW(L"client.dll");if(!source_camera::engineModule)source_camera::engineModule=GetModuleHandleW(L"engine.dll");source_camera::connect();}
+ void OnD3DDeviceCreated(void* pointer,bool)override{lifetime::Guard guard;if(!guard)return;start();if(!started||!pointer)return;auto device=static_cast<IDirect3DDevice9*>(pointer);auto table=*reinterpret_cast<void***>(device);
  cfg=*std::atomic_load(&settings);created(device);patch(table,17,reinterpret_cast<void*>(&devicePresent));patch(table,16,reinterpret_cast<void*>(&resetDevice));patch(table,14,reinterpret_cast<void*>(&getChain));patch(table,13,reinterpret_cast<void*>(&addChain));IDirect3DSwapChain9* chain=nullptr;if(SUCCEEDED(device->GetSwapChain(0,&chain))&&chain){hookChain(chain);chain->Release();}IDirect3DDevice9Ex* ex=nullptr;if(SUCCEEDED(device->QueryInterface(__uuidof(IDirect3DDevice9Ex),reinterpret_cast<void**>(&ex)))&&ex){auto et=*reinterpret_cast<void***>(ex);patch(et,121,reinterpret_cast<void*>(&presentEx));patch(et,132,reinterpret_cast<void*>(&resetEx));ex->Release();}note("x86 Client D3D9 callbacks installed; no Host plugin required");}
- void stop(){stopExternalCameraTest();source_camera::stop();if(started){shutdown();started=false;}for(size_t i=patchCount.load();i>0;--i){auto& p=patches[i-1];if(!source_camera::readable(p.slot,sizeof(void*)))continue;DWORD old=0;if(VirtualProtect(p.slot,sizeof(void*),PAGE_READWRITE,&old)){InterlockedCompareExchangePointer(p.slot,p.original,p.replacement);DWORD ignored=0;VirtualProtect(p.slot,sizeof(void*),old,&ignored);}}patchCount.store(0);if(renderOwner){CloseHandle(renderOwner);renderOwner=nullptr;}}
- ~LyricsPlugin()override{stop();}
+ // L4N's destructor path may be under Loader Lock. No waits, locks,
+ // resource releases, cross-DLL calls, or worker destruction here.
+ void requestStop() noexcept {lifetime::requestStop();stopping=true;externalCameraTest=false;externalCameraActive=false;source_camera::frameListener=nullptr;}
+ // Normal Source Shutdown / explicit export, outside Loader Lock.
+ void stop(){
+  requestStop();if(stopStarted.exchange(true))return;wake.notify_all();
+  if(worker){if(WaitForSingleObject(worker,2500)!=WAIT_OBJECT_0){note("DangoMusic shutdown deferred: worker not stopped; module retained");stopStarted=false;return;}CloseHandle(worker);worker=nullptr;}
+  const auto deadline=GetTickCount64()+1000;
+  while(lifetime::callbacks.load()&&GetTickCount64()<deadline)Sleep(1);
+  if(lifetime::callbacks.load()){note("DangoMusic shutdown deferred: callbacks in flight; module retained");stopStarted=false;return;}
+  stopExternalCameraTest();source_camera::shutdownListener=nullptr;source_camera::stop();if(started){shutdown();started=false;}
+  for(size_t i=patchCount.load();i>0;--i){auto& p=patches[i-1];if(!source_camera::readable(p.slot,sizeof(void*)))continue;DWORD old=0;if(VirtualProtect(p.slot,sizeof(void*),PAGE_READWRITE,&old)){InterlockedCompareExchangePointer(p.slot,p.original,p.replacement);DWORD ignored=0;VirtualProtect(p.slot,sizeof(void*),old,&ignored);}}
+  // Retain original targets: another plugin may still chain our pinned thunk.
+  if(renderOwner){CloseHandle(renderOwner);renderOwner=nullptr;}
+  note("DangoMusic shutdown complete");
+ }
+ ~LyricsPlugin()override{requestStop();}
 };
 }
-LyricsPlugin& instance(){static LyricsPlugin plugin;return plugin;}
+LyricsPlugin& instance(){static LyricsPlugin* plugin=new LyricsPlugin;return *plugin;}
+namespace { void shutdownFromEngine(){instance().stop();} }
 #if defined(__GNUC__) && !defined(_MSC_VER)
 // L4N is an MSVC C++ interface. GNU's two destructor vtable entries are NOT
 // compatible. Export an explicit MSVC x86 table; delegate into the native object.
 namespace {
-void* __fastcall abiDestructor(void* self,void*,unsigned){instance().stop();return self;}
+void* __fastcall abiDestructor(void* self,void*,unsigned){instance().requestStop();return self;}
 unsigned __fastcall abiVersion(void*,void*){return 2;}
 const char* __fastcall abiName(void*,void*){return instance().GetName();}
 const char* __fastcall abiRelease(void*,void*){return instance().GetVersion();}
