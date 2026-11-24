@@ -21,14 +21,15 @@ struct LyricLease {uint64_t id=0;int index=-1;std::string text;int slot=0;double
 struct LyricLifecycle {
  std::vector<LyricLease> entries;std::string key;int current=-1;uint64_t serial=0;
  void reset(){entries.clear();current=-1;key.clear();}
- void retire(double now,int lingerMs,int fadeMs){for(auto& e:entries)if(e.retired<0){e.lingerMs=std::max(0,lingerMs);e.fadeMs=std::max(1,fadeMs);e.retired=now;e.expires=now+(std::max(0,lingerMs)+std::max(1,fadeMs))/1000.;}current=-1;}
+ void retire(double now,int lingerMs,int fadeMs){for(auto& e:entries)if(e.retired<0){e.lingerMs=std::max(0,lingerMs);e.fadeMs=std::max(0,fadeMs);e.retired=now;e.expires=now+(std::max(0,lingerMs)+std::max(0,fadeMs))/1000.;}current=-1;expire(now);}
  void expire(double now){entries.erase(std::remove_if(entries.begin(),entries.end(),[&](auto& e){return e.expires>=0&&now>=e.expires;}),entries.end());}
  void update(const std::string& song,int index,const std::string& text,double now,int lingerMs,int fadeMs,bool discontinuity=false,int capacity=2,bool replaceOutgoing=false){
  if(discontinuity||song!=key){reset();key=song;}
  entries.erase(std::remove_if(entries.begin(),entries.end(),[&](auto& e){return e.expires>=0&&now>=e.expires;}),entries.end());
  if(index==current)return;
  capacity=std::clamp(capacity,1,9);int slot=index<0?0:index%capacity;
- for(auto& e:entries)if(e.retired<0){e.lingerMs=std::max(0,lingerMs);e.fadeMs=std::max(1,fadeMs);e.retired=now;e.expires=now+(std::max(0,lingerMs)+std::max(1,fadeMs))/1000.;}
+ for(auto& e:entries)if(e.retired<0){e.lingerMs=std::max(0,lingerMs);e.fadeMs=std::max(0,fadeMs);e.retired=now;e.expires=now+(std::max(0,lingerMs)+std::max(0,fadeMs))/1000.;}
+ expire(now);
  current=index;
  if(index<0||text.empty()){entries.clear();return;}
  // Distinct world occurrences retain their own outgoing lease, including repeated lyrics.
