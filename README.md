@@ -216,3 +216,9 @@ python scripts/package.py
 [feature/visual-freecamera-abi-client](https://github.com/yeyunyyds/LDBDangoMusic/tree/feature/visual-freecamera-abi-client) 包含 L4D2Visual FreeCamera C ABI v1 的**可选客户端适配层**：`src/visual_camera_client.hpp`。通过 `GetModuleHandleW` 和 `GetProcAddress` 动态探测 `L4D2Visual.dll`，可以读取控制状态、请求启停、提交世界坐标和镜头角度；没有安装 L4D2Visual 时调用安全失败，不会新增任何 ClientMode Hook。
 
 用户必须先在 L4D2Visual 的 FreeCamera 菜单授权外部接口，才能实际接管。用户操作期间 `pose()` 只更新候选位置，`status().owner` 表示真实所有权。**当前实验分支仅提供调用适配层，尚未接入具体自动运镜策略或主动发送镜头坐标**，不会改变既有歌词播放和镜头行为。
+
+### 游戏内 ABI 连通测试（实验分支）
+
+无需 `visual_camera_client_win32_smoke.exe`。安装本分支和 L4D2Visual 的 `feature/external-freecamera-abi` 版本，先在 L4D2Visual 的 **FreeCamera → 外部接口（ABI）** 中授权（默认关闭，等待 3 秒）。DangoMusic 中打开 **系统与恢复 → FreeCamera 外部 ABI 连通测试（实验） → 启动测试运镜**。**仅在离线游戏的开阔位置测试**：镜头以启动时的玩家视角为基准缓慢平移（最大水平偏移 24 游戏单位）并左右转动。移动鼠标或按键应立即转为手动 FreeCamera，保留当前位置；松开键鼠 3 秒后恢复外部运动。再次点击「关闭测试运镜」可释放请求；Visual 关闭外部授权、切地图或游戏失效也会中断。
+
+这仅验证调用链与控制权切换，**不是 PEAK 式自动镜头，也没有避障**。为了不误触原有玩法，本测试默认关闭、只通过显式菜单启用，不会随音乐播放自行启动。
