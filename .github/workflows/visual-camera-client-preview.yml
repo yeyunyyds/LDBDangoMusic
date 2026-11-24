@@ -18,6 +18,10 @@ jobs:
         run: |
           g++ -std=c++17 -Wall -Wextra -Werror tests/visual_camera_api_test.cpp -o /tmp/visual-camera-api
           /tmp/visual-camera-api
+          g++ -std=c++17 -Wall -Wextra -Werror -Isrc tests/cinematic_camera_test.cpp -o /tmp/cinematic-camera
+          /tmp/cinematic-camera
+          g++ -std=c++17 -Wall -Wextra -Werror -Isrc tests/hud_menu_policy_test.cpp -o /tmp/camera-menu
+          /tmp/camera-menu
       - name: Build optional camera client caller and plugin
         env:
           DANGO_CXX: i686-w64-mingw32-g++-posix
@@ -30,5 +34,4 @@ jobs:
           name: DangoMusic-VisualCamera-Client-Preview
           path: |
             build/L4D2DangoMusic.dll
-            build/visual_camera_client_win32_smoke.exe
           if-no-files-found: error
