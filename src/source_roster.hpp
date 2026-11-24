@@ -19,6 +19,7 @@ inline bool contract(){
  validated=true;log("Roster contract verified: playerInfo[8] size=144, localPlayer[12], maxClients[21]; game-thread capture");return true;
 }
 // Read-only local entity index independent of Steam discovery/identity.
+inline int maxClients(){using namespace source_camera;if(!contract())return 0;using Fn=int(__thiscall*)(void*);auto n=reinterpret_cast<Fn>(reinterpret_cast<uintptr_t>(engineModule)+0x5d290)(engine);return n>=1&&n<=64?n:0;}
 inline int localIndex(){
  using namespace source_camera;
  if(!contract())return -1;
