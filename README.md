@@ -1,6 +1,6 @@
 # L4D2DangoMusic
 
-> **Folia 实验分支**：本分支新增可选「Folia（SMTC + 歌词 API）」音乐来源，仅使用 Windows SMTC 读取播放状态和 Folia 本机 `32109/v1/lyric` 读取同步歌词。需要单独安装 `DangoMediaBridge.exe`；本功能仍未实机验证，不属于下述正式版 v0.9.8。 [Folia 实验包安装与限制](packaging/README-folia-smtc.md) · [Folia 预览 CI](https://github.com/yeyunyyds/LDBDangoMusic/actions/workflows/folia-smtc-preview.yml)。
+> **本实验分支：原生 Folia Stage API**，直接由 x86 DLL 读取本机 Stage 与歌词 API；不需要额外 EXE。见 [安装说明](packaging/README-folia-stage.md)。
 >
 > 当前正式版：[v0.9.8](https://github.com/yeyunyyds/LDBDangoMusic/releases/tag/v0.9.8)。新增七套视觉预设、八个外观收藏与分项应用，整理原生 HUD 菜单，提供恢复默认外观/全部设置。[菜单使用说明](docs/menu-navigation-preview.md)
 
@@ -213,14 +213,14 @@ python scripts/package.py
 
 本版新增：原文与翻译按演唱进度显字（无逐字时间轴默认整句，可选择估算渐显）、单行长度倍率，以及世界歌词换句时沿用视野内原位置。墙面挂画也接入歌词和翻译动画。设置路径和说明见 [歌词设置说明](docs/0.8.1-lyrics-controls.md)。
 
-## 实验性闲置运镜与 Folia 联动
+## 实验性 AFK 运镜与 Folia
 
-`feature/visual-freecamera-abi-client` 已合并 Folia SMTC + 本机歌词 API 支持。运镜需要配套 L4D2Visual 的 `feature/external-freecamera-abi` 构建（ABI v2）；没有 Visual 或版本不匹配时不接管镜头。无需 `visual_camera_client_win32_smoke.exe`。
+当前分支使用 L4D2Visual FreeCamera ABI v3，两个插件必须同时更新。原生 Folia Stage API 替换旧 SMTC EXE；选择 Folia (Stage API) 音乐来源，并在 Folia 开启 Stage Mode / Stage API 和歌词接口。自动发现连接文件，只读本地 HTTP。
 
-1. 安装两个实验 DLL；使用 Folia 时另安装实验包内的 `DangoMediaBridge.exe`，在音乐来源选择 Folia 并开启其歌词 API。
-2. 离线开阔位置测试：Visual → FreeCamera → 外部接口（ABI）允许；DangoMusic → 系统与恢复 → FreeCamera 闲置运镜（实验） → 启动运镜。
-3. 键鼠接管保持当前相机位置，闲置设定时间后读取 GetPose 重新规划。F6/配置快捷键或 Visual 菜单关闭 FreeCamera 会结束会话，DangoMusic 不会偷偷重启；重新启动运镜可开始新会话。关闭 ABI 授权后等待重新授权。
-4. 运镜根据水平朝向规划横移、后退、升降；低头时平滑抬头；世界静态障碍物通过复用已验证 TraceRay 进行有限路径检查，无法验证时只转向，不保证动态物体避障。
-5. 运镜与歌词联动默认开启：优先按 4–10 秒内适当的歌词行边界调整下一段轨迹时长，歌词普通悬浮模式随镜头更新位置。无歌词时采用 6 秒环境运镜。挂画及实体跟随仍保留各自世界锚点。非音乐节拍检测。
+- 系统与恢复 → FreeCamera 闲置运镜（实验）：启用后保持第一人称游戏，首次闲置默认 10 秒（1–120 秒）才开启 FreeCamera。键鼠接管保持镜头原位；再次闲置依照 Visual 的交还时间恢复，F6 结束当前 AFK 会话。
+- 可选混合、人物环绕、建筑歌词、场景远景、鸟瞰追踪。读取经验证的本地存活求生者网络姿态和估算速度；每段以当前相机和最新人物位置规划。半径按风格约 325–620 游戏单位，受世界静态碰撞和视线检查约束，空间不足则缩短或原地构图。真正切换到旁观者且本地实体无效时不盲目飞行。
+- 建筑歌词通过真实墙面固定透视平面表现，规划两个可选侧边位置并依据实际歌词时间轮换；无合适表面时恢复普通歌词。手动实体跟随优先。
+- 全局和独立挂画退场均允许 0 ms；保留停留时间语义，结束即消失。
+- 不添加运行时 EXE；仅单 DLL、config.json 和 README。编译产物及游戏内行为需验证，未合并 main。
 
-默认不启动自动运镜，实验设置仅当前会话有效。两个项目未合并正式 main，不代表联机或 Folia 实机验证完成。
+[实验版安装说明](packaging/README-folia-stage.md) · [CI](https://github.com/yeyunyyds/LDBDangoMusic/actions/workflows/folia-smtc-preview.yml)
