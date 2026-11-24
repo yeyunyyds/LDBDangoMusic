@@ -55,6 +55,8 @@ struct PresentInfo {bool is_swapchain_present=false;IDirect3DSwapChain9* swap_ch
 namespace {
 using namespace dango;
 void captureSourceFeatures(const GameCameraFrame& frame);
+void stopExternalCameraTest();
+void tickExternalCameraTest(const GameCameraFrame& frame);
 hud::NativeHud nativeHud;
 std::shared_ptr<const follow::Settings> followSettings=std::make_shared<follow::Settings>();
 std::atomic<bool> followPositionPreview{false};
