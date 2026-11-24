@@ -1135,6 +1135,20 @@ void tickExternalCameraTest(const GameCameraFrame& frame){
  }
  if(!externalDirector.ready){if(!externalDirector.start(current)){resetExternalCameraLocked(true,false);return;}note("Cinematic acquired actual GetPose");}
  if(!externalCameraTraceProbed){externalCameraTraceProbed=true;externalCameraTrace=source_walls::resolveWorldTrace();if(!externalCameraTrace)note("Cinematic world trace unavailable; stationary fallback");}
+ // The normal shot clock only starts after the initial short departure.
+ if(!externalDirector.departureChecked){
+  externalDirector.departureChecked=true;
+  cinematicTraceBudget=112;
+  if(externalDirector.departure.plan(at,current,actor,cinematicPathClear))note("Cinematic initial model clearance started");
+ }
+ if(externalDirector.departure.active){
+  const auto p=externalDirector.departure.step(at);
+  L4D2VisualCameraPoseV1 target{sizeof(target),{p.eye.x,p.eye.y,p.eye.z},{p.pitch,p.yaw,p.roll}};
+  if(!api.setPose(&target)){resetExternalCameraLocked(false,false);return;}
+  externalDirector.last=p;externalCameraActive=true;
+  if(!externalDirector.departure.active)note("Cinematic initial model clearance completed");
+  return;
+ }
  const auto requested=cinematic::Style(std::clamp(config->cinematicStyle,0,5));
  const auto music=std::atomic_load(&snapshot);
  const auto song=music->at(static_cast<int64_t>(at));
