@@ -60,7 +60,7 @@ inline std::optional<Document> page(uintptr_t id,const Config& c,const State& st
  case 5300:return Document{u8"音乐与歌曲信息",{{value(u8"音乐来源",media::sourceName(c.musicSource)),9500},{value(u8"歌词同步偏移",std::to_string(c.offset)+"ms"),16},{value(u8"显示歌名",on(c.showTitle)),5},{value(u8"显示作者",on(c.showArtist)),6},{u8"当前歌曲："+state.song,0},{u8"歌手："+state.artist,0},{u8"当前来源："+state.source,0},{u8"连接状态："+state.status,0}}};
  case 5400:return Document{u8"实体跟随",{{u8"手动锁定与解除",5410},{u8"自动追踪",5420},{u8"实体歌词布局",812},{u8"跟随运动",5402},{u8"关闭全部实体跟随",6904}}};
  case 5402:return Document{u8"实体跟随运动",{{value(u8"实体位置平滑",on(c.entitySmooth)),110010},{value(u8"移动曲线",movement::name(c.moveCurve))+u8"（与换句移动共用）",879},field(c,Field::MoveMs),{u8"实体专属上下往复",818}}};
- case 5500:{Document d{u8"系统与恢复",{{u8"菜单外观",9000},{u8"恢复默认外观（保留布局与收藏）",6900},{u8"恢复全部设置（保留收藏）",5501},{u8"一起听（实验，默认关闭）",9602},{u8"版本与路径",24}}};
+ case 5500:{Document d{u8"系统与恢复",{{u8"菜单外观",9000},{u8"恢复默认外观（保留布局与收藏）",6900},{u8"恢复全部设置（保留收藏）",5501},{u8"一起听（实验，默认关闭）",9602},{u8"版本与路径",24},{u8"FreeCamera 外部 ABI 连通测试（实验）",9750}}};
 d.note=u8"恢复外观只重置歌词样式和动画，布局、音乐、规则及收藏保留。全部恢复按安装默认值重置，收藏保留。";
 #if DANGO_DIAGNOSTICS
  d.rows.push_back({u8"独立诊断工具",9600});d.rows.push_back({u8"实体诊断",800});
