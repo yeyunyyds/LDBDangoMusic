@@ -96,7 +96,7 @@ inline std::optional<Record> readRecord(unsigned i,const wire::Entry& entry,uint
  r.worldModelIndex=field<int>(base,info,"m_iWorldModelIndex",0);auto carry=field<uint8_t>(base,info,"m_isCarryable",0);if(carry&&*carry<=1)r.isCarryable=*carry!=0;r.effects=field<int>(base,info,"m_fEffects",0);
  r.networkOrigin=vectorField(base,info,"m_vecOrigin");r.networkAngles=vectorField(base,info,"m_angRotation");r.team=field<int>(base,info,"m_iTeamNum",0);r.zombieClass=field<int>(base,info,"m_zombieClass",0);r.character=field<int>(base,info,"m_survivorCharacter",0);r.health=field<int>(base,info,"m_iHealth",0);r.lifeState=field<uint8_t>(base,info,"m_lifeState",0);
  auto index=field<int16_t>(base,info,"m_nModelIndex",0);if(index){r.modelIndex=int(*index);r.modelName=modelName(*index);}
- r.parent=field<uint32_t>(base,info,"moveparent",0);r.parentAttachment=field<uint8_t>(base,info,"m_iParentAttachment",0);r.owner=field<uint32_t>(base,info,"m_hOwnerEntity",0);r.weaponOwner=field<uint32_t>(base,info,"m_hOwner",0);r.activeWeapon=field<uint32_t>(base,info,"m_hActiveWeapon",0);r.viewModel=field<uint32_t>(base,info,"m_hViewModel[0]",0);
+ r.parent=field<uint32_t>(base,info,"moveparent",0);r.parentAttachment=field<uint8_t>(base,info,"m_iParentAttachment",0);r.owner=field<uint32_t>(base,info,"m_hOwnerEntity",0);r.weaponOwner=field<uint32_t>(base,info,"m_hOwner",0);r.activeWeapon=field<uint32_t>(base,info,"m_hActiveWeapon",0);r.viewModel=field<uint32_t>(base,info,"m_hViewModel[0]",0);r.observerTarget=field<uint32_t>(base,info,"m_hObserverTarget",0);
  }return r;
 }
 inline bool prepare(const GameCameraFrame& camera,Frame& frame){
@@ -129,6 +129,17 @@ inline Frame captureSelected(const GameCameraFrame& camera,const inventory::Foll
  auto append=[&](const std::optional<uint32_t>& h){if(h&&*h!=0xffffffffu&&pending.size()<32)pending.push_back(*h);};append(record->parent);
  if(handle==trackedHandle&&dango::follow::carryable(*record)){append(record->owner);append(record->weaponOwner);}
  f.records.push_back(std::move(*record));
+ }
+ return f;
+}
+// Bounded player-only inventory for survivor takeover / spectator transitions.
+inline Frame capturePlayers(const GameCameraFrame& camera,unsigned count){
+ Frame f;f.epoch=camera.epoch;f.tick=camera.tick;if(!prepare(camera,f))return f;
+ auto object=uint32_t(reinterpret_cast<uintptr_t>(list)),entries=uint32_t(int64_t(object)+profile::EntryBaseDelta);
+ for(unsigned index=1;index<=std::min(count,64u)&&index<profile::MaxNetworked;++index){
+  wire::Entry entry;uint32_t net=0;
+  if(!wire::load(reader,entries+index*sizeof(wire::Entry),entry)||!entry.entity||!wire::load(reader,object+profile::CacheOffset+index*8,net)||!net)continue;
+  auto record=readRecord(index,entry,net,f);if(record)f.records.push_back(std::move(*record));
  }
  return f;
 }
