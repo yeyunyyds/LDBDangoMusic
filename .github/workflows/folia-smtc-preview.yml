@@ -1,0 +1,42 @@
+name: Folia SMTC integration preview
+
+on:
+  push:
+    branches:
+      - feature/folia-smtc-lyrics
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-and-package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install cross compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++-mingw-w64-i686-posix
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Run native and bridge regression tests
+        run: bash scripts/test.sh
+      - name: Build L4N x86 plugin
+        env:
+          DANGO_CXX: i686-w64-mingw32-g++-posix
+        run: bash scripts/build-mingw.sh
+      - name: Build Folia-capable x64 bridge
+        run: dotnet publish media-bridge/DangoMediaBridge.csproj -c Release -r win-x64 --self-contained true -o build/media-bridge
+      - name: Package preview only (no public release)
+        run: python3 scripts/package.py --variant folia-smtc
+      - uses: actions/upload-artifact@v4
+        with:
+          name: folia-smtc-preview
+          path: |
+            build/packages/*-folia-smtc.zip
+            build/packages/*-folia-smtc.zip.sha256
+          if-no-files-found: error

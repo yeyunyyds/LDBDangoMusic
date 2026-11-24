@@ -15,6 +15,7 @@ public static class Protocol
             5 => app.Contains("kugou"),
             6 => app.Contains("spotify"),
             7 => app.Contains("tidal"),
+            8 => app.Contains("folia"),
             _ => !app.Contains("left4dead") && !app.Contains("l4d2") && !app.Contains("dangomedia")
         };
     }
