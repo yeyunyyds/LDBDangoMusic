@@ -58,6 +58,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: github.ref_name == 'work/next-cinematic-recovery'
         with:
-          name: DangoMusic-v0.9.9-Release-Candidate
+          name: DangoMusic-v1.0.0-Release-Candidate
           path: build/packages/*
           if-no-files-found: error
