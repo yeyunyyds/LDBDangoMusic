@@ -37,6 +37,9 @@ struct Recovery {
   if(elapsed>=6500)return Action::Native;
   return Action::Hold;
  }
+ Pose desired(Pose current,const Actor& actor) const {
+  return look(hasTarget?target:current.eye,actor.center,current.yaw);
+ }
  Pose step(Pose current,const Actor& actor,float dt) const {
   auto eye=current.eye;
   if(hasTarget){auto delta=target-eye;float n=length(delta);if(n>.001f)eye=eye+delta*std::min(1.f,720.f*std::clamp(dt,0.f,.1f)/n);}

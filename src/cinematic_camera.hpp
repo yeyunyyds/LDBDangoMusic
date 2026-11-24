@@ -74,16 +74,18 @@ inline wall::Panel freePanel(Style style,const Actor& actor,Vec3 eye,bool altern
 }
 // The render clock interpolates sampled actor motion without adding engine reads.
 struct RenderActor {
- Actor value{};uint64_t tick=0;
+ Actor value{};double tick=0;
  void reset(){*this={};}
- Actor update(const Actor& sample,uint64_t now){
+ Actor update(const Actor& sample,double now){
   if(!sample.ready){reset();return value;}
   if(!value.ready||value.epoch!=sample.epoch||value.handle!=sample.handle||now<tick||now-tick>500||length(sample.center-value.center)>128){
    value=sample;tick=now;return value;
   }
   const float dt=float(now-tick)*.001f;
   auto center=mix(value.center,sample.center,1-std::exp(-dt*24.f));
-  value=sample;value.center=center;tick=now;return value;
+  const auto velocity=mix(value.velocity,sample.velocity,1-std::exp(-dt*12.f));
+  const float yaw=mixAngle(value.yaw,sample.yaw,1-std::exp(-dt*18.f));
+  value=sample;value.center=center;value.velocity=velocity;value.yaw=yaw;tick=now;return value;
  }
 };
 enum class LyricMode {Subtitle,First,Second};
@@ -93,13 +95,40 @@ inline LyricMode chooseLyricMode(bool preferSecond,bool firstVisible,bool second
  if(firstVisible)return LyricMode::First;
  return secondVisible?LyricMode::Second:LyricMode::Subtitle;
 }
+inline Vec3 limited(Vec3 v,float maximum){const float n=length(v);return n>maximum&&n>0?v*(maximum/n):v;}
+inline Vec3 leadPosition(const Actor& actor,float seconds){return actor.center+limited(Vec3{actor.velocity.x,actor.velocity.y,0}*seconds,420.f);}
+// Exact critically damped integration for a held target; retain velocity across shots.
+inline Vec3 spring(Vec3 current,Vec3 target,Vec3& velocity,float dt,float omega,float cap){
+ if(dt<=0)return current;
+ const auto error=current-target;const auto term=velocity+error*omega;
+ const float decay=std::exp(-omega*dt);
+ const auto next=target+(error+term*dt)*decay;
+ velocity=limited((velocity-term*(omega*dt))*decay,cap);
+ return current+limited(next-current,cap*dt);
+}
+struct MotionController {
+ Vec3 linear{},angular{};
+ void reset(){*this={};}
+ void blocked(){linear={};}
+ Pose step(Pose current,Pose target,float dt,bool rapid=false){
+  dt=std::clamp(dt,0.f,.05f);
+  const float distance=length(target.eye-current.eye);
+  const float omega=rapid?10.f:distance>220.f?7.f:5.f;
+  auto eye=spring(current.eye,target.eye,linear,dt,omega,rapid?720.f:900.f);
+  Vec3 angles{current.pitch,current.yaw,current.roll};
+  Vec3 desired{target.pitch,current.yaw+wrap(target.yaw-current.yaw),current.roll+wrap(target.roll-current.roll)};
+  auto out=spring(angles,desired,angular,dt,10.f,180.f);
+  return {eye,std::clamp(out.x,-85.f,85.f),wrap(out.y),wrap(out.z)};
+ }
+};
+inline bool healthyView(bool visible,float distance,float range){return visible&&distance<range;}
 inline Vec3 quadratic(Vec3 a,Vec3 b,Vec3 c,float t){return mix(mix(a,b,t),mix(b,c,t),t);}
 // Brief, independently planned departure from the initial survivor eye.
 // Static world clearance is checked before translating; no blind teleport.
 struct Departure {
- Pose from{},to{};uint64_t begin=0;bool active=false;
+ Pose from{},to{};double begin=0;bool active=false;
  static constexpr unsigned milliseconds=300;
- template<class Clear> bool plan(uint64_t now,Pose p,const Actor& actor,Clear clear){
+ template<class Clear> bool plan(double now,Pose p,const Actor& actor,Clear clear){
   active=false;if(!actor.ready||!valid(p))return false;
   auto delta=p.eye-actor.center;
   if(std::hypot(delta.x,delta.y)>=48.f||std::abs(delta.z)>70.f)return false;
@@ -112,7 +141,7 @@ struct Departure {
   }
   return false;
  }
- Pose step(uint64_t now){
+ Pose step(double now){
   const auto elapsed=now>=begin?now-begin:0;
   Pose p=from;p.eye=mix(from.eye,to.eye,ease(float(elapsed)/milliseconds));
   if(elapsed>=milliseconds){p=to;active=false;}return p;
@@ -120,31 +149,35 @@ struct Departure {
 };
 struct Director {
  Pose from{},to{},last{};
- Vec3 control{},anchor{},focus{};
- uint64_t begin=0,lastTick=0;uint32_t actorEpoch=0,actorHandle=0;
- unsigned span=6000,sequence=0,selectedMask=allStyles;
+ Vec3 control{},anchor{},focus{},intercept{};
+ double begin=0,lastTick=0;uint32_t actorEpoch=0,actorHandle=0;
+ unsigned span=6000,sequence=0,selectedMask=allStyles;float travelMs=6000;
  Style active=Style::Orbit,selected=Style::Mixed;
- bool ready=false,planned=false,moving=false,departureChecked=false,lyricFocus=false;
+ bool ready=false,planned=false,moving=false,departureChecked=false,lyricFocus=false,anticipating=false,fixedSurface=false;
  Departure departure;
  void reset(){*this={};}
  bool start(Pose pose){if(!valid(pose))return false;reset();ready=true;last=from=to=pose;return true;}
- bool needsPlan(uint64_t now,const Actor& actor,Style requested,unsigned mask=allStyles)const{
+ bool rebase(Pose pose){const auto n=sequence;if(!start(pose))return false;sequence=n;departureChecked=true;return true;}
+ bool needsPlan(double now,const Actor& actor,Style requested,unsigned mask=allStyles)const{
   if(!planned||requested!=selected||(requested==Style::Mixed&&mask!=selectedMask)||actor.epoch!=actorEpoch||actor.handle!=actorHandle||now<begin||now-begin>=span)return true;
   if(!actor.ready)return false;
   // Update world reference at every shot boundary; fast-moving players may
   // force an earlier continuous transition, not an instantaneous teleport.
-  if(!moving)return now-begin>=350;
-  return surfaceStyle(active)&&now-begin>=500&&length(actor.center-anchor)>120.f;
+  if(anticipating&&now-begin>=travelMs+450){
+   auto away=actor.center-intercept;auto direction=intercept-anchor;
+   if(length(away)>240.f||wall::dot(away,direction)>length(direction)*100.f)return true;
+  }
+  if(!moving)return now-begin>=1200;
+  return fixedSurface&&now-begin>=700&&length(actor.center-anchor)>160.f;
  }
- template<class Clear> bool plan(uint64_t now,unsigned milliseconds,const Actor& actor,Style requested,const Composition& comp,Clear clear,bool lyrics=false,unsigned mask=allStyles){
+ template<class Clear> bool plan(double now,unsigned milliseconds,const Actor& actor,Style requested,const Composition& comp,Clear clear,bool lyrics=false,unsigned mask=allStyles){
   if(!actor.ready)return false;
   lyricFocus=lyrics;from=last;anchor=actor.center;selected=requested;selectedMask=mask;active=choose(requested,length(actor.velocity),sequence,comp.ready,mask);actorEpoch=actor.epoch;actorHandle=actor.handle;
   if(surfaceStyle(active)&&!comp.ready&&requested!=Style::Mixed)active=Style::Wide;
-  const unsigned n=sequence;sequence=nextSequence(sequence,active);begin=now;span=std::clamp(milliseconds,4000u,10000u);planned=true;moving=false;
+  const unsigned n=sequence;sequence=nextSequence(sequence,active);begin=now;span=std::clamp(milliseconds,4000u,10000u);travelMs=float(span);planned=true;moving=false;anticipating=false;fixedSurface=surfaceStyle(active)&&comp.ready;
   if(active==Style::Mixed){focus=actor.center;to=look(from.eye,focus,from.yaw);control=from.eye;return false;}
   const float heading=(length(Vec3{actor.velocity.x,actor.velocity.y,0})>40?std::atan2(actor.velocity.y,actor.velocity.x):actor.yaw*pi/180.f);
   Vec3 predicted=actor.center;
-  if(active==Style::Bird){auto v=actor.velocity;float speed=length(v);if(speed>600)v=v*(600/speed);predicted=predicted+v*.6f;}
   focus=predicted;
   if(surfaceStyle(active)&&comp.ready)focus=mix(actor.center,comp.hasSecond?mix(comp.first.center,comp.second.center,.5f):comp.first.center,active==Style::Architecture?.52f:.40f);
   const float radius=active==Style::Orbit?325.f:active==Style::Wide?620.f:active==Style::Bird?400.f:active==Style::Wall?275.f:620.f;
@@ -154,6 +187,25 @@ struct Director {
   if(active==Style::Bird)initial=heading+pi;
   if(surfaceStyle(active)&&comp.ready)initial=std::atan2(comp.first.normal.y,comp.first.normal.x);
   const float sign=active==Style::Orbit?1.f:(n%2?1.f:-1.f);
+  // Bounded forward intercept: arrive early and hold rather than drag the camera along.
+  if(!surfaceStyle(active)&&std::hypot(actor.velocity.x,actor.velocity.y)>=100.f){
+   constexpr float leadSeconds=1.65f;
+   auto future=leadPosition(actor,leadSeconds);
+   if(length(future-actor.center)>=120.f&&clear(actor.center,future)){
+    for(float side:{sign*.85f,-sign*.85f}){
+     const float az=heading+side;Vec3 radial{std::cos(az),std::sin(az),0};
+     auto candidate=future+radial*(radius*.65f)+Vec3{0,0,height*.65f};
+     if(length(candidate-from.eye)>leadSeconds*400.f||length(candidate-actor.center)<100.f)continue;
+     if(!clear(candidate,actor.center)||!clear(candidate,future))continue;
+     auto midpoint=mix(from.eye,candidate,.5f)+radial*25.f;
+     bool safe=true;auto prev=from.eye;
+     for(int i=1;i<=4;++i){auto next=quadratic(from.eye,midpoint,candidate,float(i)/4);if(!clear(prev,next)){safe=false;break;}prev=next;}
+     if(!safe)continue;
+     control=midpoint;intercept=future;focus=future;to=look(candidate,future,from.yaw);
+     travelMs=1050.f;span=4000;anticipating=moving=true;return true;
+    }
+   }
+  }
   const float angles[]={sign*.95f,-sign*.75f,sign*1.65f,0.f};
   const float facadeAngles[]={sign*.62f,-sign*.62f,sign*.95f,-sign*.95f};
   for(float scale:{1.f,.65f,.4f})for(unsigned ai=0;ai<4;++ai){
@@ -197,19 +249,21 @@ struct Director {
   if(length(Vec3{focus.x-from.eye.x,focus.y-from.eye.y,0})<80.f){focus=from.eye+Vec3{std::cos(heading),std::sin(heading),0}*180.f;}
   to=look(from.eye,focus,from.yaw);control=from.eye;return false;
  }
- Pose step(uint64_t now,const Actor& actor){
+ Pose step(double now,const Actor& actor){
   if(!ready||!planned)return last;
-  float t=ease(float(now>=begin?now-begin:0)/float(span));
+  float t=ease(float(now>=begin?now-begin:0)/travelMs);
   Vec3 eye=moving?quadratic(from.eye,control,to.eye,t):from.eye;
   Vec3 aim=focus;
   if(actor.ready){
    const auto delta=actor.center-anchor;
-   if(moving&&!surfaceStyle(active))eye=eye+delta;
-   if(!surfaceStyle(active))aim=lyricFocus&&active!=Style::Wide?mix(actor.center,freePanel(active,actor,eye).center,.38f):actor.center;
-   else aim=aim+delta*.55f;
+   if(!fixedSurface&&!anticipating)eye=eye+(moving?delta:limited(delta,180.f));
+   if(!fixedSurface){
+    aim=lyricFocus&&active!=Style::Wide&&active!=Style::Mixed?mix(actor.center,freePanel(active,actor,eye).center,.38f):actor.center;
+    if(anticipating)aim=mix(aim,intercept,.35f*(1-t));
+   }else aim=aim+delta*.55f;
   }
   auto target=look(eye,aim,from.yaw);
-  // Blend from actual orientation; dynamic tracking remains smooth.
+  // Desired pose only; the persistent MotionController smooths all applied poses.
   float rotation=ease(float(now>=begin?now-begin:0)/float(std::min(span,1800u)));
   last={eye,mix(from.pitch,target.pitch,rotation),mixAngle(from.yaw,target.yaw,rotation),mixAngle(from.roll,0,rotation)};
   lastTick=now;return last;

@@ -14,6 +14,7 @@ extern "C" __declspec(dllexport) const char DangoBuildFlavor[]="DANGO_PRODUCTION
 #include <atomic>
 #include <memory>
 #include <thread>
+#include <chrono>
 #include <process.h>
 #include "plugin_lifetime.hpp"
 #include <mutex>
@@ -81,6 +82,8 @@ void updateHudAppearance(const hud::Appearance&);
 std::string nativeMenuNotice();
 const char* nativeEntryMenu();
 int64_t now(){return static_cast<int64_t>(GetTickCount64());}
+// Independent high-resolution monotonic clock for camera motion.
+double motionNow(){return std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count();}
 thread_local Config cfg;
 struct MenuNotice {uint64_t tick=0;std::string text;};
 std::shared_ptr<const MenuNotice> menuNotice=std::make_shared<MenuNotice>();
@@ -98,7 +101,9 @@ std::uint32_t externalCameraEpoch=0;
 void* externalCameraTrace=nullptr;
 cinematic::Director externalDirector;
 cinematic::Recovery cinematicRecovery;
-uint64_t cinematicTrackAt=0,cinematicMissingSince=0;bool cinematicPathBlocked=false,cinematicDynamicPanel=false;
+double cinematicTrackAt=0;uint64_t cinematicMissingSince=0,cinematicBlockedSince=0;bool cinematicPathBlocked=false,cinematicDynamicPanel=false;
+ cinematic::RenderActor cameraActor;
+ cinematic::MotionController cameraMotion;
 cinematic::Tracker cinematicActor;
 std::optional<int> cinematicCharacter;
 bool cinematicActorFresh=false;
@@ -415,7 +420,7 @@ void drawCinematicLyrics(IDirect3DDevice9* dev,const GameCameraFrame& camera,boo
  const bool ready=cameraGood&&shot->panels.ready&&shot->panels.epoch==camera.epoch&&tick>=shot->panels.tick&&tick-shot->panels.tick<=350&&shot->key==music.key&&shot->generation==music.generation;
  const bool visibilityFresh=ready&&tick>=shot->visibilityTick&&tick-shot->visibilityTick<=350&&shot->visibilityTick!=0;
  cinematic::Actor actor{};
- if(ready&&shot->dynamic&&shot->actor.ready)actor=state.actor.update(shot->actor,tick);else state.actor.reset();
+ if(ready&&shot->dynamic&&shot->actor.ready)actor=state.actor.update(shot->actor,motionNow());else state.actor.reset();
  auto panel=[&](bool second){return shot->dynamic&&actor.ready?cinematic::freePanel(shot->style,actor,pose.eye,second):(second?shot->panels.second:shot->panels.first);};
  life.update(music.key,at,music.timeline[at].text,clock,cfg.lingerMs,cfg.transition,false,2,false);
  entries.erase(std::remove_if(entries.begin(),entries.end(),[&](const auto& e){return std::none_of(life.entries.begin(),life.entries.end(),[&](const auto& l){return l.id==e.lease;});}),entries.end());
@@ -1030,7 +1035,7 @@ void resetExternalCameraLocked(bool release,bool disarm){
  externalCameraInitialized=false;externalCameraActive=false;
  externalCameraLastFrame=0;externalCameraEpoch=0;
  externalCameraTrace=nullptr;externalCameraTraceProbed=false;
- externalDirector.reset();cinematicRecovery.reset();cinematicTrackAt=0;cinematicMissingSince=0;cinematicPathBlocked=false;cinematicDynamicPanel=false;cinematicActor.reset();cinematicCharacter.reset();cinematicActorFresh=false;cinematicSampleAt=0;cinematicLastMissingLog=cinematicLastViewMismatchLog=0;cinematicPanels={};cinematicVisibilityAt=0;
+ externalDirector.reset();cinematicRecovery.reset();cinematicTrackAt=0;cinematicMissingSince=0;cinematicBlockedSince=0;cameraActor.reset();cameraMotion.reset();cinematicPathBlocked=false;cinematicDynamicPanel=false;cinematicActor.reset();cinematicCharacter.reset();cinematicActorFresh=false;cinematicSampleAt=0;cinematicLastMissingLog=cinematicLastViewMismatchLog=0;cinematicPanels={};cinematicVisibilityAt=0;
  std::atomic_store(&cinematicLyricShot,std::make_shared<const CinematicLyricShot>());
 }
 void stopExternalCameraTest(){
@@ -1145,12 +1150,12 @@ void tickExternalCameraTest(const GameCameraFrame& frame){
    // renew the live external view rather than issuing Request(0).
    auto api=visualcamera::resolve();L4D2VisualCameraPoseV1 hold{};hold.size=sizeof(hold);
    if(api&&api.getPose(&hold))(void)api.setPose(&hold);
-   externalDirector.reset();cinematicRecovery.reset();cinematicTrackAt=0;cinematicPathBlocked=false;externalCameraLastFrame=0;clearCinematicComposition();return;
+   externalDirector.reset();cinematicRecovery.reset();cinematicTrackAt=0;cinematicBlockedSince=0;cameraActor.reset();cameraMotion.reset();cinematicPathBlocked=false;externalCameraLastFrame=0;clearCinematicComposition();return;
   }
   if(externalCameraInitialized){note("AFK map inactive state="+std::to_string(state));resetExternalCameraLocked(true,false);}return;
  }
  if(externalCameraInitialized&&externalCameraEpoch!=frame.epoch){resetExternalCameraLocked(true,false);return;}
- const auto at=uint64_t(now());
+ const auto at=uint64_t(now());const double motionAt=motionNow();
  auto config=std::atomic_load(&settings);
  if(config->cinematicStyle==0&&!config->cinematicMixedMask){if(externalCameraInitialized||externalCameraActive.load())resetExternalCameraLocked(true,false);return;}
  const auto api=visualcamera::resolve();
@@ -1162,7 +1167,7 @@ void tickExternalCameraTest(const GameCameraFrame& frame){
  if(!api.setNativeOnInput(config->cinematicKeepFreeCamera?0:1)){resetExternalCameraLocked(true,false);return;}
  if(externalCameraInitialized&&status.owner==L4D2VISUAL_CAMERA_OWNER_NATIVE)(void)api.setInitialIdle(unsigned(config->cinematicIdleSeconds));
  if(externalCameraInitialized&&!status.external_requested){note("AFK runtime lease lost; feature remains armed");resetExternalCameraLocked(false,false);return;}
- auto actor=readCinematicActor(frame,at);
+ auto sample=readCinematicActor(frame,at);
  if(nativeHud.isOpen()&&!status.camera_active){
   if(externalCameraInitialized)resetExternalCameraLocked(true,false);
   return; // first idle countdown starts AFTER closing DangoMusic menu
@@ -1175,7 +1180,7 @@ void tickExternalCameraTest(const GameCameraFrame& frame){
  }
  L4D2VisualCameraPoseV1 actual{};actual.size=sizeof(actual);
  if(!api.getPose(&actual)){
-  externalCameraActive=false;externalDirector.reset();cinematicRecovery.reset();cinematicTrackAt=0;cinematicPathBlocked=false;clearCinematicComposition();
+  externalCameraActive=false;externalDirector.reset();cinematicRecovery.reset();cinematicTrackAt=0;cinematicBlockedSince=0;cameraActor.reset();cameraMotion.reset();cinematicPathBlocked=false;clearCinematicComposition();
   CameraPose view{};
   if(cameraPose(frame,view)){
    actual.origin[0]=view.eye.x;actual.origin[1]=view.eye.y;actual.origin[2]=view.eye.z;
@@ -1186,31 +1191,38 @@ void tickExternalCameraTest(const GameCameraFrame& frame){
   return; // pending native poses are heartbeat only; Visual does not apply them
  }
  if(status.owner!=L4D2VISUAL_CAMERA_OWNER_EXTERNAL||!status.camera_active||nativeHud.isOpen()){
-  externalCameraActive=false;externalDirector.reset();cinematicRecovery.reset();cinematicTrackAt=0;cinematicPathBlocked=false;externalCameraLastFrame=0;clearCinematicComposition();
+  externalCameraActive=false;externalDirector.reset();cinematicRecovery.reset();cinematicTrackAt=0;cinematicBlockedSince=0;cameraActor.reset();cameraMotion.reset();cinematicPathBlocked=false;externalCameraLastFrame=0;clearCinematicComposition();
   if(!api.setPose(&actual))resetExternalCameraLocked(false,false);
   return;
  }
- if(externalCameraLastFrame&&at-externalCameraLastFrame>500){externalDirector.reset();cinematicRecovery.reset();cinematicTrackAt=0;cinematicPathBlocked=false;}
+ if(externalCameraLastFrame&&at-externalCameraLastFrame>500){externalDirector.reset();cinematicRecovery.reset();cinematicTrackAt=0;cinematicBlockedSince=0;cameraActor.reset();cameraMotion.reset();cinematicPathBlocked=false;}
  externalCameraLastFrame=at;
  const cinematic::Pose current{{actual.origin[0],actual.origin[1],actual.origin[2]},actual.angles[0],actual.angles[1],actual.angles[2]};
- if(!actor.ready){
+ if(!sample.ready){
   if(!cinematicMissingSince)cinematicMissingSince=at;
   if(at-cinematicMissingSince>=3000){note("Cinematic subject lost for 3s; native fallback");resetExternalCameraLocked(true,false);return;}
   // Observer target may be transiently absent during a bot takeover. The
   // actual detached pose remains owned by us; no stale coordinates or flight.
-  externalDirector.reset();cinematicRecovery.reset();cinematicTrackAt=0;cinematicPathBlocked=false;clearCinematicComposition();
+  externalDirector.reset();cinematicRecovery.reset();cinematicTrackAt=0;cinematicBlockedSince=0;cameraActor.reset();cameraMotion.reset();cinematicPathBlocked=false;clearCinematicComposition();
   if(!api.setPose(&actual)){resetExternalCameraLocked(false,false);return;}
   externalCameraActive=true;
   if(!cinematicLastMissingLog||at-cinematicLastMissingLog>=2000){cinematicLastMissingLog=at;note("AFK subject unavailable; holding external view");}
   return;
  }
  cinematicMissingSince=0;
- if(externalDirector.planned&&(externalDirector.actorEpoch!=actor.epoch||externalDirector.actorHandle!=actor.handle)){externalDirector.reset();cinematicRecovery.reset();cinematicPathBlocked=false;clearCinematicComposition();}
+ auto actor=cameraActor.update(sample,motionAt);
+ if(externalDirector.planned&&(externalDirector.actorEpoch!=actor.epoch||externalDirector.actorHandle!=actor.handle)){externalDirector.reset();cinematicRecovery.reset();cameraMotion.reset();cinematicTrackAt=0;cinematicBlockedSince=0;cinematicPathBlocked=false;clearCinematicComposition();}
  // Compare final rendered view to the ABI view, independently of ownership.
  // If the engine overwrites later, report that rather than guessing new offsets.
  CameraPose rendered{};
- if(cameraPose(frame,rendered)&&length(rendered.eye-current.eye)>32&&(!cinematicLastViewMismatchLog||at-cinematicLastViewMismatchLog>=2000)){
-  cinematicLastViewMismatchLog=at;note("AFK rendered/ABI pose mismatch distance="+std::to_string(length(rendered.eye-current.eye)));
+ if(cameraPose(frame,rendered)){
+  const float pitch=current.pitch*cinematic::pi/180.f,yaw=current.yaw*cinematic::pi/180.f;
+  const Vec3 expected{std::cos(pitch)*std::cos(yaw),std::cos(pitch)*std::sin(yaw),-std::sin(pitch)};
+  const float positionError=length(rendered.eye-current.eye);
+  const float angleError=std::acos(std::clamp(wall::dot(rendered.forward,expected),-1.f,1.f))*180.f/cinematic::pi;
+  if((positionError>4.f||angleError>1.5f)&&(!cinematicLastViewMismatchLog||at-cinematicLastViewMismatchLog>=2000)){
+   cinematicLastViewMismatchLog=at;note("AFK rendered/ABI pose mismatch distance="+std::to_string(positionError)+" angle="+std::to_string(angleError));
+  }
  }
  if(!externalDirector.ready){if(!externalDirector.start(current)){resetExternalCameraLocked(true,false);return;}note("Cinematic acquired actual GetPose");}
  if(!externalCameraTraceProbed){externalCameraTraceProbed=true;externalCameraTrace=source_walls::resolveWorldTrace();if(!externalCameraTrace)note("Cinematic world trace unavailable; stationary fallback");}
@@ -1218,13 +1230,13 @@ void tickExternalCameraTest(const GameCameraFrame& frame){
  if(!externalDirector.departureChecked){
   externalDirector.departureChecked=true;
   cinematicTraceBudget=112;
-  if(externalDirector.departure.plan(at,current,actor,cinematicPathClear))note("Cinematic initial model clearance started");
+  if(externalDirector.departure.plan(motionAt,current,actor,cinematicPathClear))note("Cinematic initial model clearance started");
  }
  if(externalDirector.departure.active){
-  const auto p=externalDirector.departure.step(at);
+  const auto p=externalDirector.departure.step(motionAt);
   L4D2VisualCameraPoseV1 target{sizeof(target),{p.eye.x,p.eye.y,p.eye.z},{p.pitch,p.yaw,p.roll}};
   if(!api.setPose(&target)){resetExternalCameraLocked(false,false);return;}
-  externalDirector.last=p;externalCameraActive=true;
+  externalDirector.last=p;cameraMotion.reset();cinematicTrackAt=motionAt;externalCameraActive=true;
   if(!externalDirector.departure.active)note("Cinematic initial model clearance completed");
   return;
  }
@@ -1233,7 +1245,8 @@ void tickExternalCameraTest(const GameCameraFrame& frame){
  const auto song=music->at(static_cast<int64_t>(at));
  const auto lyricSong=song<0?song:song+(config->demo?0:config->offset);
  const unsigned mask=unsigned(config->cinematicMixedMask);
- if(!cinematicRecovery.active&&externalDirector.needsPlan(at,actor,requested,mask)){
+ const bool blockedReplan=cinematicBlockedSince&&at-cinematicBlockedSince>=700&&motionAt-externalDirector.begin>=1200;
+ if(!cinematicRecovery.active&&(externalDirector.needsPlan(motionAt,actor,requested,mask)||blockedReplan)){
   // Replan from the exact last rendered pose rather than an old target.
   externalDirector.last=current;
   clearCinematicComposition();
@@ -1242,38 +1255,41 @@ void tickExternalCameraTest(const GameCameraFrame& frame){
   if(config->cinematicLyrics&&cinematic::surfaceStyle(shotStyle))cinematicPanels=findCinematicPanels(actor,current,shotStyle,at);
   unsigned span=config->cinematicLyrics&&music->playing?cinematic::duration(music->timeline,lyricSong,music->rate):6000;
   cinematicTraceBudget=336; // bounded per-shot world traces
-  bool planned=externalDirector.plan(at,span,actor,requested,cinematicPanels,cinematicPathClear,config->cinematicLyrics,mask);
-  if(!planned&&cinematicPanels.hasSecond){cinematicPanels.hasSecond=false;externalDirector.last=current;externalDirector.sequence=shotSequence;cinematicTraceBudget=112;planned=externalDirector.plan(at,span,actor,requested,cinematicPanels,cinematicPathClear,config->cinematicLyrics,mask);}
-  if(!planned&&cinematicPanels.ready){clearCinematicComposition();externalDirector.last=current;externalDirector.sequence=shotSequence;cinematicTraceBudget=112;planned=externalDirector.plan(at,span,actor,requested,cinematicPanels,cinematicPathClear,config->cinematicLyrics,mask);}
+  bool planned=externalDirector.plan(motionAt,span,actor,requested,cinematicPanels,cinematicPathClear,config->cinematicLyrics,mask);
+  if(!planned&&cinematicPanels.hasSecond){cinematicPanels.hasSecond=false;externalDirector.last=current;externalDirector.sequence=shotSequence;cinematicTraceBudget=112;planned=externalDirector.plan(motionAt,span,actor,requested,cinematicPanels,cinematicPathClear,config->cinematicLyrics,mask);}
+  if(!planned&&cinematicPanels.ready){clearCinematicComposition();externalDirector.last=current;externalDirector.sequence=shotSequence;cinematicTraceBudget=112;planned=externalDirector.plan(motionAt,span,actor,requested,cinematicPanels,cinematicPathClear,config->cinematicLyrics,mask);}
   if(!planned||!cinematic::surfaceStyle(externalDirector.active))clearCinematicComposition();
-  note("Cinematic shot style="+std::to_string(int(externalDirector.active))+" moving="+std::to_string(planned)+" actor="+std::to_string(actor.handle)+" requested="+std::to_string(int(shotStyle))+" panels="+std::to_string(cinematicPanels.ready));
+  note("Cinematic shot style="+std::to_string(int(externalDirector.active))+" moving="+std::to_string(planned)+" actor="+std::to_string(actor.handle)+" requested="+std::to_string(int(shotStyle))+" panels="+std::to_string(cinematicPanels.ready)+" anticipate="+std::to_string(externalDirector.anticipating));
  }
  if(!config->cinematicLyrics)clearCinematicComposition();
  // Continuous world-space tracking, independent of artistic shot duration.
- const float dt=cinematicTrackAt&&at>=cinematicTrackAt?std::min(.1f,float(at-cinematicTrackAt)*.001f):0.f;cinematicTrackAt=at;
+ const float dt=cinematicTrackAt&&motionAt>=cinematicTrackAt?std::min(.05f,float(motionAt-cinematicTrackAt)*.001f):0.f;cinematicTrackAt=motionAt;
  cinematic::Pose p=current;
  cinematicTraceBudget=280;
  const float range=externalDirector.active==cinematic::Style::Wide?1150.f:externalDirector.active==cinematic::Style::Bird?1000.f:850.f;
  auto action=cinematic::Recovery::Action::Normal;
  if(at>=cinematicRecovery.nextProbe){
   const bool visible=cinematicActorVisible(current.eye,actor);
-  const bool healthy=visible&&!cinematicPathBlocked&&length(current.eye-actor.center)<range&&(externalDirector.moving||cinematicRecovery.active);
+  const bool healthy=cinematic::healthyView(visible,length(current.eye-actor.center),range);
   const bool wasRecovering=cinematicRecovery.active;
   action=cinematicRecovery.probe(at,current,actor,healthy,cinematicPathClear,cinematicActorVisible);
   if(!wasRecovering&&cinematicRecovery.active){note("Cinematic recovery: distance="+std::to_string(length(current.eye-actor.center))+" visible="+std::to_string(visible));clearCinematicComposition();}
-  if(wasRecovering&&action==cinematic::Recovery::Action::Normal){externalDirector.start(current);externalDirector.departureChecked=true;clearCinematicComposition();note("Cinematic recovered; replanning");}
+  if(wasRecovering&&action==cinematic::Recovery::Action::Normal){externalDirector.rebase(current);clearCinematicComposition();note("Cinematic recovered; replanning");}
  }else if(cinematicRecovery.active)action=cinematicRecovery.hasTarget?cinematic::Recovery::Action::Follow:cinematic::Recovery::Action::Hold;
  if(action==cinematic::Recovery::Action::Native){note("Cinematic recovery exhausted; return to native and rearm");resetExternalCameraLocked(true,false);return;}
  if(action==cinematic::Recovery::Action::Cut){
   p=cinematic::look(cinematicRecovery.target,actor.center,current.yaw);
-  externalDirector.start(p);externalDirector.departureChecked=true;clearCinematicComposition();cinematicPathBlocked=false;
+  externalDirector.rebase(p);cameraMotion.reset();clearCinematicComposition();cinematicPathBlocked=false;cinematicBlockedSince=0;
   note("Cinematic camera cut: distance="+std::to_string(length(current.eye-actor.center)));
  }else{
-  p=action==cinematic::Recovery::Action::Normal?externalDirector.step(at,actor):cinematicRecovery.step(current,actor,dt);
-  auto delta=p.eye-current.eye;float distance=length(delta);if(distance>900.f*dt&&distance>.001f)p.eye=current.eye+delta*(900.f*dt/distance);
+  auto desired=action==cinematic::Recovery::Action::Normal?externalDirector.step(motionAt,actor):cinematicRecovery.desired(current,actor);
+  p=cameraMotion.step(current,desired,dt,action!=cinematic::Recovery::Action::Normal);
+  if(action==cinematic::Recovery::Action::Hold){p.eye=current.eye;cameraMotion.blocked();}
   cinematicTraceBudget=7;
-  cinematicPathBlocked=length(p.eye-current.eye)>.05f&&!cinematicPathClear(current.eye,p.eye);
-  if(cinematicPathBlocked){p.eye=current.eye;externalDirector.last=p;}
+  cinematicPathBlocked=length(p.eye-current.eye)>.001f&&!cinematicPathClear(current.eye,p.eye);
+  if(cinematicPathBlocked){p.eye=current.eye;cameraMotion.blocked();if(!cinematicBlockedSince)cinematicBlockedSince=at;}
+  else cinematicBlockedSince=0;
+  externalDirector.last=p;
  }
  const Vec3 panelEye=cameraPose(frame,rendered)?rendered.eye:current.eye;
  auto panelStyle=cinematicRecovery.active?cinematic::Style::Orbit:externalDirector.active;
