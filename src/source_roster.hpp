@@ -8,7 +8,7 @@ inline uint64_t nextCapture=0,generation=1;inline uint32_t lastEpoch=0;inline HM
 // Static inspection of the uploaded engine image: GetPlayerInfo copies/clears
 // exactly 0x90 bytes. Names at +8/+0x54 are 32 bytes; userID is +0x28.
 inline bool contract(){
- using namespace source_camera;if(checkedModule==engineModule)return validated;checkedModule=engineModule;validated=false;if(!engineModule||!engine||!hooked)return false;
+ using namespace source_camera;if(!engineModule||!engine||!hooked)return false;if(checkedModule==engineModule)return validated;checkedModule=engineModule;validated=false;
  if(!matchesImage(engineModule,EngineTimestamp,EngineImageSize,"roster engine.dll"))return false;
  struct Method{unsigned slot;uint32_t rva;unsigned char prefix[12];};
  static constexpr Method methods[]={
