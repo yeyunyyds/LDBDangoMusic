@@ -1,0 +1,2 @@
+# November 2026 L4D2 build
+Offline evidence from uploaded x86 DLLs; runtime testing pending. Client SHA 4d01ed9fb856d57ce549b8587c386f361083ee581b001295fac0eff4c835d52d, timestamp 1794952363; engine SHA d451800729322f25bfc65d58a408edb4f4243a8ea8c26fabccbba4bc7ecc1db3, timestamp 1794946460. Camera slots unchanged, entity methods +0x30, model methods +0x50. TraceRay 0x1797a0; clear and return sizes and nine existing ABI anchors checked. Old builds are refused by the new fixed profile. No game DLLs bundled.

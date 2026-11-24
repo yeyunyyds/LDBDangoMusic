@@ -1,7 +1,7 @@
 {
   "client": {
-    "sha256": "c0a8e1e88f7312db11bcfd4b0ec574d224a34b2d9a615d6088b28335eeb4af1f",
-    "timestamp": 1782845135,
+    "sha256": "4d01ed9fb856d57ce549b8587c386f361083ee581b001295fac0eff4c835d52d",
+    "timestamp": 1794952363,
     "image_size": 9842688,
     "image_base": 268435456,
     "interface": "VClient016",
@@ -23,11 +23,11 @@
       }
     },
     "interface_name_rva": 5654720,
-    "registration_rva": 5232656
+    "registration_rva": 5232832
   },
   "engine": {
-    "sha256": "8a6d468059394bf4cfce32f11dcba12ef45de88da1373084d5a2916d0bf7ba86",
-    "timestamp": 1782845142,
+    "sha256": "d451800729322f25bfc65d58a408edb4f4243a8ea8c26fabccbba4bc7ecc1db3",
+    "timestamp": 1794946460,
     "image_size": 7598080,
     "image_base": 268435456,
     "interface": "VEngineClient013",
@@ -57,6 +57,6 @@
       }
     },
     "interface_name_rva": 3516340,
-    "registration_rva": 3382960
+    "registration_rva": 3383328
   }
 }
