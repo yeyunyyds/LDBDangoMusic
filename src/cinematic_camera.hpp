@@ -52,6 +52,17 @@ inline Style choose(Style requested,float speed,unsigned sequence,bool architect
  const Style cycle[]={Style::Orbit,Style::Architecture,Style::Wide,Style::Wall,Style::Bird};
  auto style=cycle[sequence%5];return surfaceStyle(style)&&!architecture?Style::Wide:style;
 }
+inline wall::Panel freePanel(Style style,const Actor& actor,Vec3 eye,bool alternate=false){
+ auto normal=normalize(Vec3{eye.x-actor.center.x,eye.y-actor.center.y,0});
+ if(length(normal)<.9f)normal={-std::cos(actor.yaw*pi/180.f),-std::sin(actor.yaw*pi/180.f),0};
+ auto right=normalize(wall::cross(Vec3{0,0,1},normal));
+ if(style==Style::Bird){
+  Vec3 up=normal*-1.f;auto side=normalize(wall::cross(up,{0,0,1}));
+  return {actor.center+side*104.f+Vec3{0,0,-22},{0,0,1},side,up,180,60,actor.epoch};
+ }
+ const bool wide=style==Style::Wide||style==Style::Architecture;
+ return {actor.center+right*((wide?170.f:100.f)*(alternate?-1.f:1.f))+Vec3{0,0,wide?80.f:34.f},normal,right,{0,0,1},wide?270.f:150.f,wide?85.f:50.f,actor.epoch};
+}
 inline Vec3 quadratic(Vec3 a,Vec3 b,Vec3 c,float t){return mix(mix(a,b,t),mix(b,c,t),t);}
 // Brief, independently planned departure from the initial survivor eye.
 // Static world clearance is checked before translating; no blind teleport.
@@ -83,7 +94,7 @@ struct Director {
  uint64_t begin=0,lastTick=0;uint32_t actorEpoch=0,actorHandle=0;
  unsigned span=6000,sequence=0;
  Style active=Style::Orbit,selected=Style::Mixed;
- bool ready=false,planned=false,moving=false,departureChecked=false;
+ bool ready=false,planned=false,moving=false,departureChecked=false,lyricFocus=false;
  Departure departure;
  void reset(){*this={};}
  bool start(Pose pose){if(!valid(pose))return false;reset();ready=true;last=from=to=pose;return true;}
@@ -92,11 +103,12 @@ struct Director {
   if(!actor.ready)return false;
   // Update world reference at every shot boundary; fast-moving players may
   // force an earlier continuous transition, not an instantaneous teleport.
-  return now-begin>1400&&length(actor.center-anchor)>(active==Style::Bird?240.f:320.f);
+  if(!moving)return now-begin>=350;
+  return surfaceStyle(active)&&now-begin>=500&&length(actor.center-anchor)>120.f;
  }
- template<class Clear> bool plan(uint64_t now,unsigned milliseconds,const Actor& actor,Style requested,const Composition& comp,Clear clear){
+ template<class Clear> bool plan(uint64_t now,unsigned milliseconds,const Actor& actor,Style requested,const Composition& comp,Clear clear,bool lyrics=false){
   if(!actor.ready)return false;
-  from=last;anchor=actor.center;selected=requested;active=choose(requested,length(actor.velocity),sequence,comp.ready);actorEpoch=actor.epoch;actorHandle=actor.handle;
+  lyricFocus=lyrics;from=last;anchor=actor.center;selected=requested;active=choose(requested,length(actor.velocity),sequence,comp.ready);actorEpoch=actor.epoch;actorHandle=actor.handle;
   if(surfaceStyle(active)&&!comp.ready)active=Style::Wide;
   const unsigned n=sequence++;begin=now;span=std::clamp(milliseconds,4000u,10000u);planned=true;moving=false;
   const float heading=(length(Vec3{actor.velocity.x,actor.velocity.y,0})>40?std::atan2(actor.velocity.y,actor.velocity.x):actor.yaw*pi/180.f);
@@ -147,7 +159,7 @@ struct Director {
     Vec3 prev=from.eye;bool safe=true;
     for(int i=1;i<=4;++i){auto next=quadratic(from.eye,midPoint,candidate,float(i)/4);if(!clear(prev,next)){safe=false;break;}prev=next;}
     if(!safe)continue;
-    control=midPoint;to=look(candidate,focus,from.yaw);moving=true;return true;
+    control=midPoint;auto aim=lyricFocus&&!surfaceStyle(active)&&active!=Style::Wide?mix(actor.center,freePanel(active,actor,candidate).center,.38f):focus;to=look(candidate,aim,from.yaw);moving=true;return true;
    }
   }
   // Never fly through unsupported geometry. No fake free-space orbit.
@@ -159,9 +171,11 @@ struct Director {
   float t=ease(float(now>=begin?now-begin:0)/float(span));
   Vec3 eye=moving?quadratic(from.eye,control,to.eye,t):from.eye;
   Vec3 aim=focus;
-  if(moving&&actor.ready&&(active==Style::Orbit||active==Style::Bird)){
-   Vec3 delta=actor.center-anchor;float distance=length(delta);if(distance>300)delta=delta*(300/distance);
-   aim=aim+delta;
+  if(actor.ready){
+   const auto delta=actor.center-anchor;
+   if(moving&&!surfaceStyle(active))eye=eye+delta;
+   if(!surfaceStyle(active))aim=lyricFocus&&active!=Style::Wide?mix(actor.center,freePanel(active,actor,eye).center,.38f):actor.center;
+   else aim=aim+delta*.55f;
   }
   auto target=look(eye,aim,from.yaw);
   // Blend from actual orientation; dynamic tracking remains smooth.

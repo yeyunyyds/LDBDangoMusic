@@ -14,8 +14,9 @@ struct Api {
  L4D2VisualCameraGetStatusFn getStatus=nullptr;
  L4D2VisualCameraGetPoseFn getPose=nullptr;
  L4D2VisualCameraSetInitialIdleFn setInitialIdle=nullptr;
+ L4D2VisualCameraSetNativeOnInputFn setNativeOnInput=nullptr;
 
- explicit operator bool() const noexcept {return setActive&&setPose&&getStatus&&getPose&&setInitialIdle;}
+ explicit operator bool() const noexcept {return setActive&&setPose&&getStatus&&getPose&&setInitialIdle&&setNativeOnInput;}
 };
 
 // Resolve each time; do not retain unowned pointers across plugin reloads.
@@ -36,6 +37,7 @@ inline Api resolve() noexcept {
  api.getPose=reinterpret_cast<L4D2VisualCameraGetPoseFn>(
   GetProcAddress(module,"L4D2VisualCameraGetPose"));
  api.setInitialIdle=reinterpret_cast<L4D2VisualCameraSetInitialIdleFn>(GetProcAddress(module,"L4D2VisualCameraSetInitialIdle"));
+ api.setNativeOnInput=reinterpret_cast<L4D2VisualCameraSetNativeOnInputFn>(GetProcAddress(module,"L4D2VisualCameraSetNativeOnInput"));
  return api;
 }
 inline bool status(L4D2VisualCameraStatusV1& result) noexcept {

@@ -1,4 +1,6 @@
 #include "cinematic_camera.hpp"
+#include "plugin_lifetime.hpp"
+#include "cinematic_recovery.hpp"
 #include "cinematic_architecture.hpp"
 #include "cinematic_subject.hpp"
 #include <cassert>
@@ -25,6 +27,7 @@ static inventory::Record survivor(uint32_t index,uint32_t handle,int character,c
  inventory::Record r;r.index=index;r.handle=handle;r.className=name;r.team=2;r.health=100;r.lifeState=0;r.dormant=false;r.character=character;r.networkOrigin=Vec3{10,0,0};r.networkAngles=Vec3{};return r;
 }
 int main(){
+ {lifetime::Guard guard;assert(guard&&lifetime::callbacks.load()==1);lifetime::requestStop();lifetime::Guard denied;assert(!denied&&lifetime::callbacks.load()==1);}assert(!lifetime::callbacks.load());
  trace::Result facade;assert(building({0,0,80},{200,0,80},facade)&&trace::wallHit(facade));
  wall::Panel roof;assert(roofPanel(facade,1,building,roof));
  assert(roof.center.x>100&&roof.center.z-roof.height*.5f>200&&roof.normal.x<-.99f);
@@ -86,6 +89,21 @@ int main(){
  assert(wallCam.plan(1000,6000,a,Style::Wall,wallComp,clear));
  auto low=wallCam.step(7000,a);assert(low.eye.z<=wallComp.first.center.z+70.01f&&raised.eye.z>low.eye.z+100);
 
+ Director follow;assert(follow.start({{-200,0,80},0,0,0}));
+ assert(follow.plan(1000,6000,a,Style::Orbit,{},clear,true));
+ auto fixed=follow.step(3000,a);auto shifted=a;shifted.center.x+=250;
+ auto tracked=follow.step(3000,shifted);assert(std::abs(tracked.eye.x-fixed.eye.x-250)<.01f);
+ auto birdPanel=freePanel(Style::Bird,a,{100,100,500});assert(birdPanel.normal.z==1&&birdPanel.center.z<a.center.z);
+ auto orbitPanel=freePanel(Style::Orbit,a,{-200,0,80});assert(orbitPanel.normal.x<-.9f);
+ auto widePanel=freePanel(Style::Wide,a,{-200,0,80});assert(widePanel.width>orbitPanel.width);auto wideOther=freePanel(Style::Wide,a,{-200,0,80},true);assert(length(wideOther.center-widePanel.center)>300);
+ Recovery recovery;auto far=a;far.center={1500,0,40};Pose stuck{{0,0,80},0,0,0};
+ auto localClear=[](Vec3 from,Vec3 to){return from.x>1000&&to.x>1000;};
+ auto seen=[](Vec3,const Actor&){return true;};
+ assert(recovery.probe(1000,stuck,far,false,localClear,seen)==Recovery::Action::Hold);
+ assert(recovery.probe(3600,stuck,far,false,localClear,seen)==Recovery::Action::Cut);
+ assert(length(recovery.target-far.center)<250);
+ recovery.reset();assert(recovery.probe(1000,stuck,far,false,blocked,seen)==Recovery::Action::Hold);
+ assert(recovery.probe(7600,stuck,far,false,blocked,seen)==Recovery::Action::Native);
  struct L{int64_t start;};std::vector<L> lines{{0},{1000},{2000},{5500},{9000}};
  assert(duration(lines,1000,1)==4500);
  assert(duration(lines,-1,1)==6000);

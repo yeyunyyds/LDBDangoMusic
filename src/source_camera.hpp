@@ -23,6 +23,7 @@ template<class Factory> std::string inventory(Factory factory,const char* prefix
 inline std::shared_ptr<const GameCameraFrame> snapshot=std::make_shared<GameCameraFrame>();
 inline void (*logger)(const std::string&)=nullptr;
 inline std::atomic<void(*)(const GameCameraFrame&)> frameListener{nullptr};
+inline std::atomic<void(*)()> shutdownListener{nullptr};
 inline void log(const std::string& s){if(logger)logger(s);}
 inline bool readable(const void* p,size_t n){MEMORY_BASIC_INFORMATION i{};return p&&VirtualQuery(p,&i,sizeof(i))&&i.State==MEM_COMMIT&&!(i.Protect&(PAGE_GUARD|PAGE_NOACCESS))&&reinterpret_cast<uintptr_t>(p)+n<=reinterpret_cast<uintptr_t>(i.BaseAddress)+i.RegionSize;}
 inline bool owns(const void* p,HMODULE m){HMODULE owner=nullptr;return p&&GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,reinterpret_cast<const wchar_t*>(p),&owner)&&owner==m;}
@@ -40,7 +41,7 @@ inline void capture(bool active){
  std::atomic_store(&snapshot,std::make_shared<const GameCameraFrame>(f));if(auto listener=frameListener.load(std::memory_order_acquire))listener(f);
 }
 inline void __fastcall renderHook(void* self,void*,void* rect){static thread_local int depth=0;++depth;originalRender(self,rect);if(depth==1)capture(true);--depth;}
-inline void __fastcall shutdownHook(void* self,void*){++epoch;capture(false);originalShutdown(self);}
+inline void __fastcall shutdownHook(void* self,void*){++epoch;auto original=originalShutdown;if(auto listener=shutdownListener.exchange(nullptr))listener();else capture(false);original(self);}
 inline void __fastcall levelHook(void* self,void*){++epoch;capture(false);originalLevelShutdown(self);}
 inline bool replace(size_t slot,void* expected,void* value){DWORD old=0;if(!VirtualProtect(table+slot,sizeof(void*),PAGE_READWRITE,&old))return false;void* actual=InterlockedCompareExchangePointer(table+slot,value,expected);DWORD ignored=0;VirtualProtect(table+slot,sizeof(void*),old,&ignored);return actual==expected;}
 inline bool executable(const void* address){MEMORY_BASIC_INFORMATION info{};if(!address||!VirtualQuery(address,&info,sizeof(info))||info.State!=MEM_COMMIT||(info.Protect&(PAGE_GUARD|PAGE_NOACCESS)))return false;return (info.Protect&(PAGE_EXECUTE|PAGE_EXECUTE_READ|PAGE_EXECUTE_READWRITE|PAGE_EXECUTE_WRITECOPY))!=0;}
