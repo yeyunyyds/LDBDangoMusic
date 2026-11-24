@@ -1103,16 +1103,18 @@ void tickExternalCameraTest(const GameCameraFrame& frame){
   // Replan from the exact last rendered pose rather than an old target.
   externalDirector.last=current;
   clearCinematicComposition();
-  const auto shotStyle=cinematic::choose(requested,length(actor.velocity),externalDirector.sequence,true);
+  const auto shotSequence=externalDirector.sequence;
+  const auto shotStyle=cinematic::choose(requested,length(actor.velocity),shotSequence,true);
   if(config->cinematicLyrics&&cinematic::surfaceStyle(shotStyle))cinematicPanels=findCinematicPanels(actor,current,shotStyle,at);
   unsigned span=config->cinematicLyrics&&music->playing?cinematic::duration(music->timeline,lyricSong,music->rate):6000;
   cinematicTraceBudget=224; // bounded per-shot world traces
   bool planned=externalDirector.plan(at,span,actor,requested,cinematicPanels,cinematicPathClear);
-  if(!planned&&cinematicPanels.hasSecond){cinematicPanels.hasSecond=false;externalDirector.last=current;cinematicTraceBudget=112;planned=externalDirector.plan(at,span,actor,requested,cinematicPanels,cinematicPathClear);}
-  if(!planned&&cinematicPanels.ready){clearCinematicComposition();externalDirector.last=current;cinematicTraceBudget=112;planned=externalDirector.plan(at,span,actor,requested,cinematicPanels,cinematicPathClear);}
+  if(!planned&&cinematicPanels.hasSecond){cinematicPanels.hasSecond=false;externalDirector.last=current;externalDirector.sequence=shotSequence;cinematicTraceBudget=112;planned=externalDirector.plan(at,span,actor,requested,cinematicPanels,cinematicPathClear);}
+  if(!planned&&cinematicPanels.ready){clearCinematicComposition();externalDirector.last=current;externalDirector.sequence=shotSequence;cinematicTraceBudget=112;planned=externalDirector.plan(at,span,actor,requested,cinematicPanels,cinematicPathClear);}
   if(!planned||!cinematic::surfaceStyle(externalDirector.active))clearCinematicComposition();
   note("Cinematic shot style="+std::to_string(int(externalDirector.active))+" moving="+std::to_string(planned)+" actor="+std::to_string(actor.handle));
  }
+ if(!config->cinematicLyrics)clearCinematicComposition();
  const auto p=externalDirector.step(at,actor);
  L4D2VisualCameraPoseV1 target{sizeof(target),{p.eye.x,p.eye.y,p.eye.z},{p.pitch,p.yaw,p.roll}};
  if(!api.setPose(&target)){resetExternalCameraLocked(false,false);return;}
