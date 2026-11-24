@@ -72,11 +72,10 @@ struct Director {
   from=last;anchor=actor.center;selected=requested;active=choose(requested,length(actor.velocity),sequence,comp.ready);
   const unsigned n=sequence++;begin=now;span=std::clamp(milliseconds,4000u,10000u);planned=true;moving=false;
   const float heading=(length(Vec3{actor.velocity.x,actor.velocity.y,0})>40?std::atan2(actor.velocity.y,actor.velocity.x):actor.yaw*pi/180.f);
-  Vec3 direction{std::cos(heading),std::sin(heading),0};
   Vec3 predicted=actor.center;
   if(active==Style::Bird){auto v=actor.velocity;float speed=length(v);if(speed>600)v=v*(600/speed);predicted=predicted+v*.6f;}
   focus=predicted;
-  if(active==Style::Architecture&&comp.ready)focus=mix(actor.center,comp.first.center,.32f);
+  if(active==Style::Architecture&&comp.ready)focus=mix(actor.center,comp.hasSecond?mix(comp.first.center,comp.second.center,.5f):comp.first.center,.32f);
   const float radius=active==Style::Orbit?325.f:active==Style::Wide?620.f:active==Style::Bird?400.f:390.f;
   const float height=active==Style::Orbit?100.f:active==Style::Wide?260.f:active==Style::Bird?540.f:115.f;
   float initial=std::atan2(from.eye.y-anchor.y,from.eye.x-anchor.x);
