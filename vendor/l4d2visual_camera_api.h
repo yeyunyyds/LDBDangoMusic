@@ -13,7 +13,7 @@
 #define L4D2VISUAL_CAMERA_CALL
 #endif
 
-#define L4D2VISUAL_CAMERA_ABI_VERSION 1u
+#define L4D2VISUAL_CAMERA_ABI_VERSION 2u
 #define L4D2VISUAL_CAMERA_OWNER_NATIVE 0u
 #define L4D2VISUAL_CAMERA_OWNER_USER 1u
 #define L4D2VISUAL_CAMERA_OWNER_EXTERNAL 2u
@@ -36,18 +36,17 @@ typedef struct L4D2VisualCameraStatusV1 {
     uint32_t camera_active;    /* camera is actually overriding the view */
 } L4D2VisualCameraStatusV1;
 
-/* Returns 1 for this ABI, 0 otherwise. All other calls return 1 on
- * acceptance and 0 on refusal (permission off, invalid input, shutdown).
- *
- * SetExternalActive(1) requests control, but NEVER overrides active user
- * input. It has no effect until the user allows External API in the menu
- * and SetPose has supplied a valid pose. Keep sending poses while active:
- * a controller silent for 15s expires safely to native view.
- * SetExternalActive(0) explicitly stops the external session.
+/* Version 2: one shared camera switch. Request(1) turns it on; explicit
+ * user OFF cancels the session. SetPose while USER owns the camera renews
+ * the lease but discards coordinates. On handoff, GetPose returns the actual
+ * detached pose, not the last submitted target. It fails if no active view.
+ * SetExternalActive(0) releases an existing session; a stale release cannot
+ * close a separate manually enabled camera. All calls return 1/0 except version.
  */
 typedef uint32_t (L4D2VISUAL_CAMERA_CALL *L4D2VisualCameraGetVersionFn)(void);
 typedef int (L4D2VISUAL_CAMERA_CALL *L4D2VisualCameraSetExternalActiveFn)(int active);
 typedef int (L4D2VISUAL_CAMERA_CALL *L4D2VisualCameraSetPoseFn)(const L4D2VisualCameraPoseV1* pose);
+typedef int (L4D2VISUAL_CAMERA_CALL *L4D2VisualCameraGetPoseFn)(L4D2VisualCameraPoseV1* out);
 typedef int (L4D2VISUAL_CAMERA_CALL *L4D2VisualCameraGetStatusFn)(L4D2VisualCameraStatusV1* out);
 
 #ifdef __cplusplus
@@ -56,6 +55,7 @@ extern "C" {
 uint32_t L4D2VISUAL_CAMERA_CALL L4D2VisualCameraGetVersion(void);
 int L4D2VISUAL_CAMERA_CALL L4D2VisualCameraSetExternalActive(int active);
 int L4D2VISUAL_CAMERA_CALL L4D2VisualCameraSetPose(const L4D2VisualCameraPoseV1* pose);
+int L4D2VISUAL_CAMERA_CALL L4D2VisualCameraGetPose(L4D2VisualCameraPoseV1* out);
 int L4D2VISUAL_CAMERA_CALL L4D2VisualCameraGetStatus(L4D2VisualCameraStatusV1* out);
 #ifdef __cplusplus
 }
