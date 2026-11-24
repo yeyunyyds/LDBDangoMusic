@@ -1,4 +1,5 @@
 #include "cinematic_camera.hpp"
+#include "lyric_lifecycle.hpp"
 #include "plugin_lifetime.hpp"
 #include "cinematic_recovery.hpp"
 #include "cinematic_architecture.hpp"
@@ -96,6 +97,25 @@ int main(){
  auto birdPanel=freePanel(Style::Bird,a,{100,100,500});assert(birdPanel.normal.z==1&&birdPanel.center.z<a.center.z);
  auto orbitPanel=freePanel(Style::Orbit,a,{-200,0,80});assert(orbitPanel.normal.x<-.9f);
  auto widePanel=freePanel(Style::Wide,a,{-200,0,80});assert(widePanel.width>orbitPanel.width);auto wideOther=freePanel(Style::Wide,a,{-200,0,80},true);assert(length(wideOther.center-widePanel.center)>300);
+ // Dynamic panel orientation follows the actual render eye even between actor samples.
+ RenderActor renderActor;auto ra=renderActor.update(a,1000);
+ auto eyeA=freePanel(Style::Orbit,ra,{300,0,80});auto eyeB=freePanel(Style::Orbit,ra,{300,30,80});
+ assert(eyeA.normal.y==0&&eyeB.normal.y>0&&length(eyeA.center-eyeB.center)>1);
+ auto moved=a;moved.center.x+=20;
+ auto r1=renderActor.update(moved,1016);auto r2=renderActor.update(moved,1032);
+ assert(r1.center.x>0&&r1.center.x<r2.center.x&&r2.center.x<20);
+ moved.handle++;assert(renderActor.update(moved,1048).center.x==20);
+ assert(chooseLyricMode(true,true,true)==LyricMode::Second);
+ assert(chooseLyricMode(true,true,false)==LyricMode::First);
+ assert(chooseLyricMode(false,false,true)==LyricMode::Second);
+ assert(chooseLyricMode(false,false,false)==LyricMode::Subtitle);
+ LyricLifecycle lyricLife;lyricLife.update("song",0,"A",1,100,300,false,2,false);
+ auto locked=chooseLyricMode(false,true,false);auto firstLease=lyricLife.entries.back().id;
+ lyricLife.update("song",0,"A",1.1,100,300,false,2,false);
+ assert(lyricLife.entries.back().id==firstLease&&locked==LyricMode::First);
+ lyricLife.update("song",1,"B",1.2,100,300,false,2,false);
+ assert(lyricLife.entries.size()==2&&lyricLife.entries.front().id==firstLease&&lyricLife.entries.front().retired>=0);
+ assert(chooseLyricMode(false,false,false)==LyricMode::Subtitle&&locked==LyricMode::First);
  Recovery recovery;auto far=a;far.center={1500,0,40};Pose stuck{{0,0,80},0,0,0};
  auto localClear=[](Vec3 from,Vec3 to){return from.x>1000&&to.x>1000;};
  auto seen=[](Vec3,const Actor&){return true;};

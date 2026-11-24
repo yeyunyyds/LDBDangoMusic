@@ -105,7 +105,7 @@ bool cinematicActorFresh=false;
 uint64_t cinematicLastMissingLog=0,cinematicLastViewMismatchLog=0;
 uint64_t cinematicSampleAt=0,cinematicVisibilityAt=0,cinematicSerial=0;
 cinematic::Composition cinematicPanels;
-struct CinematicLyricShot {cinematic::Composition panels;std::string key;uint64_t generation=0;int index=0;bool firstVisible=false,secondVisible=false,dynamic=false;};
+struct CinematicLyricShot {cinematic::Composition panels;cinematic::Actor actor;cinematic::Style style=cinematic::Style::Orbit;std::string key;uint64_t generation=0,visibilityTick=0;int index=0;bool firstVisible=false,secondVisible=false,dynamic=false;};
 std::shared_ptr<const CinematicLyricShot> cinematicLyricShot=std::make_shared<CinematicLyricShot>();
 std::atomic<bool> positionPreview{false},wallPositionPreview{false},positionPreviewMotion{false};bool lastPositionPreview=false,lastWallMode=false,escapeHeld=false;uint64_t layoutGeneration=0;
 PlaybackDisplay playbackDisplay;
@@ -390,48 +390,69 @@ void drawWallContents(IDirect3DDevice9* dev,const wall::Panel& panel,const GameC
  wallGlyphs(dev,face,camera,width,height,sentence.original,sentence.originalMotion,original,unit*cfg.visual.originalSize,top,song,clock,false,opacity,cinematicLayout);
  if(showTranslation)wallGlyphs(dev,face,camera,width,height,sentence.translated,sentence.translatedMotion,translation,unit*cfg.visual.translationSize,top-(original.height*cfg.visual.originalSize+cfg.visual.translationGap)*unit,song,clock,true,opacity,cinematicLayout);
 }
-bool drawCinematicLyrics(IDirect3DDevice9* dev,const GameCameraFrame& camera,float width,float height,const State& music,const PlaybackDisplayFrame& display,int at){
- struct Entry {uint64_t lease=0;wall::Panel panel;std::unique_ptr<WallSentence> text;bool second=false;};
- static LyricLifecycle life;static std::vector<Entry> entries;static uint64_t serial=0,generation=0;
- const auto shot=std::atomic_load(&cinematicLyricShot);const auto tick=uint64_t(now());
- if(!externalCameraActive.load()||!cfg.cinematicLyrics||!shot->panels.ready||shot->panels.epoch!=camera.epoch||
-  tick<shot->panels.tick||tick-shot->panels.tick>350||shot->key!=music.key||shot->generation!=music.generation||!display.lyrics||at<0||at>=int(music.timeline.size())){
-  life.reset();entries.clear();serial=0;return false;
- }
- if(serial!=shot->panels.serial||generation!=music.generation){life.reset();entries.clear();serial=shot->panels.serial;generation=music.generation;}
- bool side=shot->panels.hasSecond&&((at-shot->index)&1)!=0;
- if(shot->panels.hasSecond){if(side&&!shot->secondVisible&&shot->firstVisible)side=false;else if(!side&&!shot->firstVisible&&shot->secondVisible)side=true;}
- const auto& selected=side?shot->panels.second:shot->panels.first;
- const double clock=now()/1000.;
- life.update(music.key,at,music.timeline[at].text,clock,cfg.lingerMs,cfg.transition,false,shot->panels.hasSecond?2:1,true);
- entries.erase(std::remove_if(entries.begin(),entries.end(),[&](const auto& e){return std::none_of(life.entries.begin(),life.entries.end(),[&](const auto& l){return l.id==e.lease;});}),entries.end());
- for(const auto& l:life.entries)if(l.index==at&&std::none_of(entries.begin(),entries.end(),[&](const auto& e){return e.lease==l.id;})){
-  const auto next=at+1<int(music.timeline.size())?music.timeline[at+1].start:music.timeline[at].start+5000;
-  entries.push_back({l.id,selected,std::make_unique<WallSentence>(music.timeline[at],next,music),side});
- }
- bool currentDrawn=false;
- for(auto& e:entries){auto l=std::find_if(life.entries.begin(),life.entries.end(),[&](const auto& x){return x.id==e.lease;});if(l==life.entries.end())continue;
-  if(shot->dynamic)e.panel=e.second&&shot->panels.hasSecond?shot->panels.second:shot->panels.first;
-  bool sameFirst=shot->dynamic?!(e.second&&shot->panels.hasSecond):length(e.panel.center-shot->panels.first.center)<1;
-  if(!(sameFirst?shot->firstVisible:shot->secondVisible)||!wallscene::onScreen(e.panel,camera,width,height))continue;
-  const auto fade=l->retired<0?ExitFrame{}:exitFrame((clock-l->retired)*1000,l->lingerMs,l->fadeMs);
-  if(fade.done)continue;
-  drawWallContents(dev,e.panel,camera,width,height,*e.text,lyricPosition(display.position,cfg.demo?0:cfg.offset),clock,fade.alpha,false,true);
-  if(l->index==at)currentDrawn=true;
- }
- return currentDrawn;
-}
-// Dedicated subtitle fallback, independent of the user's ordinary lyric route.
-void drawCinematicSubtitle(IDirect3DDevice9* dev,const State& music,const PlaybackDisplayFrame& display,int at,float width,float height){
- if(!display.lyrics||at<0||at>=int(music.timeline.size()))return;
- const auto& line=music.timeline[at];
+// Rendering owns each lyric lease. A shot change, occlusion or failed projection
+// may hide a spatial lease, but cannot turn it into a subtitle mid-sentence.
+struct CinematicRenderState {
+ struct Entry {uint64_t lease=0,shotSerial=0;uint32_t actorHandle=0;cinematic::Style style=cinematic::Style::Orbit;cinematic::LyricMode mode=cinematic::LyricMode::Subtitle;bool dynamic=false;wall::Panel panel;std::unique_ptr<WallSentence> text;};
+ LyricLifecycle life;std::vector<Entry> entries;cinematic::RenderActor actor;uint64_t generation=0;uint32_t epoch=0;
+ void reset(){life.reset();entries.clear();actor.reset();generation=0;epoch=0;}
+} cinematicRender;
+void drawCinematicSubtitle(IDirect3DDevice9* dev,const Line& line,float width,float height,float opacity,float verticalOffset){
  auto drawLine=[&](const std::string& text,float y,float maxScale,DWORD color){
   auto im=image(dev,text);if(!im.texture)return;
   float scale=std::min(maxScale,width*.82f/std::max(im.width,1));
-  styled(dev,im,(width-im.width*scale)*.5f,height*y-im.height*scale*.5f,scale,cfg.opacity,color);
+  styled(dev,im,(width-im.width*scale)*.5f,height*(y+verticalOffset)-im.height*scale*.5f,scale,cfg.opacity*opacity,color);
  };
  drawLine(line.text,.82f,1.15f,cfg.textColor);
  if(cfg.translation&&!line.translation.empty())drawLine(line.translation,.89f,.85f,cfg.accent);
+}
+void drawCinematicLyrics(IDirect3DDevice9* dev,const GameCameraFrame& camera,bool cameraGood,const CameraPose& pose,float width,float height,const State& music,const PlaybackDisplayFrame& display,int at){
+ using Mode=cinematic::LyricMode;
+ auto& state=cinematicRender;auto& life=state.life;auto& entries=state.entries;
+ if(state.generation!=music.generation||state.epoch!=camera.epoch||life.key!=music.key){state.reset();state.generation=music.generation;state.epoch=camera.epoch;}
+ if(!display.lyrics||at<0||at>=int(music.timeline.size()))return;
+ const auto shot=std::atomic_load(&cinematicLyricShot);const auto tick=uint64_t(now());const double clock=tick/1000.;
+ const bool ready=cameraGood&&shot->panels.ready&&shot->panels.epoch==camera.epoch&&tick>=shot->panels.tick&&tick-shot->panels.tick<=350&&shot->key==music.key&&shot->generation==music.generation;
+ const bool visibilityFresh=ready&&tick>=shot->visibilityTick&&tick-shot->visibilityTick<=350&&shot->visibilityTick!=0;
+ cinematic::Actor actor{};
+ if(ready&&shot->dynamic&&shot->actor.ready)actor=state.actor.update(shot->actor,tick);else state.actor.reset();
+ auto panel=[&](bool second){return shot->dynamic&&actor.ready?cinematic::freePanel(shot->style,actor,pose.eye,second):(second?shot->panels.second:shot->panels.first);};
+ life.update(music.key,at,music.timeline[at].text,clock,cfg.lingerMs,cfg.transition,false,2,false);
+ entries.erase(std::remove_if(entries.begin(),entries.end(),[&](const auto& e){return std::none_of(life.entries.begin(),life.entries.end(),[&](const auto& l){return l.id==e.lease;});}),entries.end());
+ for(const auto& l:life.entries)if(l.retired<0&&std::none_of(entries.begin(),entries.end(),[&](const auto& e){return e.lease==l.id;})){
+  const bool first=visibilityFresh&&shot->firstVisible&&wallscene::onScreen(panel(false),camera,width,height);
+  const bool second=visibilityFresh&&shot->panels.hasSecond&&shot->secondVisible&&wallscene::onScreen(panel(true),camera,width,height);
+  const auto mode=cinematic::chooseLyricMode(shot->panels.hasSecond&&((at-shot->index)&1)!=0,first,second);
+  CinematicRenderState::Entry entry;entry.lease=l.id;entry.mode=mode;entry.shotSerial=shot->panels.serial;entry.dynamic=shot->dynamic;entry.style=shot->style;entry.actorHandle=shot->actor.handle;
+  if(mode!=Mode::Subtitle){entry.panel=panel(mode==Mode::Second);const auto next=at+1<int(music.timeline.size())?music.timeline[at+1].start:music.timeline[at].start+5000;entry.text=std::make_unique<WallSentence>(music.timeline[at],next,music);}
+  entries.push_back(std::move(entry));
+  note(mode==Mode::Subtitle?"Cinematic lyrics: dedicated subtitle fallback (sentence locked)":"Cinematic lyrics: panel (sentence locked)");
+ }
+ const CinematicRenderState::Entry* current=nullptr;
+ uint64_t newestOutgoingSubtitle=0;
+ for(const auto& e:entries){
+  auto l=std::find_if(life.entries.begin(),life.entries.end(),[&](const auto& x){return x.id==e.lease;});
+  if(l==life.entries.end())continue;
+  if(l->retired<0)current=&e;else if(e.mode==Mode::Subtitle)newestOutgoingSubtitle=std::max(newestOutgoingSubtitle,e.lease);
+ }
+ for(auto& e:entries){
+  auto l=std::find_if(life.entries.begin(),life.entries.end(),[&](const auto& x){return x.id==e.lease;});if(l==life.entries.end()||l->index<0||l->index>=int(music.timeline.size()))continue;
+  const auto fade=l->retired<0?ExitFrame{}:exitFrame((clock-l->retired)*1000,l->lingerMs,l->fadeMs);if(fade.done)continue;
+  if(e.mode==Mode::Subtitle){
+   // Keep the retiring subtitle in screen space; avoid stacking unbounded lines.
+   if(l->retired>=0&&e.lease!=newestOutgoingSubtitle)continue;
+   drawCinematicSubtitle(dev,music.timeline[l->index],width,height,fade.alpha,l->retired>=0&&current&&current->mode==Mode::Subtitle?-.15f:0.f);continue;
+  }
+  const bool second=e.mode==Mode::Second;
+  const bool compatible=ready&&(e.shotSerial==shot->panels.serial||(e.dynamic&&shot->dynamic&&e.style==shot->style&&e.actorHandle==shot->actor.handle));
+  if(!compatible||!visibilityFresh||(second&&!shot->panels.hasSecond))continue;
+  if(e.dynamic&&shot->dynamic&&actor.ready)e.panel=panel(second);
+  // World occlusion still suppresses drawing, never changes the locked mode.
+  if(!(second?shot->secondVisible:shot->firstVisible)||!wallscene::onScreen(e.panel,camera,width,height))continue;
+  // A single physical panel cannot show two overlapping sentences.
+  if(l->retired>=0&&current&&current->mode==e.mode&&(current->shotSerial==e.shotSerial||(current->dynamic&&e.dynamic&&current->style==e.style&&current->actorHandle==e.actorHandle)))continue;
+  drawWallContents(dev,e.panel,camera,width,height,*e.text,lyricPosition(display.position,cfg.demo?0:cfg.offset),clock,fade.alpha,false,true);
+ }
 }
 void drawWallLayoutPreview(IDirect3DDevice9* dev,GameCameraFrame camera,bool valid,const CameraPose& pose,float width,float height){
  CameraPose view=pose;if(!valid){camera.active=1;camera.epoch=1;camera.worldToView={0,-1,0,0,0,0,1,0,1,0,0,0,0,0,0,1};camera.worldToClip={0,-1,0,0,0,0,1,0,1.0001f,0,0,-1.0001f,1,0,0,0};if(!cameraPose(camera,view))return;}
@@ -475,7 +496,7 @@ struct DrawGuard {
 void WINAPI render(IDirect3DDevice9* dev,const PresentInfo* present){
  if(!dev||!present)return;
  bool preview=positionPreview.load()||wallPositionPreview.load();bool escapeDown=(GetAsyncKeyState(VK_ESCAPE)&0x8000)!=0;if(preview&&!nativeHud.isOpen()&&escapeDown&&!escapeHeld){positionPreview=false;wallPositionPreview=false;preview=false;}escapeHeld=escapeDown;
- if(displayResetRequested.exchange(false)){worldPeakEntries.clear();entityPeakEntries.clear();worldLyricLifecycle.reset();entityLyricLifecycle.reset();wallTextState.reset();anchors.reset();entityTracker.reset();playbackCursor={};playbackDisplay={};peakIndex=-1;visibleLyricIndex=-1;++layoutGeneration;}
+ if(displayResetRequested.exchange(false)){cinematicRender.reset();worldPeakEntries.clear();entityPeakEntries.clear();worldLyricLifecycle.reset();entityLyricLifecycle.reset();wallTextState.reset();anchors.reset();entityTracker.reset();playbackCursor={};playbackDisplay={};peakIndex=-1;visibleLyricIndex=-1;++layoutGeneration;}
  auto currentSettings=std::atomic_load(&settings);cfg=*currentSettings;bool wallMode=source_walls::enabled.load();auto notice=std::atomic_load(&menuNotice);bool showNotice=!notice->text.empty()&&uint64_t(now())>=notice->tick&&uint64_t(now())-notice->tick<2000;if(!cfg.enabled&&!preview&&!showNotice&&!nativeHud.isOpen())return;
  if(lastWallMode!=wallMode){if(!wallMode)wallTextState.reset();lastWallMode=wallMode;++layoutGeneration;}
  if(lastPositionPreview!=preview){wallTextState.reset();++layoutGeneration;worldPeakEntries.clear();worldLyricLifecycle.reset();anchors.reset();playbackCursor={};lastPositionPreview=preview;}
@@ -485,8 +506,8 @@ void WINAPI render(IDirect3DDevice9* dev,const PresentInfo* present){
  const unsigned path=present->is_swapchain_present?1:0;
  if(!presentLogged[path]){presentLogged[path]=true;note(std::string("L4D2DangoMusic first Present path=")+(path?"SwapChain":"Device")+(present->swap_chain?" current-chain=yes":" current-chain=no"));}
  try {if(cache.size()>256)clear();auto state=resetDisplayRevision.load()?std::make_shared<const State>():std::atomic_load(&snapshot);auto display=playbackDisplay.select(*state,now());
- if(display.reset){entityPeakEntries.clear();entityLyricLifecycle.reset();entityTracker.reset();wallTextState.reset();visibleLyricIndex=-1;++layoutGeneration;worldPeakEntries.clear();worldLyricLifecycle.reset();anchors.reset();playbackCursor={};}
- auto cursor=preview?ClockSelection{}:playbackCursor.select(state->key,display.position,state->playing);auto position=cursor.position;if(cursor.seek){entityPeakEntries.clear();entityLyricLifecycle.reset();entityTracker.reset();wallTextState.reset();worldPeakEntries.clear();worldLyricLifecycle.reset();anchors.reset();}auto at=position<0?-1:indexAt(state->timeline,lyricPosition(position,cfg.demo?0:cfg.offset));
+ if(display.reset){cinematicRender.reset();entityPeakEntries.clear();entityLyricLifecycle.reset();entityTracker.reset();wallTextState.reset();visibleLyricIndex=-1;++layoutGeneration;worldPeakEntries.clear();worldLyricLifecycle.reset();anchors.reset();playbackCursor={};}
+ auto cursor=preview?ClockSelection{}:playbackCursor.select(state->key,display.position,state->playing);auto position=cursor.position;if(cursor.seek){cinematicRender.reset();entityPeakEntries.clear();entityLyricLifecycle.reset();entityTracker.reset();wallTextState.reset();worldPeakEntries.clear();worldLyricLifecycle.reset();anchors.reset();}auto at=position<0?-1:indexAt(state->timeline,lyricPosition(position,cfg.demo?0:cfg.offset));
  std::string text=at<0?state->message:state->timeline[at].text;
  DrawGuard guard(dev);auto& target=guard.target;auto& depth=guard.depth;auto& back=guard.back;auto& block=guard.block;
  if(!checked(dev->CreateStateBlock(D3DSBT_ALL,&block),0,"CreateStateBlock"))return;
@@ -512,16 +533,13 @@ void WINAPI render(IDirect3DDevice9* dev,const PresentInfo* present){
  if(!chosen.ready&&cfg.autoFollow.enabled){auto automatic=std::atomic_load(&source_entities::automaticRequest);chosenRequest=*automatic;chosenFrame=std::atomic_load(&source_entities::automaticSnapshot);chosen=follow::resolve(*chosenFrame,chosenRequest,gameFrame.epoch,uint64_t(now()));if(!chosen.ready){auto full=std::atomic_load(&source_entities::snapshot);if(full->epoch==gameFrame.epoch&&uint64_t(now())>=full->tick&&uint64_t(now())-full->tick<=600&&automatic->enabled){chosen=follow::pose(*full,automatic->handle);chosenFrame=full;}}automaticChosen=chosen.ready;}
  if(chosen.ready){auto actor=follow::find(*chosenFrame,follow::effectiveHandle(*chosenFrame,chosenRequest));if(actor&&!autofollow::alive(*actor))chosen.ready=false;}
  bool entityValid=cameraGood&&chosen.ready;const bool cinematicRoute=externalCameraActive.load()&&cfg.cinematicLyrics&&!preview;int route=cinematicRoute?3:entityValid?2:wallMode?1:0;static int previousRoute=0;bool worldDrawn=false;
- if((route==3)!=(previousRoute==3)){worldPeakEntries.clear();worldLyricLifecycle.reset();entityPeakEntries.clear();entityLyricLifecycle.reset();entityTracker.reset();wallTextState.reset();anchors.reset();++layoutGeneration;}
+ if((route==3)!=(previousRoute==3)){cinematicRender.reset();worldPeakEntries.clear();worldLyricLifecycle.reset();entityPeakEntries.clear();entityLyricLifecycle.reset();entityTracker.reset();wallTextState.reset();anchors.reset();++layoutGeneration;}
  if(!preview&&route!=previousRoute){note(std::string("Lyric route: ")+(route==3?"cinematic":route==2?"entity":route==1?"wall":"world"));if(previousRoute==0)worldLyricLifecycle.retire(now()/1000.,cfg.lingerMs,cfg.transition);if(route!=2){entityPeakEntries.clear();entityLyricLifecycle.reset();entityTracker.reset();}previousRoute=route;}
  if(cfg.enabled&&cfg.worldLyrics&&build::diagnostics&&cfg.debugOverlay&&!preview&&!wallMode){auto status=image(dev,cameraValid?std::string("GAME CAMERA: ACTIVE"):std::string("GAME CAMERA: ")+source_camera::status()+" - screen fallback");draw(dev,status,16,cfg.demo?64.f:16.f,std::min(.65f,desc.Width*.9f/std::max(status.width,1)),.8f,cameraValid?0x99ffbb:0xffcc88);}
  if(!cfg.enabled&&!preview&&!followPositionPreview.load()){}
  else if(preview){if(wallPositionPreview.load())drawWallLayoutPreview(dev,gameFrame,cameraGood,pose,float(desc.Width),float(desc.Height));else drawPositionPreview(dev,gameFrame,cameraValid,pose,float(desc.Width),float(desc.Height));}
  else if(cinematicRoute){
-  bool panelDrawn=cameraGood&&drawCinematicLyrics(dev,gameFrame,float(desc.Width),float(desc.Height),*state,display,at);
-  if(!panelDrawn)drawCinematicSubtitle(dev,*state,display,at,float(desc.Width),float(desc.Height));
-  static int previousMode=-1;static uint64_t previousLog=0;auto tick=uint64_t(now());int mode=panelDrawn?1:0;
-  if(display.lyrics&&at>=0&&mode!=previousMode&&(!previousLog||tick-previousLog>=500)){note(panelDrawn?"Cinematic lyrics: panel":"Cinematic lyrics: dedicated subtitle fallback");previousMode=mode;previousLog=tick;}
+  drawCinematicLyrics(dev,gameFrame,cameraGood,pose,float(desc.Width),float(desc.Height),*state,display,at);
  }
  else if(entityValid){
  auto id=follow::effectiveHandle(*chosenFrame,chosenRequest);auto record=follow::find(*chosenFrame,id);auto raw=follow::anchor(chosen,*followState);if(automaticChosen&&record)raw.z+=autofollow::headLift(*record);auto target=entityTracker.select(raw,gameFrame.epoch,id,now()/1000.,cfg.entitySmooth,cfg.moveMs/1000.f,cfg.moveCurve);target.z+=follow::bobOffset(*followState,now()/1000.);
@@ -1099,7 +1117,7 @@ cinematic::Composition findCinematicPanels(const cinematic::Actor& actor,const c
 }
 void clearCinematicComposition(){
  if(cinematicPanels.ready||std::atomic_load(&cinematicLyricShot)->panels.ready){
-  cinematicPanels={};cinematicDynamicPanel=false;std::atomic_store(&cinematicLyricShot,std::make_shared<const CinematicLyricShot>());
+  cinematicPanels={};cinematicDynamicPanel=false;cinematicVisibilityAt=0;std::atomic_store(&cinematicLyricShot,std::make_shared<const CinematicLyricShot>());
  }
 }
 void tickExternalCameraTest(const GameCameraFrame& frame){
@@ -1241,26 +1259,31 @@ void tickExternalCameraTest(const GameCameraFrame& frame){
   cinematicPathBlocked=length(p.eye-current.eye)>.05f&&!cinematicPathClear(current.eye,p.eye);
   if(cinematicPathBlocked){p.eye=current.eye;externalDirector.last=p;}
  }
+ const Vec3 panelEye=cameraPose(frame,rendered)?rendered.eye:current.eye;
+ auto panelStyle=cinematicRecovery.active?cinematic::Style::Orbit:externalDirector.active;
  if(config->cinematicLyrics&&(cinematicRecovery.active||!cinematic::surfaceStyle(externalDirector.active)||!cinematicPanels.ready)){
   if(!cinematicDynamicPanel){cinematicPanels={};cinematicPanels.epoch=actor.epoch;cinematicPanels.serial=++cinematicSerial;cinematicPanels.ready=true;cinematicDynamicPanel=true;}
-  auto style=cinematicRecovery.active?cinematic::Style::Orbit:externalDirector.active;
-  cinematicPanels.first=cinematic::freePanel(style,actor,p.eye);
-  cinematicPanels.hasSecond=style==cinematic::Style::Wide;
-  if(cinematicPanels.hasSecond)cinematicPanels.second=cinematic::freePanel(style,actor,p.eye,true);
+  cinematicPanels.first=cinematic::freePanel(panelStyle,actor,panelEye);
+  cinematicPanels.hasSecond=panelStyle==cinematic::Style::Wide;
+  if(cinematicPanels.hasSecond)cinematicPanels.second=cinematic::freePanel(panelStyle,actor,panelEye,true);
  }
  L4D2VisualCameraPoseV1 target{sizeof(target),{p.eye.x,p.eye.y,p.eye.z},{p.pitch,p.yaw,p.roll}};
  if(!api.setPose(&target)){resetExternalCameraLocked(false,false);return;}
  externalCameraActive=true;
- // Fixed world panels preplanned for successive lines; update visibility
- // separately. All trace calls stay on the existing Source game callback.
- if(cinematicPanels.ready&&at>=cinematicVisibilityAt){
-  cinematicVisibilityAt=at+100;CinematicLyricShot shot;
-  auto prior=std::atomic_load(&cinematicLyricShot);
-  shot.panels=cinematicPanels;shot.panels.tick=at;shot.dynamic=cinematicDynamicPanel;
+ // Publish geometry each Source frame; trace visibility at 10 Hz only.
+ // A new composition needs its own initial visibility sample.
+ if(cinematicPanels.ready){
+  CinematicLyricShot shot;auto prior=std::atomic_load(&cinematicLyricShot);
+  shot.panels=cinematicPanels;shot.panels.tick=at;shot.dynamic=cinematicDynamicPanel;shot.actor=actor;shot.style=panelStyle;
   shot.key=music->key;shot.generation=music->generation;
-  shot.index=prior->panels.serial==shot.panels.serial&&prior->key==shot.key?prior->index:std::max(0,indexAt(music->timeline,lyricSong));
-  shot.firstVisible=trace::visible(shot.panels.first,current.eye,cinematicRay);
-  shot.secondVisible=shot.panels.hasSecond&&trace::visible(shot.panels.second,current.eye,cinematicRay);
+  const bool same=prior->panels.serial==shot.panels.serial&&prior->key==shot.key&&prior->generation==shot.generation;
+  shot.index=same?prior->index:std::max(0,indexAt(music->timeline,lyricSong));
+  const bool sameGeometry=prior->panels.serial==shot.panels.serial&&prior->dynamic==shot.dynamic&&(!shot.dynamic||prior->style==shot.style);
+  if(!sameGeometry||at>=cinematicVisibilityAt){
+   cinematicVisibilityAt=at+100;shot.visibilityTick=at;
+   shot.firstVisible=trace::visible(shot.panels.first,panelEye,cinematicRay);
+   shot.secondVisible=shot.panels.hasSecond&&trace::visible(shot.panels.second,panelEye,cinematicRay);
+  }else{shot.visibilityTick=prior->visibilityTick;shot.firstVisible=prior->firstVisible;shot.secondVisible=prior->secondVisible;}
   std::atomic_store(&cinematicLyricShot,std::make_shared<const CinematicLyricShot>(std::move(shot)));
  }
 }

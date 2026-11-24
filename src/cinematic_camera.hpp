@@ -63,6 +63,27 @@ inline wall::Panel freePanel(Style style,const Actor& actor,Vec3 eye,bool altern
  const bool wide=style==Style::Wide||style==Style::Architecture;
  return {actor.center+right*((wide?170.f:100.f)*(alternate?-1.f:1.f))+Vec3{0,0,wide?80.f:34.f},normal,right,{0,0,1},wide?270.f:150.f,wide?85.f:50.f,actor.epoch};
 }
+// The render clock interpolates sampled actor motion without adding engine reads.
+struct RenderActor {
+ Actor value{};uint64_t tick=0;
+ void reset(){*this={};}
+ Actor update(const Actor& sample,uint64_t now){
+  if(!sample.ready){reset();return value;}
+  if(!value.ready||value.epoch!=sample.epoch||value.handle!=sample.handle||now<tick||now-tick>500||length(sample.center-value.center)>128){
+   value=sample;tick=now;return value;
+  }
+  const float dt=float(now-tick)*.001f;
+  auto center=mix(value.center,sample.center,1-std::exp(-dt*24.f));
+  value=sample;value.center=center;tick=now;return value;
+ }
+};
+enum class LyricMode {Subtitle,First,Second};
+// Select once when a new lyric lease begins, not on each render/visibility tick.
+inline LyricMode chooseLyricMode(bool preferSecond,bool firstVisible,bool secondVisible){
+ if(preferSecond&&secondVisible)return LyricMode::Second;
+ if(firstVisible)return LyricMode::First;
+ return secondVisible?LyricMode::Second:LyricMode::Subtitle;
+}
 inline Vec3 quadratic(Vec3 a,Vec3 b,Vec3 c,float t){return mix(mix(a,b,t),mix(b,c,t),t);}
 // Brief, independently planned departure from the initial survivor eye.
 // Static world clearance is checked before translating; no blind teleport.
