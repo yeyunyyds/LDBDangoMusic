@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature/folia-smtc-lyrics
+      - feature/visual-freecamera-abi-client
   workflow_dispatch:
 
 permissions:
