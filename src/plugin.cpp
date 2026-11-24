@@ -89,7 +89,7 @@ std::mutex settingsMutex;std::atomic<int> saveState{0};thread_local std::shared_
 HMODULE ownModule=nullptr;std::filesystem::path ownPath;
 std::filesystem::path directory;using LogFn=void(*)(int,const char*);LogFn logger=nullptr;
 constexpr int LDB_HOST_LOG_INFO=0,LDB_HOST_LOG_WARNING=1,LDB_HOST_LOG_ERROR=2;
-// Explicit, opt-in ABI demonstration; never auto-starts during normal lyrics.
+// User opt-in is saved; session/ownership remain runtime-only.
 std::atomic<bool> externalCameraTest{false},externalCameraActive{false};
 std::mutex externalCameraMutex;
 bool externalCameraInitialized=false,externalCameraTraceProbed=false;
@@ -568,7 +568,7 @@ void WINAPI render(IDirect3DDevice9* dev,const PresentInfo* present){
 }
 bool load(const std::filesystem::path& pluginDirectory){try{directory=pluginDirectory/L"L4D2DangoMusic";auto path=directory/L"config.json";
  if(std::filesystem::exists(path)){std::ifstream f(path);cfg=decodeConfig(nlohmann::json::parse(f));}
- std::atomic_store(&settings,std::make_shared<const Config>(cfg));std::atomic_store(&savedSettings,std::filesystem::exists(path)?std::make_shared<const Config>(cfg):std::shared_ptr<const Config>{});source_walls::configure(cfg);nativeHud.loadAppearance(cfg.hud);
+ std::atomic_store(&settings,std::make_shared<const Config>(cfg));std::atomic_store(&savedSettings,std::filesystem::exists(path)?std::make_shared<const Config>(cfg):std::shared_ptr<const Config>{});source_walls::configure(cfg);nativeHud.loadAppearance(cfg.hud);externalCameraTest.store(cfg.cinematicEnabled);
 
  note("L4D2DangoMusic 0.9.8 config="+path.u8string()+" mode="+(cfg.demo?"DEMO":"BLF/LX")+" port="+std::to_string(cfg.port)+" offsetMs="+std::to_string(cfg.offset)+" displayMode="+cfg.mode);
  note("Steam sync fix1: in-game SteamClient user/pipe lifecycle probes disabled");
@@ -723,14 +723,27 @@ void restoreAllState(const Config& current){
  changeSettings(next,true);nativeHud.loadAppearance(next.hud);displayResetRequested=true;presetScope=0;nativeHud.requestRoot();wake.notify_all();}
 const char* menuActionImpl(void* argument){uintptr_t id=reinterpret_cast<uintptr_t>(argument);std::lock_guard<std::mutex> lock(settingsMutex);auto c=*std::atomic_load(&settings);wallPositionPreview=false;
  if(id==9751){
-  if(externalCameraTest.load())stopExternalCameraTest();
-  else startExternalCameraTest();
+  c.cinematicEnabled=!c.cinematicEnabled;changeSettings(c);
+  if(c.cinematicEnabled)startExternalCameraTest();else stopExternalCameraTest();
+  return nullptr;
+ }
+ if(id>=9761&&id<=9767){
+  if(id<=9765)c.cinematicMixedMask^=int(cinematic::styleBit(cinematic::Style(id-9760)));
+  else c.cinematicMixedMask=id==9766?int(cinematic::allStyles):0;
+  changeSettings(c);return nullptr;
+ }
+ if(id==9757){
+  std::string rows;
+  for(int i=1;i<=5;++i)rows+=item(std::string(cinematic::styleName(i))+(cinematic::allowedStyle(cinematic::Style(i),unsigned(c.cinematicMixedMask))?u8" [开]":u8" [关]"),9760+i);
+  rows+=item(u8"全部勾选",9766)+item(u8"全部取消",9767);
+  if(!c.cinematicMixedMask)rows+=item(u8"未选择镜头 · 混合运镜暂停",0);
+  return page(u8"混合运镜设置",rows);
  }
  if(id==9752){c.cinematicLyrics=!c.cinematicLyrics;changeSettings(c);return nullptr;}
  if(id==9753){c.cinematicStyle=(c.cinematicStyle+1)%6;changeSettings(c);return nullptr;}
  if(id==9756){c.cinematicKeepFreeCamera=!c.cinematicKeepFreeCamera;changeSettings(c);return nullptr;}
  if(id==9754||id==9755){c.cinematicIdleSeconds=std::clamp(c.cinematicIdleSeconds+(id==9754?-1:1),1,120);changeSettings(c);return nullptr;}
- if(id==9750||id==9751){
+ if(id==9750){
   L4D2VisualCameraStatusV1 s{};
   const bool found=visualcamera::status(s);
   const char* owner=found?(s.owner==L4D2VISUAL_CAMERA_OWNER_EXTERNAL?"DangoMusic":s.owner==L4D2VISUAL_CAMERA_OWNER_USER?"User FreeCamera":"Native"):"Unavailable";
@@ -738,10 +751,11 @@ const char* menuActionImpl(void* argument){uintptr_t id=reinterpret_cast<uintptr
   rows+=item(externalCameraTest.load()?u8"关闭 AFK 运镜":u8"启用 AFK 运镜（实验）",9751);
   rows+=item(c.cinematicLyrics?u8"运镜与歌词联动：[开]":u8"运镜与歌词联动：[关]",9752);
   rows+=item(std::string(u8"运镜风格：")+cinematic::styleName(c.cinematicStyle),9753);
+  rows+=item(u8"混合运镜设置",9757);
   rows+=item(u8"首次闲置等待 -1s · "+std::to_string(c.cinematicIdleSeconds)+"s",9754);
   rows+=item(u8"首次闲置等待 +1s",9755);
   rows+=item(c.cinematicKeepFreeCamera?u8"接管后视角：FreeCamera":u8"接管后视角：第一人称（默认）",9756);
-  rows+=item(externalCameraActive.load()?u8"运镜中":externalCameraTest.load()?u8"已启用 · 等待闲置":u8"已关闭",0);
+  rows+=item(c.cinematicEnabled&&c.cinematicStyle==0&&!c.cinematicMixedMask?u8"混合运镜暂停 · 未选择镜头":externalCameraActive.load()?u8"运镜中":externalCameraTest.load()?u8"已启用 · 等待闲置":u8"已关闭",0);
   if(found&&s.external_requested&&s.owner==L4D2VISUAL_CAMERA_OWNER_NATIVE)rows+=item(u8"剩余等待："+std::to_string((s.idle_remaining_ms+999)/1000)+"s",0);
   rows+=item(std::string(u8"Visual ABI：")+(found?u8"已连接":u8"未找到或版本不匹配"),0);
   rows+=item(std::string(u8"接口授权：")+(found?(s.external_allowed?u8"允许":u8"关闭"):u8"不可用"),0);
@@ -1138,6 +1152,7 @@ void tickExternalCameraTest(const GameCameraFrame& frame){
  if(externalCameraInitialized&&externalCameraEpoch!=frame.epoch){resetExternalCameraLocked(true,false);return;}
  const auto at=uint64_t(now());
  auto config=std::atomic_load(&settings);
+ if(config->cinematicStyle==0&&!config->cinematicMixedMask){if(externalCameraInitialized||externalCameraActive.load())resetExternalCameraLocked(true,false);return;}
  const auto api=visualcamera::resolve();
  L4D2VisualCameraStatusV1 status{};status.size=sizeof(status);
  if(!api||!api.getStatus(&status)||!status.external_allowed){
@@ -1217,18 +1232,19 @@ void tickExternalCameraTest(const GameCameraFrame& frame){
  const auto music=std::atomic_load(&snapshot);
  const auto song=music->at(static_cast<int64_t>(at));
  const auto lyricSong=song<0?song:song+(config->demo?0:config->offset);
- if(!cinematicRecovery.active&&externalDirector.needsPlan(at,actor,requested)){
+ const unsigned mask=unsigned(config->cinematicMixedMask);
+ if(!cinematicRecovery.active&&externalDirector.needsPlan(at,actor,requested,mask)){
   // Replan from the exact last rendered pose rather than an old target.
   externalDirector.last=current;
   clearCinematicComposition();
   const auto shotSequence=externalDirector.sequence;
-  const auto shotStyle=cinematic::choose(requested,length(actor.velocity),shotSequence,true);
+  const auto shotStyle=cinematic::choose(requested,length(actor.velocity),shotSequence,true,mask);
   if(config->cinematicLyrics&&cinematic::surfaceStyle(shotStyle))cinematicPanels=findCinematicPanels(actor,current,shotStyle,at);
   unsigned span=config->cinematicLyrics&&music->playing?cinematic::duration(music->timeline,lyricSong,music->rate):6000;
   cinematicTraceBudget=336; // bounded per-shot world traces
-  bool planned=externalDirector.plan(at,span,actor,requested,cinematicPanels,cinematicPathClear,config->cinematicLyrics);
-  if(!planned&&cinematicPanels.hasSecond){cinematicPanels.hasSecond=false;externalDirector.last=current;externalDirector.sequence=shotSequence;cinematicTraceBudget=112;planned=externalDirector.plan(at,span,actor,requested,cinematicPanels,cinematicPathClear,config->cinematicLyrics);}
-  if(!planned&&cinematicPanels.ready){clearCinematicComposition();externalDirector.last=current;externalDirector.sequence=shotSequence;cinematicTraceBudget=112;planned=externalDirector.plan(at,span,actor,requested,cinematicPanels,cinematicPathClear,config->cinematicLyrics);}
+  bool planned=externalDirector.plan(at,span,actor,requested,cinematicPanels,cinematicPathClear,config->cinematicLyrics,mask);
+  if(!planned&&cinematicPanels.hasSecond){cinematicPanels.hasSecond=false;externalDirector.last=current;externalDirector.sequence=shotSequence;cinematicTraceBudget=112;planned=externalDirector.plan(at,span,actor,requested,cinematicPanels,cinematicPathClear,config->cinematicLyrics,mask);}
+  if(!planned&&cinematicPanels.ready){clearCinematicComposition();externalDirector.last=current;externalDirector.sequence=shotSequence;cinematicTraceBudget=112;planned=externalDirector.plan(at,span,actor,requested,cinematicPanels,cinematicPathClear,config->cinematicLyrics,mask);}
   if(!planned||!cinematic::surfaceStyle(externalDirector.active))clearCinematicComposition();
   note("Cinematic shot style="+std::to_string(int(externalDirector.active))+" moving="+std::to_string(planned)+" actor="+std::to_string(actor.handle)+" requested="+std::to_string(int(shotStyle))+" panels="+std::to_string(cinematicPanels.ready));
  }
@@ -1261,7 +1277,7 @@ void tickExternalCameraTest(const GameCameraFrame& frame){
  }
  const Vec3 panelEye=cameraPose(frame,rendered)?rendered.eye:current.eye;
  auto panelStyle=cinematicRecovery.active?cinematic::Style::Orbit:externalDirector.active;
- if(config->cinematicLyrics&&(cinematicRecovery.active||!cinematic::surfaceStyle(externalDirector.active)||!cinematicPanels.ready)){
+ if(config->cinematicLyrics&&panelStyle!=cinematic::Style::Mixed&&(cinematicRecovery.active||!cinematic::surfaceStyle(externalDirector.active)||!cinematicPanels.ready)){
   if(!cinematicDynamicPanel){cinematicPanels={};cinematicPanels.epoch=actor.epoch;cinematicPanels.serial=++cinematicSerial;cinematicPanels.ready=true;cinematicDynamicPanel=true;}
   cinematicPanels.first=cinematic::freePanel(panelStyle,actor,panelEye);
   cinematicPanels.hasSecond=panelStyle==cinematic::Style::Wide;

@@ -46,11 +46,20 @@ template<class Timeline> unsigned duration(const Timeline& lines,std::int64_t so
  return 6000;
 }
 inline bool surfaceStyle(Style s){return s==Style::Architecture||s==Style::Wall;}
-inline Style choose(Style requested,float speed,unsigned sequence,bool architecture){
+constexpr unsigned allStyles=31u;
+inline unsigned styleBit(Style style){const unsigned n=unsigned(style);return n>=1&&n<=5?1u<<(n-1):0u;}
+inline bool allowedStyle(Style style,unsigned mask){return (styleBit(style)&mask)!=0;}
+inline Style choose(Style requested,float speed,unsigned sequence,bool architecture,unsigned mask=allStyles){
  if(requested!=Style::Mixed)return requested;
- if(speed>190.f)return Style::Bird;
+ if(speed>190.f&&allowedStyle(Style::Bird,mask))return Style::Bird;
  const Style cycle[]={Style::Orbit,Style::Architecture,Style::Wide,Style::Wall,Style::Bird};
- auto style=cycle[sequence%5];return surfaceStyle(style)&&!architecture?Style::Wide:style;
+ for(unsigned i=0;i<5;++i){auto style=cycle[(sequence+i)%5];if(allowedStyle(style,mask)&&(architecture||!surfaceStyle(style)))return style;}
+ return Style::Mixed;
+}
+inline unsigned nextSequence(unsigned sequence,Style chosen){
+ const Style cycle[]={Style::Orbit,Style::Architecture,Style::Wide,Style::Wall,Style::Bird};
+ for(unsigned i=0;i<5;++i)if(cycle[(sequence+i)%5]==chosen)return sequence+i+1;
+ return sequence+1;
 }
 inline wall::Panel freePanel(Style style,const Actor& actor,Vec3 eye,bool alternate=false){
  auto normal=normalize(Vec3{eye.x-actor.center.x,eye.y-actor.center.y,0});
@@ -113,25 +122,26 @@ struct Director {
  Pose from{},to{},last{};
  Vec3 control{},anchor{},focus{};
  uint64_t begin=0,lastTick=0;uint32_t actorEpoch=0,actorHandle=0;
- unsigned span=6000,sequence=0;
+ unsigned span=6000,sequence=0,selectedMask=allStyles;
  Style active=Style::Orbit,selected=Style::Mixed;
  bool ready=false,planned=false,moving=false,departureChecked=false,lyricFocus=false;
  Departure departure;
  void reset(){*this={};}
  bool start(Pose pose){if(!valid(pose))return false;reset();ready=true;last=from=to=pose;return true;}
- bool needsPlan(uint64_t now,const Actor& actor,Style requested)const{
-  if(!planned||requested!=selected||actor.epoch!=actorEpoch||actor.handle!=actorHandle||now<begin||now-begin>=span)return true;
+ bool needsPlan(uint64_t now,const Actor& actor,Style requested,unsigned mask=allStyles)const{
+  if(!planned||requested!=selected||(requested==Style::Mixed&&mask!=selectedMask)||actor.epoch!=actorEpoch||actor.handle!=actorHandle||now<begin||now-begin>=span)return true;
   if(!actor.ready)return false;
   // Update world reference at every shot boundary; fast-moving players may
   // force an earlier continuous transition, not an instantaneous teleport.
   if(!moving)return now-begin>=350;
   return surfaceStyle(active)&&now-begin>=500&&length(actor.center-anchor)>120.f;
  }
- template<class Clear> bool plan(uint64_t now,unsigned milliseconds,const Actor& actor,Style requested,const Composition& comp,Clear clear,bool lyrics=false){
+ template<class Clear> bool plan(uint64_t now,unsigned milliseconds,const Actor& actor,Style requested,const Composition& comp,Clear clear,bool lyrics=false,unsigned mask=allStyles){
   if(!actor.ready)return false;
-  lyricFocus=lyrics;from=last;anchor=actor.center;selected=requested;active=choose(requested,length(actor.velocity),sequence,comp.ready);actorEpoch=actor.epoch;actorHandle=actor.handle;
-  if(surfaceStyle(active)&&!comp.ready)active=Style::Wide;
-  const unsigned n=sequence++;begin=now;span=std::clamp(milliseconds,4000u,10000u);planned=true;moving=false;
+  lyricFocus=lyrics;from=last;anchor=actor.center;selected=requested;selectedMask=mask;active=choose(requested,length(actor.velocity),sequence,comp.ready,mask);actorEpoch=actor.epoch;actorHandle=actor.handle;
+  if(surfaceStyle(active)&&!comp.ready&&requested!=Style::Mixed)active=Style::Wide;
+  const unsigned n=sequence;sequence=nextSequence(sequence,active);begin=now;span=std::clamp(milliseconds,4000u,10000u);planned=true;moving=false;
+  if(active==Style::Mixed){focus=actor.center;to=look(from.eye,focus,from.yaw);control=from.eye;return false;}
   const float heading=(length(Vec3{actor.velocity.x,actor.velocity.y,0})>40?std::atan2(actor.velocity.y,actor.velocity.x):actor.yaw*pi/180.f);
   Vec3 predicted=actor.center;
   if(active==Style::Bird){auto v=actor.velocity;float speed=length(v);if(speed>600)v=v*(600/speed);predicted=predicted+v*.6f;}
