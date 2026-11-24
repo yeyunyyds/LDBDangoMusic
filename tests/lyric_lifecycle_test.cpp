@@ -6,6 +6,7 @@ using namespace dango;
 void check(bool value){if(!value)throw std::runtime_error("Lyric lifetime/overlay regression");}
 int main(){
  PlaybackCursor cursor;check(cursor.select("song",1000,true).position==1000);check(cursor.select("song",950,true).position==1000);check(cursor.select("song",1250,true).position==1250);check(cursor.select("song",500,true).seek);check(cursor.select("next",0,true).position==0);
+ LyricLifecycle zero;zero.update("s",0,"old",0,0,0);zero.update("s",1,"new",1,0,0);check(zero.entries.size()==1&&zero.entries[0].index==1);zero.retire(2,1000,0);zero.expire(2.999);check(zero.entries.size()==1);zero.expire(3);check(zero.entries.empty());
  LyricLifecycle model;model.update("s",0,"old",0,1000,400);auto first=model.entries.back().id;model.update("s",1,"current",1,1000,400);check(model.entries.size()==2&&model.entries.front().expires==2.4);
  model.update("s",1,"current",2,1000,400);check(model.entries.front().expires==2.4);model.update("s",1,"current",2.5,1000,400);check(model.entries.size()==1&&model.entries.front().text=="current");
  model.update("s",0,"old",3,1000,400,true);check(model.entries.size()==1&&model.entries[0].id!=first);
