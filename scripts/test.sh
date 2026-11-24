@@ -8,6 +8,8 @@ g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc -Ivendor 
 ./build/folia_protocol_test
 g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc tests/cinematic_camera_test.cpp -o build/cinematic_camera_test
 ./build/cinematic_camera_test
+g++ -std=c++17 -Wall -Wextra -Werror -Isrc tests/afk_stability_test.cpp -o build/afk_stability_test
+./build/afk_stability_test
 g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc -Ivendor tests/core_test.cpp -o build/core_test
 ./build/core_test
 g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc -Ivendor tests/api_fixture.cpp -o build/api_fixture
