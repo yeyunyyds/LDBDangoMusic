@@ -17,7 +17,6 @@ extern "C" __declspec(dllexport) const char DangoBuildFlavor[]="DANGO_PRODUCTION
 #include <process.h>
 #include "plugin_lifetime.hpp"
 #include <mutex>
-#include <condition_variable>
 #include <fstream>
 #include <filesystem>
 #include <map>
@@ -110,7 +109,8 @@ std::shared_ptr<const CinematicLyricShot> cinematicLyricShot=std::make_shared<Ci
 std::atomic<bool> positionPreview{false},wallPositionPreview{false},positionPreviewMotion{false};bool lastPositionPreview=false,lastWallMode=false,escapeHeld=false;uint64_t layoutGeneration=0;
 PlaybackDisplay playbackDisplay;
 PlaybackCursor playbackCursor;LyricLifecycle worldLyricLifecycle,entityLyricLifecycle;std::atomic<int> visibleLyricIndex{-1};std::atomic<uint64_t> presentationCount{0},restoreErrors{0};
-std::atomic<bool> stopping{false};HANDLE worker=nullptr;std::mutex sleepMutex;std::condition_variable wake;
+std::atomic<bool> stopping{false};HANDLE worker=nullptr;std::atomic<HANDLE> wakeEvent{nullptr};
+void signalWake() noexcept {if(auto event=wakeEvent.load())SetEvent(event);}
 std::shared_ptr<const State> snapshot=std::make_shared<State>();
 std::atomic<bool> syncResetRequested{false},displayResetRequested{false};std::atomic<uint64_t> resetDisplayRevision{0};unsigned presetScope=0;
 sync::Requests syncRequests;std::shared_ptr<const sync::Status> syncStatus=std::make_shared<sync::Status>();
@@ -219,7 +219,7 @@ void run() noexcept {
  auto resetRevision=resetDisplayRevision.load();if(resetRevision&&cfg.playbackSourceRevision>=resetRevision)resetDisplayRevision.compare_exchange_strong(resetRevision,0);
  if(provider!=lastProvider||lastPublishedRevision!=cfg.playbackSourceRevision){lastProvider=provider;lastPublishedRevision=cfg.playbackSourceRevision;++sourceEpoch;}
  if(!stopping){auto local=cfg.demo?std::make_shared<const State>():std::atomic_load(&snapshot);sync::SourceContext source{provider,cfg.playbackSourceRevision,sourceEpoch};auto sourceGuard=[&](){auto latest=std::atomic_load(&settings);if(syncResetRequested.load()||!latest->sync.enabled||!latest->sync.discover||latest->playbackSourceRevision!=source.revision||latest->demo||latest->musicSource>1||!sync::lxAllowed(source))throw std::runtime_error("LX-only command cancelled: selected music source changed");};auto result=syncRuntime.tick(cfg.sync,*local,now(),[&](){sourceGuard();return status(get(statusPath,65536),now());},[&](const std::string& path){sourceGuard();std::wstring w(path.begin(),path.end());auto response=httpGetRaw(w.c_str(),4096);if(response!="OK")throw std::runtime_error("LX control did not return OK");},source,*std::atomic_load(&source_roster::snapshot),[&](const std::string& uri){sourceGuard();if(uri.rfind("lxmusic://music/searchPlay?data=",0)!=0)throw std::runtime_error("Unsupported LX Scheme action");std::wstring w(uri.begin(),uri.end());auto result=reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr,L"open",w.c_str(),nullptr,nullptr,SW_SHOWNOACTIVATE));if(result<=32)throw std::runtime_error("LX Scheme dispatch failed; register lxmusic protocol; code="+std::to_string(result));},[&](){auto latest=std::atomic_load(&settings);return !syncResetRequested.load()&&latest->sync.enabled&&latest->sync.discover&&!latest->demo&&latest->musicSource<=1&&latest->playbackSourceRevision==source.revision;});std::atomic_store(&syncStatus,std::make_shared<const sync::Status>(std::move(result)));}
- std::unique_lock<std::mutex> lock(sleepMutex);wake.wait_for(lock,std::chrono::milliseconds(cfg.demo?50:(cfg.musicSource==8||(cfg.musicSource==0&&autoSource==8))?250:150),[]{return stopping.load();});
+ if(!stopping.load())if(auto event=wakeEvent.load())WaitForSingleObject(event,DWORD(cfg.demo?50:(cfg.musicSource==8||(cfg.musicSource==0&&autoSource==8))?250:150));
  }
  cameraWriter.drain();
  }catch(...){if(logger)logger(LDB_HOST_LOG_ERROR,"Music worker stopped unexpectedly");}
@@ -554,7 +554,7 @@ bool load(const std::filesystem::path& pluginDirectory){try{directory=pluginDire
 
  note("L4D2DangoMusic 0.9.8 config="+path.u8string()+" mode="+(cfg.demo?"DEMO":"BLF/LX")+" port="+std::to_string(cfg.port)+" offsetMs="+std::to_string(cfg.offset)+" displayMode="+cfg.mode);
  note("Steam sync fix1: in-game SteamClient user/pipe lifecycle probes disabled");
- if(stopping.load())return FALSE;worker=reinterpret_cast<HANDLE>(_beginthreadex(nullptr,0,&musicWorkerMain,nullptr,0,nullptr));if(!worker){note("Music worker start failed");return FALSE;}return TRUE;}catch(const std::exception& e){if(logger)logger(LDB_HOST_LOG_ERROR,e.what());return FALSE;}catch(...){return FALSE;}}
+ if(stopping.load())return FALSE;wakeEvent=CreateEventW(nullptr,FALSE,FALSE,nullptr);if(!wakeEvent.load()){note("Music wake event creation failed");return FALSE;}worker=reinterpret_cast<HANDLE>(_beginthreadex(nullptr,0,&musicWorkerMain,nullptr,0,nullptr));if(!worker){CloseHandle(wakeEvent.exchange(nullptr));note("Music worker start failed");return FALSE;}return TRUE;}catch(const std::exception& e){if(logger)logger(LDB_HOST_LOG_ERROR,e.what());return FALSE;}catch(...){return FALSE;}}
 void releasePresentationBackup();
 void WINAPI created(IDirect3DDevice9*){nativeHud.release();wallTextState.reset();++deviceGeneration;releasePresentationBackup();anchors.reset();worldPeakEntries.clear();peakIndex=-1;worldLyricLifecycle.reset();clear();reportedErrors=0;drewPixels=false;note("L4D2DangoMusic device lifecycle: created/destroyed; textures cleared");}
 void WINAPI beforeReset(IDirect3DDevice9*,const D3DPRESENT_PARAMETERS*,BOOL){nativeHud.beforeReset();wallTextState.reset();releasePresentationBackup();anchors.reset();worldPeakEntries.clear();peakIndex=-1;worldLyricLifecycle.reset();clear();}
@@ -702,7 +702,7 @@ void restoreAllState(const Config& current){
  positionPreview=false;positionPreviewMotion=false;wallPositionPreview=false;followPositionPreview=false;
  source_entities::browseRequested=false;source_entities::autoRequested=false;source_entities::enabled=false;source_entities::dumpRequested=false;source_entities::resetRequested=true;
  std::atomic_store(&source_entities::automaticRequest,std::make_shared<const inventory::FollowRequest>());setFollow(follow::Settings{});source_walls::clearRequested=true;source_walls::placeAt=0;source_walls::submit(wallscene::Ticket{});
- changeSettings(next,true);nativeHud.loadAppearance(next.hud);displayResetRequested=true;presetScope=0;nativeHud.requestRoot();wake.notify_all();}
+ changeSettings(next,true);nativeHud.loadAppearance(next.hud);displayResetRequested=true;presetScope=0;nativeHud.requestRoot();signalWake();}
 const char* menuActionImpl(void* argument){uintptr_t id=reinterpret_cast<uintptr_t>(argument);std::lock_guard<std::mutex> lock(settingsMutex);auto c=*std::atomic_load(&settings);wallPositionPreview=false;
  if(id==9751){
   if(externalCameraTest.load())stopExternalCameraTest();
@@ -837,7 +837,7 @@ const char* menuActionImpl(void* argument){uintptr_t id=reinterpret_cast<uintptr
  #if DANGO_DIAGNOSTICS
  if(id==800){auto frame=std::atomic_load(&source_entities::snapshot);return page(u8"实体接口 · 只读诊断",item(menus::value(u8"定时采集",on(source_entities::enabled.load())),801)+item(u8"立即导出当前快照",802)+item(menus::value(u8"已识别实体",std::to_string(frame->records.size())),0)+item(menus::value(u8"扫描条目",std::to_string(frame->occupied)),0)+item(menus::value(u8"已写帧",std::to_string(source_entities::fileFrames.load())),0)+item(menus::value(u8"状态",frame->status),0)+item(u8"输出目录："+directory.u8string(),0)+item(u8"当前为网络坐标，不是骨骼或渲染姿态",0));}
  if(id==801){source_entities::enabled=!source_entities::enabled.load();if(source_entities::enabled.load())source_entities::resetRequested=true;return nullptr;}
- if(id==802){source_entities::dumpRequested=true;wake.notify_all();return nullptr;}
+ if(id==802){source_entities::dumpRequested=true;signalWake();return nullptr;}
  #endif
  if(id==727){c.wallIndependentTiming=!c.wallIndependentTiming;changeSettings(c);return wallOptionsMenu();}
  if(id==726){c.wallFloorFollow=!c.wallFloorFollow;changeSettings(c);return menuPage(menus::wallAppearance(c));}
@@ -877,17 +877,17 @@ const char* menuActionImpl(void* argument){uintptr_t id=reinterpret_cast<uintptr
 
  #if DANGO_DIAGNOSTICS
  if(id==9603){auto result=std::atomic_load(&syncStatus);return page(u8"Steam 通信测试（不控制音乐）",item(u8"绑定 / 检查 Steam 接口",9640)+item(u8"当前 SteamID 自指收发",9641)+item(u8"Steam CreateSocketPair 双端测试",9643)+item(u8"虚拟多玩家模拟："+result->simulated,9644)+item(u8"本机："+std::to_string(result->identity)+" / "+result->network,0)+item(u8"自指："+result->self,0)+item(u8"本地双端："+result->pair,0));}
- if(id>=9620&&id<=9627){auto gate=std::atomic_load(&syncStatus);if(c.demo||c.musicSource>1||!gate->lxActive||gate->sourceRevision!=c.playbackSourceRevision)return nullptr;auto music=std::atomic_load(&snapshot);sync::Request request;request.command.expectedTrack=music->key;request.command.sourceRevision=c.playbackSourceRevision;request.command.sourceEpoch=gate->sourceEpoch;request.command.action=id==9620?lx::Action::Play:id==9621?lx::Action::Pause:id==9622?lx::Action::Stop:lx::Action::Seek;request.command.position=id==9624?30000:id==9625?std::min(music->position+10000,music->duration):id==9626?music->duration/2:0;if(id==9627){request.action=7;request.track=sync::song(*music);}syncRequests.push(request);wake.notify_all();return nullptr;}
+ if(id>=9620&&id<=9627){auto gate=std::atomic_load(&syncStatus);if(c.demo||c.musicSource>1||!gate->lxActive||gate->sourceRevision!=c.playbackSourceRevision)return nullptr;auto music=std::atomic_load(&snapshot);sync::Request request;request.command.expectedTrack=music->key;request.command.sourceRevision=c.playbackSourceRevision;request.command.sourceEpoch=gate->sourceEpoch;request.command.action=id==9620?lx::Action::Play:id==9621?lx::Action::Pause:id==9622?lx::Action::Stop:lx::Action::Seek;request.command.position=id==9624?30000:id==9625?std::min(music->position+10000,music->duration):id==9626?music->duration/2:0;if(id==9627){request.action=7;request.track=sync::song(*music);}syncRequests.push(request);signalWake();return nullptr;}
  if(id==9642)return nullptr;
- if(id>=9640&&id<=9644){sync::Request request;request.action=id==9640?4:id==9644?5:int(id-9640);syncRequests.push(request);wake.notify_all();return nullptr;}
+ if(id>=9640&&id<=9644){sync::Request request;request.action=id==9640?4:id==9644?5:int(id-9640);syncRequests.push(request);signalWake();return nullptr;}
  #endif
  if(id==9630){c.sync.enabled=!c.sync.enabled;c.sync.apply=c.sync.enabled;if(c.sync.enabled)c.sync.discover=true;changeSettings(c);return nullptr;}
  if(id==9631){c.sync.apply=!c.sync.apply;changeSettings(c);return nullptr;}
  if(id==9632){c.sync.threshold=c.sync.threshold==350?700:c.sync.threshold==700?150:350;changeSettings(c);return nullptr;}
- if(id==9633){if(!c.sync.enabled)return nullptr;auto gate=std::atomic_load(&syncStatus);if(c.musicSource>1||c.demo||!gate->lxActive)return nullptr;c.sync.enabled=c.sync.apply=c.sync.discover=true;changeSettings(c);sync::Request request;request.action=6;syncRequests.push(request);wake.notify_all();return nullptr;}
+ if(id==9633){if(!c.sync.enabled)return nullptr;auto gate=std::atomic_load(&syncStatus);if(c.musicSource>1||c.demo||!gate->lxActive)return nullptr;c.sync.enabled=c.sync.apply=c.sync.discover=true;changeSettings(c);sync::Request request;request.action=6;syncRequests.push(request);signalWake();return nullptr;}
  if(id==9634){if(!c.sync.enabled)return nullptr;c.sync.discover=!c.sync.discover;if(!c.sync.discover)c.sync.enabled=c.sync.apply=false;changeSettings(c);return nullptr;}
  if(id==9635){c.sync.autoSearch=!c.sync.autoSearch;changeSettings(c);return nullptr;}
- if(id==9636||id==9637){sync::Request request;request.action=id==9636?8:9;syncRequests.push(request);wake.notify_all();return nullptr;}
+ if(id==9636||id==9637){sync::Request request;request.action=id==9636?8:9;syncRequests.push(request);signalWake();return nullptr;}
  if(id==9500){std::string rows;for(int i:{0,1,3,8})rows+=item(std::string(c.musicSource==i?u8"当前 · ":"")+media::sourceName(i),9510+i);auto music=std::atomic_load(&snapshot);rows+=item(u8"状态："+music->message,0);return page(u8"音乐来源",rows);}
  if(id==9510||id==9511||id==9513||id==9518){c.musicSource=int(id-9510);c.demo=false;changeSettings(c);return nullptr;}
  if(id==24)return diagnosticMenu();
@@ -1300,11 +1300,12 @@ public:
  void requestStop() noexcept {lifetime::requestStop();stopping=true;externalCameraTest=false;externalCameraActive=false;source_camera::frameListener=nullptr;}
  // Normal Source Shutdown / explicit export, outside Loader Lock.
  void stop(){
-  requestStop();if(stopStarted.exchange(true))return;wake.notify_all();
+  requestStop();if(stopStarted.exchange(true))return;signalWake();
   if(worker){if(WaitForSingleObject(worker,2500)!=WAIT_OBJECT_0){note("DangoMusic shutdown deferred: worker not stopped; module retained");stopStarted=false;return;}CloseHandle(worker);worker=nullptr;}
   const auto deadline=GetTickCount64()+1000;
   while(lifetime::callbacks.load()&&GetTickCount64()<deadline)Sleep(1);
   if(lifetime::callbacks.load()){note("DangoMusic shutdown deferred: callbacks in flight; module retained");stopStarted=false;return;}
+  if(auto event=wakeEvent.exchange(nullptr))CloseHandle(event);
   stopExternalCameraTest();source_camera::shutdownListener=nullptr;source_camera::stop();if(started){shutdown();started=false;}
   for(size_t i=patchCount.load();i>0;--i){auto& p=patches[i-1];if(!source_camera::readable(p.slot,sizeof(void*)))continue;DWORD old=0;if(VirtualProtect(p.slot,sizeof(void*),PAGE_READWRITE,&old)){InterlockedCompareExchangePointer(p.slot,p.original,p.replacement);DWORD ignored=0;VirtualProtect(p.slot,sizeof(void*),old,&ignored);}}
   // Retain original targets: another plugin may still chain our pinned thunk.
