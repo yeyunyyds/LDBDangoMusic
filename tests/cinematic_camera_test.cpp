@@ -46,6 +46,10 @@ int main(){
  track.update(2,800,500,true,place);assert(track.anchors.size()==1);
  track.update(3,900,500,true,[](wall::Panel&){return false;});
  track.update(3,1000,500,true,place);assert(placements==2&&!track.anchors.back().valid);
+ track.reset();assert(track.anchors.empty());
+ assert(!findGround(groundActor,{0,-300,300},floor,[](const wall::Panel&){return false;},groundPanel));
+ auto noGround=[](Vec3 a,Vec3 b,trace::Result& r){r={};r.start=a;r.end=b;return true;};
+ assert(!findGround(groundActor,{0,-300,300},noGround,[](const wall::Panel&){return true;},groundPanel));
 
  {lifetime::Guard guard;assert(guard&&lifetime::callbacks.load()==1);lifetime::requestStop();lifetime::Guard denied;assert(!denied&&lifetime::callbacks.load()==1);}assert(!lifetime::callbacks.load());
  trace::Result facade;assert(building({0,0,80},{200,0,80},facade)&&trace::wallHit(facade));

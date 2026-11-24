@@ -432,7 +432,7 @@ void drawCinematicLyrics(IDirect3DDevice9* dev,const GameCameraFrame& camera,boo
   const auto ground=std::find_if(shot->ground.begin(),shot->ground.end(),[&](const auto& a){return a.index==l.index&&!a.expires;});
   // Source and Present may straddle a lyric boundary. Wait for placement.
   if(bird&&ground==shot->ground.end())continue;
-  const bool first=bird?ground->valid&&ground->visible:visibilityFresh&&shot->firstVisible&&wallscene::onScreen(panel(false),camera,width,height);
+  const bool first=bird?ground->valid:visibilityFresh&&shot->firstVisible&&wallscene::onScreen(panel(false),camera,width,height);
   const bool second=!bird&&visibilityFresh&&shot->panels.hasSecond&&shot->secondVisible&&wallscene::onScreen(panel(true),camera,width,height);
   const auto mode=cinematic::chooseLyricMode(!bird&&shot->panels.hasSecond&&((at-shot->index)&1)!=0,first,second);
   CinematicRenderState::Entry entry;entry.lease=l.id;entry.mode=mode;entry.shotSerial=shot->panels.serial;entry.dynamic=shot->dynamic&&!bird;entry.style=shot->style;entry.actorHandle=shot->actor.handle;
@@ -781,7 +781,7 @@ const char* menuActionImpl(void* argument){uintptr_t id=reinterpret_cast<uintptr
   rows+=item(std::string(u8"用户放开键鼠交还：")+(found?std::to_string(s.idle_seconds)+"s":u8"未知"),0);
   rows+=item(u8"键鼠接管，闲置恢复；FreeCamera 快捷键退出后重新等待",0);
   rows+=item(u8"先在 Visual 的 FreeCamera 菜单授权外部接口",0);
-  return page(u8"闲置运镜（实验）",rows);
+  return page(u8"AFK 自动运镜",rows);
  }
 
  if(id==6000){presetScope=(presetScope+1)%4;return nullptr;}
@@ -1149,7 +1149,7 @@ cinematic::Composition findCinematicPanels(const cinematic::Actor& actor,const c
 }
 void clearCinematicComposition(bool preserveGround=false){
  cinematicPanels={};cinematicDynamicPanel=false;cinematicVisibilityAt=0;
- if(!preserveGround){cinematicGround.reset();cinematicGroundKey.clear();if(std::atomic_load(&cinematicLyricShot)->panels.ready)std::atomic_store(&cinematicLyricShot,std::make_shared<const CinematicLyricShot>());}
+ if(!preserveGround){cinematicGround.reset();cinematicGroundKey.clear();auto previous=std::atomic_load(&cinematicLyricShot);if(previous->panels.ready||!previous->ground.empty())std::atomic_store(&cinematicLyricShot,std::make_shared<const CinematicLyricShot>());}
 }
 void tickExternalCameraTest(const GameCameraFrame& frame){
  if(!externalCameraTest.load(std::memory_order_acquire))return;
@@ -1223,7 +1223,7 @@ void tickExternalCameraTest(const GameCameraFrame& frame){
  }
  cinematicMissingSince=0;
  auto actor=cameraActor.update(sample,motionAt);
- if(externalDirector.planned&&(externalDirector.actorEpoch!=actor.epoch||externalDirector.actorHandle!=actor.handle)){externalDirector.reset();cinematicRecovery.reset();recoveryGate.reset();cameraMotion.reset();cinematicTrackAt=0;cinematicBlockedSince=0;cinematicPathBlocked=false;clearCinematicComposition();}
+ if(externalDirector.planned&&(externalDirector.actorEpoch!=actor.epoch||externalDirector.actorHandle!=actor.handle)){externalDirector.reset();cinematicRecovery.reset();recoveryGate.reset();cameraMotion.reset();cinematicTrackAt=0;cinematicBlockedSince=0;cinematicPathBlocked=false;clearCinematicComposition(true);}
  // Compare final rendered view to the ABI view, independently of ownership.
  // If the engine overwrites later, report that rather than guessing new offsets.
  CameraPose rendered{};
@@ -1324,7 +1324,7 @@ void tickExternalCameraTest(const GameCameraFrame& frame){
  externalCameraActive=true;
  // Publish geometry each Source frame; trace visibility at 10 Hz only.
  // A new composition needs its own initial visibility sample.
- if(cinematicPanels.ready){
+ if(cinematicPanels.ready||!cinematicGround.anchors.empty()){
   CinematicLyricShot shot;auto prior=std::atomic_load(&cinematicLyricShot);
   shot.panels=cinematicPanels;shot.panels.tick=at;shot.dynamic=cinematicDynamicPanel;shot.actor=sample;shot.style=panelStyle;
   shot.key=music->key;shot.generation=music->generation;shot.ground=cinematicGround.anchors;

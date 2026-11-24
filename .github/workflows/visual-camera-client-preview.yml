@@ -32,6 +32,13 @@ jobs:
           python3 scripts/generate_factory_defaults.py --check
           g++ -std=c++17 -Wall -Wextra -Werror -Isrc tests/hud_menu_policy_test.cpp -o /tmp/camera-menu
           /tmp/camera-menu
+      - uses: actions/setup-dotnet@v4
+        if: github.ref_name == 'work/next-cinematic-recovery'
+        with:
+          dotnet-version: 8.0.x
+      - name: Full release regression
+        if: github.ref_name == 'work/next-cinematic-recovery'
+        run: bash scripts/test.sh
       - name: Build optional camera client caller and plugin
         env:
           DANGO_CXX: i686-w64-mingw32-g++-posix
@@ -44,4 +51,13 @@ jobs:
           name: DangoMusic-VisualCamera-Client-Preview
           path: |
             build/L4D2DangoMusic.dll
+          if-no-files-found: error
+      - name: Package production installer
+        if: github.ref_name == 'work/next-cinematic-recovery'
+        run: python3 scripts/package.py
+      - uses: actions/upload-artifact@v4
+        if: github.ref_name == 'work/next-cinematic-recovery'
+        with:
+          name: DangoMusic-v0.9.9-Release-Candidate
+          path: build/packages/*
           if-no-files-found: error
