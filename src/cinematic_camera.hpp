@@ -54,14 +54,14 @@ inline Vec3 quadratic(Vec3 a,Vec3 b,Vec3 c,float t){return mix(mix(a,b,t),mix(b,
 struct Director {
  Pose from{},to{},last{};
  Vec3 control{},anchor{},focus{};
- uint64_t begin=0,lastTick=0;
+ uint64_t begin=0,lastTick=0;uint32_t actorEpoch=0,actorHandle=0;
  unsigned span=6000,sequence=0;
  Style active=Style::Orbit,selected=Style::Mixed;
  bool ready=false,planned=false,moving=false;
  void reset(){*this={};}
  bool start(Pose pose){if(!valid(pose))return false;reset();ready=true;last=from=to=pose;return true;}
  bool needsPlan(uint64_t now,const Actor& actor,Style requested)const{
-  if(!planned||requested!=selected||now<begin||now-begin>=span)return true;
+  if(!planned||requested!=selected||actor.epoch!=actorEpoch||actor.handle!=actorHandle||now<begin||now-begin>=span)return true;
   if(!actor.ready)return false;
   // Update world reference at every shot boundary; fast-moving players may
   // force an earlier continuous transition, not an instantaneous teleport.
@@ -69,7 +69,8 @@ struct Director {
  }
  template<class Clear> bool plan(uint64_t now,unsigned milliseconds,const Actor& actor,Style requested,const Composition& comp,Clear clear){
   if(!actor.ready)return false;
-  from=last;anchor=actor.center;selected=requested;active=choose(requested,length(actor.velocity),sequence,comp.ready);
+  from=last;anchor=actor.center;selected=requested;active=choose(requested,length(actor.velocity),sequence,comp.ready);actorEpoch=actor.epoch;actorHandle=actor.handle;
+  if(active==Style::Architecture&&!comp.ready)active=Style::Wide;
   const unsigned n=sequence++;begin=now;span=std::clamp(milliseconds,4000u,10000u);planned=true;moving=false;
   const float heading=(length(Vec3{actor.velocity.x,actor.velocity.y,0})>40?std::atan2(actor.velocity.y,actor.velocity.x):actor.yaw*pi/180.f);
   Vec3 predicted=actor.center;
@@ -82,7 +83,7 @@ struct Director {
   if(length(Vec3{from.eye.x-anchor.x,from.eye.y-anchor.y,0})<70)initial=heading+pi;
   if(active==Style::Bird)initial=heading+pi;
   if(active==Style::Architecture&&comp.ready)initial=std::atan2(comp.first.normal.y,comp.first.normal.x);
-  const float sign=n%2?1.f:-1.f;
+  const float sign=active==Style::Orbit?1.f:(n%2?1.f:-1.f);
   const float angles[]={sign*.95f,-sign*.75f,sign*1.65f,0.f};
   for(float scale:{1.f,.65f,.4f})for(float angle:angles){
    const float az=initial+angle;
@@ -95,8 +96,8 @@ struct Director {
    Vec3 bend=mid+radial*(active==Style::Orbit?radius*scale*.22f:25.f*scale);
    if(!clear(candidate,actor.center))continue;
    if(active==Style::Architecture&&comp.ready){
-    if(wall::dot(comp.first.normal,candidate-comp.first.center)<12.f||!clear(candidate,comp.first.center))continue;
-    if(comp.hasSecond&&(wall::dot(comp.second.normal,candidate-comp.second.center)<12.f||!clear(candidate,comp.second.center)))continue;
+    if(wall::dot(comp.first.normal,candidate-comp.first.center)<12.f||!clear(candidate,comp.first.center+comp.first.normal*8.f))continue;
+    if(comp.hasSecond&&(wall::dot(comp.second.normal,candidate-comp.second.center)<12.f||!clear(candidate,comp.second.center+comp.second.normal*8.f)))continue;
     auto a=normalize(actor.center-candidate),b=normalize(comp.first.center-candidate);
     if(wall::dot(a,b)<.68f)continue;
    }
@@ -108,6 +109,7 @@ struct Director {
    }
   }
   // Never fly through unsupported geometry. No fake free-space orbit.
+  if(length(Vec3{focus.x-from.eye.x,focus.y-from.eye.y,0})<80.f){focus=from.eye+Vec3{std::cos(heading),std::sin(heading),0}*180.f;}
   to=look(from.eye,focus,from.yaw);control=from.eye;return false;
  }
  Pose step(uint64_t now,const Actor& actor){
@@ -115,7 +117,7 @@ struct Director {
   float t=ease(float(now>=begin?now-begin:0)/float(span));
   Vec3 eye=moving?quadratic(from.eye,control,to.eye,t):from.eye;
   Vec3 aim=focus;
-  if(actor.ready&&(active==Style::Orbit||active==Style::Bird)){
+  if(moving&&actor.ready&&(active==Style::Orbit||active==Style::Bird)){
    Vec3 delta=actor.center-anchor;float distance=length(delta);if(distance>300)delta=delta*(300/distance);
    aim=aim+delta;
   }
