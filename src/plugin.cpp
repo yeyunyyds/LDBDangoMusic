@@ -77,6 +77,14 @@ std::mutex settingsMutex;std::atomic<int> saveState{0};thread_local std::shared_
 HMODULE ownModule=nullptr;std::filesystem::path ownPath;
 std::filesystem::path directory;using LogFn=void(*)(int,const char*);LogFn logger=nullptr;
 constexpr int LDB_HOST_LOG_INFO=0,LDB_HOST_LOG_WARNING=1,LDB_HOST_LOG_ERROR=2;
+// Explicit, opt-in ABI demonstration; never auto-starts during normal lyrics.
+std::atomic<bool> externalCameraTest{false};
+std::atomic<bool> externalCameraInitialized{false};
+std::atomic<std::uint64_t> externalCameraSampleAt{0};
+Vec3 externalCameraEye{};
+float externalCameraYaw=0.f,externalCameraPitch=0.f;
+std::uint64_t externalCameraStarted=0;
+std::uint32_t externalCameraEpoch=0;
 std::atomic<bool> positionPreview{false},wallPositionPreview{false},positionPreviewMotion{false};bool lastPositionPreview=false,lastWallMode=false,escapeHeld=false;uint64_t layoutGeneration=0;
 PlaybackDisplay playbackDisplay;
 PlaybackCursor playbackCursor;LyricLifecycle worldLyricLifecycle,entityLyricLifecycle;std::atomic<int> visibleLyricIndex{-1};std::atomic<uint64_t> presentationCount{0},restoreErrors{0};
@@ -590,6 +598,29 @@ void restoreAllState(const Config& current){
  std::atomic_store(&source_entities::automaticRequest,std::make_shared<const inventory::FollowRequest>());setFollow(follow::Settings{});source_walls::clearRequested=true;source_walls::placeAt=0;source_walls::submit(wallscene::Ticket{});
  changeSettings(next,true);nativeHud.loadAppearance(next.hud);displayResetRequested=true;presetScope=0;nativeHud.requestRoot();wake.notify_all();}
 const char* menuActionImpl(void* argument){uintptr_t id=reinterpret_cast<uintptr_t>(argument);std::lock_guard<std::mutex> lock(settingsMutex);auto c=*std::atomic_load(&settings);wallPositionPreview=false;
+ if(id==9751){
+  if(externalCameraTest.load())stopExternalCameraTest();
+  else{
+   externalCameraInitialized=false;
+   externalCameraSampleAt=0;
+   externalCameraTest=true;
+  }
+ }
+ if(id==9750||id==9751){
+  L4D2VisualCameraStatusV1 s{};
+  const bool found=visualcamera::status(s);
+  const char* owner=found?(s.owner==L4D2VISUAL_CAMERA_OWNER_EXTERNAL?"DangoMusic":s.owner==L4D2VISUAL_CAMERA_OWNER_USER?"User FreeCamera":"Native"):"Unavailable";
+  std::string rows;
+  rows+=item(externalCameraTest.load()?u8"关闭测试运镜":u8"启动测试运镜（仅离线开阔区域）",9751);
+  rows+=item(std::string(u8"Visual ABI：")+(found?u8"已连接":u8"未找到或版本不匹配"),0);
+  rows+=item(std::string(u8"接口授权：")+(found?(s.external_allowed?u8"允许":u8"关闭"):u8"不可用"),0);
+  rows+=item(std::string(u8"当前控制权：")+owner,0);
+  rows+=item(std::string(u8"用户放开键鼠交还：")+(found?std::to_string(s.idle_seconds)+"s":u8"未知"),0);
+  rows+=item(u8"测试：自动轻微平移和转向；移动鼠标暂停，闲置恢复",0);
+  rows+=item(u8"先在 Visual 的 FreeCamera 菜单授权外部接口",0);
+  return page(u8"外部 FreeCamera ABI 连通测试",rows);
+ }
+
  if(id==6000){presetScope=(presetScope+1)%4;return nullptr;}
  if(id>=6100&&id<6117){c=visual::apply(c,catalog::theme(unsigned(id-6100)),visual::Scope(presetScope));changeSettings(c);return nullptr;}
  if(id>=6200&&id<6208){int slot=int(id-6200);if(visual::occupied(c,slot)){try{c=visual::apply(c,c.visualPresets.at(slot),visual::Scope(presetScope));changeSettings(c);}catch(const std::exception& e){note(std::string("Saved preset rejected: ")+e.what());}}return nullptr;}
@@ -841,7 +872,60 @@ const char* openNativeMenu(void*){nativeHud.open();return nullptr;}
 const char* nativeEntryMenu(){static std::string entry;char callback[32];std::snprintf(callback,sizeof(callback),"0x%lx",static_cast<unsigned long>(reinterpret_cast<uintptr_t>(&openNativeMenu)));entry="\"L4D2DangoMusic\" { \"打开歌词控制面板\" { \"callback\" \""+std::string(callback)+"\" \"user_data\" \"0x0\" } }";return entry.c_str();}
 const char* rootMenu(bool title){if(title)return "L4D2DangoMusic 0.9.8";positionPreview=false;positionPreviewMotion=false;wallPositionPreview=false;auto c=*std::atomic_load(&settings);auto saved=std::atomic_load(&savedSettings);auto state=saveState.load();bool saving=state==1||bool(std::atomic_load(&pendingSave));return menuPage(catalog::root(c,menus::saveLabel(c,saved?*saved:Config{},saving,state<0,bool(saved)),(std::atomic_load(&followSettings)->enabled||c.autoFollow.enabled)));}
 
+// Small fixed-origin orbit to demonstrate the ABI without a new EXE.
+// Not a cinematic feature and deliberately off until a menu action requests it.
+void stopExternalCameraTest(){
+ externalCameraTest=false;
+ externalCameraInitialized=false;
+ (void)visualcamera::request(false);
+}
+void tickExternalCameraTest(const GameCameraFrame& frame){
+ if(!externalCameraTest.load(std::memory_order_acquire))return;
+ if(!frame.active){
+  stopExternalCameraTest();
+  return;
+ }
+ const auto at=uint64_t(now());
+ if(at-externalCameraSampleAt.load(std::memory_order_relaxed)<33)return;
+ externalCameraSampleAt.store(at,std::memory_order_relaxed);
+ L4D2VisualCameraStatusV1 status{};
+ if(!visualcamera::status(status)||!status.external_allowed){
+  // Do not request camera unless the user explicitly enabled the Visual menu.
+  if(externalCameraInitialized.load())stopExternalCameraTest();
+  return;
+ }
+ if(!externalCameraInitialized.load()){
+  CameraPose start{};
+  if(!cameraPose(frame,start))return;
+  const auto forward=start.forward;
+  constexpr float degrees=57.29577951308232f;
+  externalCameraEye=start.eye;
+  externalCameraYaw=std::atan2(forward.y,forward.x)*degrees;
+  externalCameraPitch=std::clamp(std::atan2(-forward.z,
+       std::hypot(forward.x,forward.y))*degrees,-88.f,88.f);
+  externalCameraStarted=at;
+  externalCameraEpoch=frame.epoch;
+  if(!visualcamera::pose(start.eye.x,start.eye.y,start.eye.z,
+                          externalCameraPitch,externalCameraYaw)||
+     !visualcamera::request(true)){
+   return;
+  }
+  externalCameraInitialized=true;
+  note("External FreeCamera ABI smoke: requested orbit around initial camera");
+ }
+ if(frame.epoch!=externalCameraEpoch){stopExternalCameraTest();return;}
+ const float elapsed=float(at-externalCameraStarted)*.001f;
+ // <=12 Source-unit motion suitable only for open-space offline testing.
+ const float dx=12.f*std::sin(elapsed*.5f);
+ const float dy=12.f*(1.f-std::cos(elapsed*.5f));
+ const float yaw=externalCameraYaw+18.f*std::sin(elapsed*.55f);
+ if(!visualcamera::pose(externalCameraEye.x+dx,externalCameraEye.y+dy,
+                        externalCameraEye.z,externalCameraPitch,yaw)){
+  stopExternalCameraTest();
+ }
+}
 void captureSourceFeatures(const GameCameraFrame& frame){
+ tickExternalCameraTest(frame);
  auto current=std::atomic_load(&settings);source_roster::enabled=!syncResetRequested.load()&&current->sync.enabled&&current->sync.discover&&!current->demo&&current->musicSource<=1;source_roster::capture(frame);
  auto config=std::atomic_load(&settings);bool automatic=config->enabled&&config->autoFollow.enabled&&!config->autoFollow.rules.empty();source_entities::autoRequested=automatic;
  CameraPose view;static std::shared_ptr<const Config> previousConfig;static uint64_t previousTick=0;static uint32_t previousEpoch=0;static inventory::FollowRequest cached;
@@ -868,7 +952,7 @@ public:
  void OnGameLaunch()override{start();if(!started)return;if(!source_camera::clientModule)source_camera::clientModule=GetModuleHandleW(L"client.dll");if(!source_camera::engineModule)source_camera::engineModule=GetModuleHandleW(L"engine.dll");source_camera::connect();}
  void OnD3DDeviceCreated(void* pointer,bool)override{start();if(!started||!pointer)return;auto device=static_cast<IDirect3DDevice9*>(pointer);auto table=*reinterpret_cast<void***>(device);
  cfg=*std::atomic_load(&settings);created(device);patch(table,17,reinterpret_cast<void*>(&devicePresent));patch(table,16,reinterpret_cast<void*>(&resetDevice));patch(table,14,reinterpret_cast<void*>(&getChain));patch(table,13,reinterpret_cast<void*>(&addChain));IDirect3DSwapChain9* chain=nullptr;if(SUCCEEDED(device->GetSwapChain(0,&chain))&&chain){hookChain(chain);chain->Release();}IDirect3DDevice9Ex* ex=nullptr;if(SUCCEEDED(device->QueryInterface(__uuidof(IDirect3DDevice9Ex),reinterpret_cast<void**>(&ex)))&&ex){auto et=*reinterpret_cast<void***>(ex);patch(et,121,reinterpret_cast<void*>(&presentEx));patch(et,132,reinterpret_cast<void*>(&resetEx));ex->Release();}note("x86 Client D3D9 callbacks installed; no Host plugin required");}
- void stop(){source_camera::stop();if(started){shutdown();started=false;}for(size_t i=patchCount.load();i>0;--i){auto& p=patches[i-1];if(!source_camera::readable(p.slot,sizeof(void*)))continue;DWORD old=0;if(VirtualProtect(p.slot,sizeof(void*),PAGE_READWRITE,&old)){InterlockedCompareExchangePointer(p.slot,p.original,p.replacement);DWORD ignored=0;VirtualProtect(p.slot,sizeof(void*),old,&ignored);}}patchCount.store(0);if(renderOwner){CloseHandle(renderOwner);renderOwner=nullptr;}}
+ void stop(){stopExternalCameraTest();source_camera::stop();if(started){shutdown();started=false;}for(size_t i=patchCount.load();i>0;--i){auto& p=patches[i-1];if(!source_camera::readable(p.slot,sizeof(void*)))continue;DWORD old=0;if(VirtualProtect(p.slot,sizeof(void*),PAGE_READWRITE,&old)){InterlockedCompareExchangePointer(p.slot,p.original,p.replacement);DWORD ignored=0;VirtualProtect(p.slot,sizeof(void*),old,&ignored);}}patchCount.store(0);if(renderOwner){CloseHandle(renderOwner);renderOwner=nullptr;}}
  ~LyricsPlugin()override{stop();}
 };
 }
