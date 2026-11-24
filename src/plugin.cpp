@@ -291,7 +291,7 @@ void peakFrame(IDirect3DDevice9* dev,const State& state,int at,int64_t song,bool
  top-=(cfg.visual.exit==0?life.lift:0)*(world?20.f*scale*cfg.size/cfg.worldHeight:height*.025f);
  auto drawLine=[&](const peak::Animation& animation,peak::VisibleAnimation& motion,const peak::Layout& layout,bool translated){
  float textScale=scale*(translated?cfg.visual.translationSize:cfg.visual.originalSize);float baseTop=translated?top+entry.layout.height*scale*cfg.visual.originalSize+cfg.visual.translationGap:top;
- for(const auto& glyph:layout.glyphs){auto frame=peak::revealFrame(motion,animation,glyph.index,song,clock,cfg.animationSpeed,cfg.progressiveReveal,!cinematicLayout&&!translated&&cfg.pop,!cinematicLayout&&!translated&&cfg.wiggle,cfg.wiggleFrequency,cfg.wiggleAmount,cfg.fallbackReveal);if(frame.alpha<=0)continue;frame.alpha*=visual::entrance(cfg.visual,motion,glyph.index,clock);
+ for(const auto& glyph:layout.glyphs){auto frame=peak::revealFrame(motion,animation,glyph.index,song,clock,cfg.animationSpeed,cfg.progressiveReveal,!translated&&cfg.pop,!translated&&cfg.wiggle,cfg.wiggleFrequency,cfg.wiggleAmount,cfg.fallbackReveal);if(frame.alpha<=0)continue;frame.alpha*=visual::entrance(cfg.visual,motion,glyph.index,clock);
  if(!translated&&cfg.pop)frame.scale=1+(frame.scale-1)*cfg.visual.popStrength;
  float fraction=animation.glyphs.size()>1?float(glyph.index)/float(animation.glyphs.size()-1):0;auto exit=visual::retire(cfg.visual.exit,life.alpha,fraction,animation.textSeed+uint32_t(glyph.index)*257);auto tone=visual::shade(cfg.visual,animation,glyph.index,song,lyricTint(glyph.index,animation.glyphs.size(),clock),translated);
  auto im=image(dev,animation.glyphs[glyph.index].text);float size=textScale*frame.scale*exit.scale;
@@ -360,8 +360,8 @@ struct WallTextState {
  }
 } wallTextState;
 void wallGlyphs(IDirect3DDevice9* dev,const wall::Panel& panel,const GameCameraFrame& camera,float width,float height,const peak::Animation& animation,peak::VisibleAnimation& motion,const peak::Layout& layout,float unit,float top,int64_t song,double clock,bool translated,float opacity=1,bool cinematicLayout=false){
- for(const auto& glyph:layout.glyphs){auto frame=peak::revealFrame(motion,animation,glyph.index,song,clock,cfg.animationSpeed,cfg.progressiveReveal,!translated&&cfg.pop,!translated&&cfg.wiggle,cfg.wiggleFrequency,cfg.wiggleAmount,cfg.fallbackReveal);if(frame.alpha<=0)continue;frame.alpha*=visual::entrance(cfg.visual,motion,glyph.index,clock);
- if(!translated&&cfg.pop)frame.scale=1+(frame.scale-1)*cfg.visual.popStrength;
+ for(const auto& glyph:layout.glyphs){auto frame=peak::revealFrame(motion,animation,glyph.index,song,clock,cfg.animationSpeed,cfg.progressiveReveal,!cinematicLayout&&!translated&&cfg.pop,!cinematicLayout&&!translated&&cfg.wiggle,cfg.wiggleFrequency,cfg.wiggleAmount,cfg.fallbackReveal);if(frame.alpha<=0)continue;frame.alpha*=visual::entrance(cfg.visual,motion,glyph.index,clock);
+ if(!cinematicLayout&&!translated&&cfg.pop)frame.scale=1+(frame.scale-1)*cfg.visual.popStrength;
  auto im=image(dev,animation.glyphs[glyph.index].text);if(!im.texture)continue;auto face=panel;
  auto exit=visual::retire(cinematicLayout?0:cfg.visual.exit,opacity,animation.glyphs.size()>1?float(glyph.index)/float(animation.glyphs.size()-1):0,animation.textSeed+uint32_t(glyph.index)*257);
  auto tone=visual::shade(cfg.visual,animation,glyph.index,song,lyricTint(glyph.index,animation.glyphs.size(),clock),translated);
