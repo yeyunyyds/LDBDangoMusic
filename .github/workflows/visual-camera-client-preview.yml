@@ -18,6 +18,8 @@ jobs:
         run: |
           g++ -std=c++17 -Wall -Wextra -Werror tests/visual_camera_api_test.cpp -o /tmp/visual-camera-api
           /tmp/visual-camera-api
+          g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc -Ivendor tests/folia_protocol_test.cpp -o /tmp/folia-protocol
+          /tmp/folia-protocol
           g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc tests/cinematic_camera_test.cpp -o /tmp/cinematic-camera
           /tmp/cinematic-camera
           g++ -std=c++17 -Wall -Wextra -Werror -Isrc tests/hud_menu_policy_test.cpp -o /tmp/camera-menu
