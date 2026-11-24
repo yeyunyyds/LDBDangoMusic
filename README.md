@@ -2,7 +2,7 @@
 
 > **本实验分支：原生 Folia Stage API**，直接由 x86 DLL 读取本机 Stage 与歌词 API；不需要额外 EXE。见 [安装说明](packaging/README-folia-stage.md)。
 >
-> 当前分支准备 v1.0.0，已发布正式版：[v0.9.8](https://github.com/yeyunyyds/LDBDangoMusic/releases/tag/v0.9.8)。新增七套视觉预设、八个外观收藏与分项应用，整理原生 HUD 菜单，提供恢复默认外观/全部设置。[菜单使用说明](docs/menu-navigation-preview.md)
+> 正式版：[v1.0.0](https://github.com/yeyunyyds/LDBDangoMusic/releases/tag/v1.0.0)。新增 AFK 自动运镜、场景化歌词与 Folia 原生支持，适配 2026 年 11 月游戏更新。[菜单使用说明](docs/menu-navigation-preview.md)
 
 为《求生之路 2》（Left 4 Dead 2）提供音乐歌词显示的 L4N 插件。通过兼容 LX / BLF 的本地音乐 API 获取播放进度和歌词，在游戏中呈现带逐字动画的歌词，并支持世界空间定位、歌名与作者显示以及游戏内调节。
 
@@ -54,7 +54,7 @@
 
 ## 安装
 
-[下载 L4D2DangoMusic v0.9.8](https://github.com/yeyunyyds/LDBDangoMusic/releases/download/v0.9.8/L4D2DangoMusic-0.9.8-l4n.zip) · [Release 说明](https://github.com/yeyunyyds/LDBDangoMusic/releases/tag/v0.9.8)
+[下载 L4D2DangoMusic v1.0.0](https://github.com/yeyunyyds/LDBDangoMusic/releases/download/v1.0.0/L4D2DangoMusic-1.0.0-l4n.zip) · [Release 说明](https://github.com/yeyunyyds/LDBDangoMusic/releases/tag/v1.0.0)
 
 安装压缩包内仅包含 **bin 文件夹和 README.md**，不附带源码、构建工具、测试程序或额外依赖。
 
@@ -216,7 +216,7 @@ python scripts/package.py
 
 主菜单第 6 项。默认关闭，首次闲置默认 10 秒；新配置默认鸟瞰追踪。支持人物环绕、建筑歌词、场景远景、鸟瞰追踪、墙面运镜，以及可选择参与镜头的混合运镜。修改后通过主菜单第 8 项保存设置。键鼠接管默认返回第一人称，也可选择保留 FreeCamera。
 
-AFK 运镜需要兼容 FreeCamera ABI v4 的 [L4D2Visual](https://github.com/yeyunyyds/L4D2-Visual-Effects) 并主动授权外部接口。旧版 Visual v1.0.0 不含该接口；需要配套 ABI v4 构建。未安装或未授权时不会接管原生相机，普通歌词功能仍可独立使用。
+AFK 运镜需要兼容 FreeCamera ABI v4 的 [L4D2Visual](https://github.com/yeyunyyds/L4D2-Visual-Effects) 并主动授权外部接口。配套版本为 [Visual v1.1.0](https://github.com/yeyunyyds/L4D2-Visual-Effects/releases/tag/v1.1.0)。未安装或未授权时不会接管原生相机，普通歌词功能仍可独立使用。
 
 - 连续平滑追踪人物和估算移动方向，验证路径与世界遮挡；空间不足时调整构图，远离人物或失去视线时进行受限恢复。
 - 鸟瞰歌词在每句开始时从八个方向寻找经过地面支撑、视线和屏幕检查的位置。选定后世界坐标和朝向固定，人物和相机运动均不会拖动歌词；找不到位置则整句使用屏幕字幕。遮挡只隐藏，不在句中改换显示模式。
