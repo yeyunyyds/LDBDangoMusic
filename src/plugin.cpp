@@ -794,7 +794,7 @@ const char* menuActionImpl(void* argument){uintptr_t id=reinterpret_cast<uintptr
  else if(id==716){if(!c.wallIndependentTiming){c.wallLingerMs=c.lingerMs;c.wallFadeMs=c.transition;}c.wallIndependentTiming=true;c.wallLingerMs=c.wallLingerMs<2000?2000:c.wallLingerMs<4000?4000:c.wallLingerMs<8000?8000:0;}
  else if(id==718)c.wallReuse=!c.wallReuse;
  else if(id==719)c.wallSurface=1-c.wallSurface;
- else if(id==717){if(!c.wallIndependentTiming){c.wallLingerMs=c.lingerMs;c.wallFadeMs=c.transition;}c.wallIndependentTiming=true;c.wallFadeMs=c.wallFadeMs<1000?1000:c.wallFadeMs<2000?2000:500;}
+ else if(id==717){if(!c.wallIndependentTiming){c.wallLingerMs=c.lingerMs;c.wallFadeMs=c.transition;}c.wallIndependentTiming=true;c.wallFadeMs=c.wallFadeMs==0?500:c.wallFadeMs<1000?1000:c.wallFadeMs<2000?2000:0;}
  changeSettings(c);return id>=712&&id<=717?wallOptionsMenu():wallMenu();}
  if(id==9600){std::string rows=item(u8"一起听（总开关）",9602)+item(u8"同局玩家与插件发现",9650);
  #if DANGO_DIAGNOSTICS
@@ -887,7 +887,7 @@ const char* menuAction(void* argument){
  if(id>=2201&&id<=2209)text=u8"歌词位置数量："+std::to_string(c.layout.lyricCount);
  if(id>=20000&&id<=31304){int code=int(id-20000),index=code/1000,axis=code%1000/100;const char* labels[]={u8"左右",u8"高度",u8"距离",u8"大小"};if(index<=2+MaxLyricSlots&&axis<4){auto p=index==2+MaxLyricSlots?c.layout.lyrics[0]:component(c.layout,index);text=(index==2+MaxLyricSlots?std::string(u8"全部歌词"):componentName(index))+labels[axis]+u8"："+positionValue(positionAxis(p,axis),axis<2);}}
  if(id>=500&&id<=504)text=u8"动画速度："+positionValue(c.animationSpeed)+"x";
- if(id>=520&&id<=524)text=u8"退场耗时："+std::to_string(c.transition)+"ms";
+ if(id>=520&&id<=525)text=u8"退场耗时："+std::to_string(c.transition)+"ms";
  if(id>=540&&id<=544)text=u8"换句额外停留："+std::to_string(c.lingerMs)+"ms";
  if(id==712){const char* sizes[]={u8"小80×28",u8"中120×40",u8"大180×60"};text=std::string(u8"新挂画尺寸：")+sizes[c.wallSize];}
  if(id>=620&&id<=626)text=u8"复用距离上限："+positionValue(c.reuseDistanceFactor)+u8" × 各歌词配置距离";
@@ -1012,6 +1012,7 @@ void tickExternalCameraTest(const GameCameraFrame& frame){
   if(externalCameraInitialized)note("AFK camera waiting for Visual authorization");
   resetExternalCameraLocked(false,false);return;
  }
+ if(externalCameraInitialized&&status.owner==L4D2VISUAL_CAMERA_OWNER_NATIVE)(void)api.setInitialIdle(unsigned(config->cinematicIdleSeconds));
  if(externalCameraInitialized&&!status.external_requested){note("AFK camera ended by shared FreeCamera switch");resetExternalCameraLocked(false,true);return;}
  auto actor=readCinematicActor(frame,at);
  if(!actor.ready){
@@ -1092,7 +1093,7 @@ void captureSourceFeatures(const GameCameraFrame& frame){
  if(!automatic){cached={};previousConfig.reset();}else if(cameraPose(frame,view)){auto inventory=std::atomic_load(&source_entities::snapshot);if(previousConfig!=config||previousTick!=inventory->tick||previousEpoch!=frame.epoch){cached=autoSelector.choose(*inventory,config->autoFollow,view,frame.epoch,frame.tick);previousConfig=config;previousTick=inventory->tick;previousEpoch=frame.epoch;}if(frame.tick<inventory->tick||frame.tick-inventory->tick>600)cached={};}
  inventory::FollowRequest request=cached;
  auto old=std::atomic_load(&source_entities::automaticRequest);if(old->enabled!=request.enabled||old->handle!=request.handle||old->epoch!=request.epoch)std::atomic_store(&source_entities::automaticRequest,std::make_shared<const inventory::FollowRequest>(request));
- source_walls::onFrame(frame);source_entities::onFrame(frame);tickExternalCameraTest(frame);
+ source_walls::onFrame(frame);source_entities::onFrame(frame);try{tickExternalCameraTest(frame);}catch(...){stopExternalCameraTest();note("AFK camera stopped after a planning exception");}
 }
 class LyricsPlugin final:public IL4NPlugin {
  bool started=false,attempted=false,duplicate=false;HANDLE renderOwner=nullptr;
