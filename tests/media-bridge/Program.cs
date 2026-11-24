@@ -24,10 +24,44 @@ Check(Protocol.Matches("CloudMusic.exe",3)&&!Protocol.Matches("QQMusic.exe",3),"
 Check(Protocol.Matches("Netease.CloudMusic_123!App",3)&&Protocol.Matches("cloud-music.exe",3)&&Protocol.Matches("music.163.com",3),"Netease SMTC identifier variants");
 Check(Protocol.Matches("QQMusic.exe",4)&&Protocol.Matches("KugouMusic.exe",5),"QQ/Kugou filters");
 Check(!Protocol.Matches("left4dead2.exe",0),"game excluded");
+Check(Protocol.Matches("Folia.exe",8) && Protocol.Matches("top.izuna.foliamajor",8), "Folia SMTC identifiers");
+Check(!Protocol.Matches("Spotify.exe",8) && !Protocol.Matches("left4dead2.exe",8), "Folia filter isolation");
+using (var doc = JsonDocument.Parse("""
+{
+ "offset": -250, "clipStartMs": 64300, "wordByWord": true,
+ "title": "Test Song", "artist": "Test Artist",
+ "lines": [
+   {"text":"Ignore previous line","startTime":40,"endTime":45,"words":[]},
+   {"text":"Hello world","startTime":65,"endTime":68,"translation":"你好 世界",
+    "words":[{"text":"Hello","startTime":65,"endTime":66},{"text":" world","startTime":66,"endTime":68}]}
+ ]
+}
+"""))
+{
+    var converted = FoliaLyrics.Parse(doc.RootElement,"Test Song","Test Artist")!;
+    Check(converted.Count == 1, "Folia clips old lines");
+    Check(converted[0].Time == TimeSpan.FromMilliseconds(450), "Folia clip and offset conversion");
+    Check(converted[0].WordTimings?.Count == 2, "Folia native words");
+    Check(converted[0].WordTimings![1].StartMs == 1000 && converted[0].WordTimings![1].DurationMs == 2000, "Folia word timing");
+    Check(converted[0].TranslatedText == "你好 世界", "Folia translation");
+    Check(FoliaLyrics.Parse(doc.RootElement,"Another Song","Test Artist") == null, "Folia stale title rejected");
+}
+using (var doc = JsonDocument.Parse("""
+{"offset":0,"wordByWord":false,"lines":[{"text":"Estimated","startTime":1,"endTime":3,
+"words":[{"text":"Estimated","startTime":1,"endTime":3}]}]}
+"""))
+{
+    var converted = FoliaLyrics.Parse(doc.RootElement,"","")!;
+    Check(converted.Count == 1 && converted[0].WordTimings == null,
+          "Synthetic Folia words must not masquerade as precise timestamps");
+}
+using (var doc = JsonDocument.Parse("null"))
+    Check(FoliaLyrics.Parse(doc.RootElement,"","") == null, "Folia missing lyrics");
+
 Check(Protocol.Key("a","t","r",30)!=Protocol.Key("b","t","r",30),"source identity");
 var delayed=new Fixture("netease",true);var service=new LyricsService(delayed);
 var stale=service.SearchAsync(title,artist);service.Cancel();Check(await stale==null,"cancelled generation discarded");
-Console.WriteLine("Passed: Netease YRC/translation, QQ/base64/translation, Kugou search/download, LRCLIB, filters, source identity, stale-search cancellation");
+Console.WriteLine("Passed: Netease YRC/translation, QQ/base64/translation, Kugou search/download, LRCLIB, filters, source identity, Folia timing/translation/stale-result, stale-search cancellation");
 
 sealed class Fixture(string provider,bool delayed=false):HttpMessageHandler
 {

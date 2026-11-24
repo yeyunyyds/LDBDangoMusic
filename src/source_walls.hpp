@@ -27,34 +27,47 @@ inline void* traceObject=nullptr;inline bool wasEnabled=false,faulted=false,held
 inline void log(const std::string& s){source_camera::log("Wall experiment: "+s);}
 inline void publish(){state.panels=scene.items;std::atomic_store(&snapshot,std::make_shared<const Frame>(state));}
 inline void status(const std::string& s){if(state.message!=s){state.message=s;log(s);}}
-inline bool connect(){
+inline void* resolveWorldTrace(){
  using namespace source_camera;
- if(!hooked||!engineModule)return false;
- if(!matchesImage(engineModule,EngineTimestamp,EngineImageSize,"wall-trace engine.dll"))return false;
- using Factory=void*(__cdecl*)(const char*,int*);auto factory=reinterpret_cast<Factory>(GetProcAddress(engineModule,"CreateInterface"));if(!factory)return false;
+ if(!hooked||!engineModule)return nullptr;
+ if(!matchesImage(engineModule,EngineTimestamp,EngineImageSize,"wall-trace engine.dll"))return nullptr;
+ using Factory=void*(__cdecl*)(const char*,int*);auto factory=reinterpret_cast<Factory>(GetProcAddress(engineModule,"CreateInterface"));if(!factory)return nullptr;
  void* object=factory("EngineTraceClient003",nullptr);auto base=reinterpret_cast<uintptr_t>(engineModule);
- if(object!=reinterpret_cast<void*>(base+0x42fa5c)||!readable(object,4))return false;auto table=*reinterpret_cast<void***>(object);
- if(table!=reinterpret_cast<void**>(base+0x3874b4)||!readable(table,32))return false;
+ if(object!=reinterpret_cast<void*>(base+0x42fa5c)||!readable(object,4))return nullptr;auto table=*reinterpret_cast<void***>(object);
+ if(table!=reinterpret_cast<void**>(base+0x3874b4)||!readable(table,32))return nullptr;
  constexpr uint32_t methods[]={0x177680,0x177650,0x178990,0x1779e0,0x17a030,0x1797a0,0x177db0,0x177df0};
- for(unsigned i=0;i<8;++i)if(table[i]!=reinterpret_cast<void*>(base+methods[i])||!executable(table[i]))return false;
+ for(unsigned i=0;i<8;++i)if(table[i]!=reinterpret_cast<void*>(base+methods[i])||!executable(table[i]))return nullptr;
  const uint8_t entry[]={0x53,0x8b,0xdc,0x83,0xec,0x08,0x83,0xe4,0xf0};
  const uint8_t clear[]={0x55,0x8b,0xec,0x56,0x8b,0x75,0x08,0x6a,0x54};
  const uint8_t tail[]={0xc2,0x10,0x00};
- if(!readable(table[5],sizeof(entry))||std::memcmp(table[5],entry,sizeof(entry))||!readable(reinterpret_cast<void*>(base+0x14ba30),sizeof(clear))||std::memcmp(reinterpret_cast<void*>(base+0x14ba30),clear,sizeof(clear))||!readable(reinterpret_cast<void*>(base+0x179e6b),3)||std::memcmp(reinterpret_cast<void*>(base+0x179e6b),tail,3))return false;
- traceObject=object;log("TraceRay bound to static profile; result size=84 Ray size=80; game-thread runtime validation pending");return true;
+ if(!readable(table[5],sizeof(entry))||std::memcmp(table[5],entry,sizeof(entry))||!readable(reinterpret_cast<void*>(base+0x14ba30),sizeof(clear))||std::memcmp(reinterpret_cast<void*>(base+0x14ba30),clear,sizeof(clear))||!readable(reinterpret_cast<void*>(base+0x179e6b),3)||std::memcmp(reinterpret_cast<void*>(base+0x179e6b),tail,3))return nullptr;
+ return object;
+}
+inline bool connect(){
+ traceObject=resolveWorldTrace();
+ if(!traceObject)return false;
+ log("TraceRay bound to static profile; result size=84 Ray size=80; game-thread runtime validation pending");return true;
 }
 // Explicit MSVC x86 filter table: ITraceFilter has exactly two methods and no destructor.
 inline bool __fastcall rejectEntity(void*,void*,void*,int){return false;}
 inline int __fastcall worldOnly(void*,void*){return 1;}
 inline void* filterMethods[]={reinterpret_cast<void*>(&rejectEntity),reinterpret_cast<void*>(&worldOnly)};
 struct Filter {void** methods=filterMethods;};
-inline bool cast(Vec3 start,Vec3 end,trace::Result& output){
- if(faulted||!traceObject||!wall::finite(start)||!wall::finite(end))return false;
+// Shared verified world-only trace contract. Called on the Source frame
+// callback; the camera director does not mutate wall lyric state.
+inline bool castWorld(void* object,Vec3 start,Vec3 end,trace::Result& output){
+ if(!object||!wall::finite(start)||!wall::finite(end))return false;
  auto ray=trace::ray(start,end);trace::GuardedResult guarded;Filter filter;
  using Function=void(__thiscall*)(void*,const trace::Ray&,unsigned,void*,trace::Result*);
- auto table=*reinterpret_cast<void***>(traceObject);reinterpret_cast<Function>(table[5])(traceObject,ray,0x400b,&filter,&guarded.result);++state.traces;
- if(!guarded.intact()||!trace::valid(guarded.result,start,end)){faulted=true;status("Trace result validation failed; toggle experiment off/on to retry");return false;}
- output=guarded.result;if(state.traces==1)log("First TraceRay result passed validation; fraction="+std::to_string(output.fraction));return true;
+ auto table=*reinterpret_cast<void***>(object);reinterpret_cast<Function>(table[5])(object,ray,0x400b,&filter,&guarded.result);
+ if(!guarded.intact()||!trace::valid(guarded.result,start,end))return false;
+ output=guarded.result;return true;
+}
+inline bool cast(Vec3 start,Vec3 end,trace::Result& output){
+ if(faulted||!traceObject||!wall::finite(start)||!wall::finite(end))return false;
+ ++state.traces;
+ if(!castWorld(traceObject,start,end,output)){faulted=true;status("Trace result validation failed; toggle experiment off/on to retry");return false;}
+ if(state.traces==1)log("First TraceRay result passed validation; fraction="+std::to_string(output.fraction));return true;
 }
 // Only invoked by the Source View_Render callback after its original function.
 // Menu and Present callbacks merely publish requests / read immutable snapshots.

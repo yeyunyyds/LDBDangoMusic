@@ -8,7 +8,7 @@ inline uint64_t nextCapture=0,generation=1;inline uint32_t lastEpoch=0;inline HM
 // Static inspection of the uploaded engine image: GetPlayerInfo copies/clears
 // exactly 0x90 bytes. Names at +8/+0x54 are 32 bytes; userID is +0x28.
 inline bool contract(){
- using namespace source_camera;if(checkedModule==engineModule)return validated;checkedModule=engineModule;validated=false;if(!engineModule||!engine||!hooked)return false;
+ using namespace source_camera;if(!engineModule||!engine||!hooked)return false;if(checkedModule==engineModule)return validated;checkedModule=engineModule;validated=false;
  if(!matchesImage(engineModule,EngineTimestamp,EngineImageSize,"roster engine.dll"))return false;
  struct Method{unsigned slot;uint32_t rva;unsigned char prefix[12];};
  static constexpr Method methods[]={
@@ -17,6 +17,16 @@ inline bool contract(){
  {21,0x5d290,{0xe8,0x0b,0x5a,0x02,0x00,0x8b,0x80,0x58,0x01,0x00,0x00,0xc3}}};
  for(auto& m:methods){auto code=reinterpret_cast<const unsigned char*>(engineModule)+m.rva;if(!readable(code,sizeof(m.prefix))||!executable(code)||std::memcmp(code,m.prefix,sizeof(m.prefix))){log("Roster contract rejected: engine method bytes differ");return false;}}
  validated=true;log("Roster contract verified: playerInfo[8] size=144, localPlayer[12], maxClients[21]; game-thread capture");return true;
+}
+// Read-only local entity index independent of Steam discovery/identity.
+inline int maxClients(){using namespace source_camera;if(!contract())return 0;using Fn=int(__thiscall*)(void*);auto n=reinterpret_cast<Fn>(reinterpret_cast<uintptr_t>(engineModule)+0x5d290)(engine);return n>=1&&n<=64?n:0;}
+inline int localIndex(){
+ using namespace source_camera;
+ if(!contract())return -1;
+ using Fn=int(__thiscall*)(void*);
+ auto index=reinterpret_cast<Fn>(reinterpret_cast<uintptr_t>(engineModule)+0x5d030)(engine);
+ auto count=reinterpret_cast<Fn>(reinterpret_cast<uintptr_t>(engineModule)+0x5d290)(engine);
+ return count>=1&&count<=64&&index>=1&&index<=count?index:-1;
 }
 inline dango::sync::Peer readPlayer(int index){
  using namespace source_camera;alignas(8)unsigned char guarded[16+144+16];std::memset(guarded,0xa5,sizeof(guarded));std::memset(guarded+16,0,144);

@@ -29,7 +29,7 @@ int main(){
  scene.add(left,true,ticket,1000,options);check(scene.items.size()==1&&scene.items[0].token==1&&!scene.pending(ticket),"assign exactly once");
  check(!wallscene::separated(left,scene.items,80),"duplicate rectangle");check(wallscene::separated(right,scene.items,80),"other wall");
  ticket.serial=2;ticket.tick=2000;scene.observe(ticket,2000,7,options);check(scene.items[0].retired==2000,"retire at next sentence");scene.add(right,true,ticket,2000,options);
- check(scene.items[0].token==1&&scene.items[1].token==2,"distinct lyric payloads");check(wallscene::alpha(scene.items[0],6000,options)==1,"extra hold");check(std::abs(wallscene::alpha(scene.items[0],6500,options)-.5f)<.001,"fade");
+ check(scene.items[0].token==1&&scene.items[1].token==2,"distinct lyric payloads");check(wallscene::alpha(scene.items[0],6000,options)==1,"extra hold");auto zeroFade=options;zeroFade.fadeMs=0;check(wallscene::alpha(scene.items[0],5999,zeroFade)==1&&wallscene::alpha(scene.items[0],6000,zeroFade)==0,"zero fade");check(std::abs(wallscene::alpha(scene.items[0],6500,options)-.5f)<.001,"fade");
  ticket.tick=7000;scene.observe(ticket,7000,7,options);check(scene.items.size()==1&&scene.items[0].token==2,"expiry no resurrection");
  // Pause and stale requests clear history; old tickets cannot cross a map epoch.
  ticket.active=false;scene.observe(ticket,7001,7,options);check(scene.items.empty(),"pause clears");ticket.active=true;ticket.tick=8000;scene.observe(ticket,8000,7,options);scene.add(left,true,ticket,8000,options);scene.observe(ticket,9001,7,options);check(scene.items.empty(),"stale producer clears");

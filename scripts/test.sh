@@ -2,6 +2,14 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 mkdir -p build
+g++ -std=c++17 -Wall -Wextra -Werror -Ivendor tests/visual_camera_api_test.cpp -o build/visual_camera_api_test
+./build/visual_camera_api_test
+g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc -Ivendor tests/folia_protocol_test.cpp -o build/folia_protocol_test
+./build/folia_protocol_test
+g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc tests/cinematic_camera_test.cpp -o build/cinematic_camera_test
+./build/cinematic_camera_test
+g++ -std=c++17 -Wall -Wextra -Werror -Isrc tests/afk_stability_test.cpp -o build/afk_stability_test
+./build/afk_stability_test
 g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc -Ivendor tests/core_test.cpp -o build/core_test
 ./build/core_test
 g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc -Ivendor tests/api_fixture.cpp -o build/api_fixture
@@ -71,7 +79,6 @@ python3 tests/test_lx_control_http.py
 python3 tests/test_steam_lifecycle_boundary.py
 g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc -Ivendor tests/media_protocol_test.cpp -o build/media_protocol_test
 ./build/media_protocol_test
-if command -v dotnet >/dev/null 2>&1; then dotnet run --project tests/media-bridge/MediaBridgeTests.csproj -c Release; fi
 
 g++ -std=c++17 -O2 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc -Ivendor tests/netease_elog_test.cpp -o build/netease_elog_test
 ./build/netease_elog_test

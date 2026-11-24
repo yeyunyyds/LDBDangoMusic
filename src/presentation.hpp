@@ -4,7 +4,7 @@ namespace dango {
 inline float smooth(float x){x=std::clamp(x,0.f,1.f);return x*x*(3-2*x);}
 struct Motion {float alpha,scale,lift;};
 inline Motion motion(int64_t age,int fadeMs=180){float t=smooth(float(age)/std::max(fadeMs,1));return {t,1.f+.12f*(1-t)*(1-t),6.f*(1-t)};}
-inline float outgoingAlpha(int64_t currentAge,int transitionMs){return 1-smooth(float(currentAge)/std::max(transitionMs,1));}
+inline float outgoingAlpha(int64_t currentAge,int transitionMs){return transitionMs<=0?(currentAge<0?1.f:0.f):1-smooth(float(currentAge)/transitionMs);}
 inline int64_t lyricPosition(int64_t position,int offsetMs){return position+offsetMs;}
 struct Glyph {std::string text;uint32_t first;};
 // Common combining sequences, emoji modifiers, flags and ZWJ chains stay together.

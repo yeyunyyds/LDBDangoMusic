@@ -1,6 +1,8 @@
 # L4D2DangoMusic
 
-> 当前正式版：[v0.9.8](https://github.com/yeyunyyds/LDBDangoMusic/releases/tag/v0.9.8)。新增七套视觉预设、八个外观收藏与分项应用，整理原生 HUD 菜单，提供恢复默认外观/全部设置。[菜单使用说明](docs/menu-navigation-preview.md)
+> **本实验分支：原生 Folia Stage API**，直接由 x86 DLL 读取本机 Stage 与歌词 API；不需要额外 EXE。见 [安装说明](packaging/README-folia-stage.md)。
+>
+> 正式版：[v1.0.0](https://github.com/yeyunyyds/LDBDangoMusic/releases/tag/v1.0.0)。新增 AFK 自动运镜、场景化歌词与 Folia 原生支持，适配 2026 年 11 月游戏更新。[菜单使用说明](docs/menu-navigation-preview.md)
 
 为《求生之路 2》（Left 4 Dead 2）提供音乐歌词显示的 L4N 插件。通过兼容 LX / BLF 的本地音乐 API 获取播放进度和歌词，在游戏中呈现带逐字动画的歌词，并支持世界空间定位、歌名与作者显示以及游戏内调节。
 
@@ -52,7 +54,7 @@
 
 ## 安装
 
-[下载 L4D2DangoMusic v0.9.8](https://github.com/yeyunyyds/LDBDangoMusic/releases/download/v0.9.8/L4D2DangoMusic-0.9.8-l4n.zip) · [Release 说明](https://github.com/yeyunyyds/LDBDangoMusic/releases/tag/v0.9.8)
+[下载 L4D2DangoMusic v1.0.0](https://github.com/yeyunyyds/LDBDangoMusic/releases/download/v1.0.0/L4D2DangoMusic-1.0.0-l4n.zip) · [Release 说明](https://github.com/yeyunyyds/LDBDangoMusic/releases/tag/v1.0.0)
 
 安装压缩包内仅包含 **bin 文件夹和 README.md**，不附带源码、构建工具、测试程序或额外依赖。
 
@@ -85,11 +87,11 @@ bin/neko/plugins/L4D2DangoMusic/config.json
 3. 按需调整显示、翻译、预设、颜色、动画及同步偏移。
 4. 点击 **保存设置**，使修改在下次启动时继续生效。
 
-进入 **位置与场景 → 歌词位置与数量** 页面后，实时歌词会暂时替换为固定的歌名、作者和编号歌词，方便调节位置；音乐仍继续播放。退出预览页面恢复当前歌曲的歌词显示；设置通过主菜单第 7 项保存。
+进入 **位置与场景 → 歌词位置与数量** 页面后，实时歌词会暂时替换为固定的歌名、作者和编号歌词，方便调节位置；音乐仍继续播放。退出预览页面恢复当前歌曲的歌词显示；设置通过主菜单第 8 项保存。
 
 默认使用两个轮换位置，歌词位于屏幕中心稍上方，长句自动回到视野的功能默认关闭。换句复用世界位置时，旧锚点必须仍在视野内，且到相机的距离小于该歌词位置配置距离的 3 倍；超出时按预设重新放置。可在“位置与场景 → 位置复用与回归 → 复用距离上限”选择 1、1.5、2、3（默认）、4、5 或 10 倍。位置复用与长句回归同时开启时，计时到达后仍可见且未超出复用距离上限的歌词保持原位，不再被定时回归覆盖。歌名和作者可在显示菜单中分别开启。
 
-主菜单默认共 8 项：歌词显示、外观与预设、动画与退场、位置与场景、音乐与歌曲信息、实体跟随、保存设置、系统与恢复。单行长度位于“外观与预设 → 原文样式”，同步偏移位于“音乐与歌曲信息”。视觉预设支持整套或分项应用，手动修改后显示“自定义”。完整层级与两种恢复默认的范围见[菜单说明](docs/menu-navigation-preview.md)。
+主菜单固定 9 项：歌词显示、外观与预设、动画与退场、位置与场景、音乐与歌曲信息、AFK 自动运镜、实体跟随、保存设置、系统与恢复。单行长度位于“外观与预设 → 原文样式”，同步偏移位于“音乐与歌曲信息”。视觉预设支持整套或分项应用，手动修改后显示“自定义”。完整层级与两种恢复默认的范围见[菜单说明](docs/menu-navigation-preview.md)。
 
 菜单默认位于左侧、垂直居中，可手动移动并保存。升级时原默认顶端位置自动迁移，自定义高度保留。“菜单外观 → 调整菜单位置 → 重置到默认位置”可恢复居中。
 
@@ -116,7 +118,7 @@ bin/neko/plugins/L4D2DangoMusic/config.json
 - **动画与退场 → 换句移动 / 实体跟随 → 跟随运动**：实体平滑默认开，全局换句移动默认关；提供先快后慢、匀速、先慢后快、缓入缓出和回弹。
 - **外观与预设 → 配色与柔光**：新效果默认关闭，可选新配色并调整混色强度和流动速度，保存后保留；选择原有预设可恢复纯色。
 - 显示顺序为有效手动实体 → 有效自动实体 → 挂画 → 普通歌词。没有实体时按设置回退；普通歌词和挂画仍自然停留、淡出，只有实体上的当前句即时替换。
-- 启用跟随后，主菜单第 9 项可一键“返回普通歌词”。主菜单第 7 项仍为保存设置。
+- 启用跟随后，通过“实体跟随 → 关闭全部实体跟随”（7 → 5）返回普通歌词。主菜单第 8 项为保存设置。
 
 [实体跟随指南](docs/entity-follow-guide.md) · [动画与自动追踪指南](docs/animation-and-auto-follow.md) · [菜单与配色指南](docs/colors-and-menu.md)
 
@@ -165,7 +167,7 @@ bin/neko/plugins/L4D2DangoMusic/config.json
 
 ### Windows / MSVC
 
-安装 .NET 8 SDK 和 Visual Studio C++ 构建工具，在 **x86 开发者 PowerShell** 中进入源码根目录并运行：
+安装 Visual Studio C++ 构建工具，在 **x86 开发者 PowerShell** 中进入源码根目录并运行：
 
 ```powershell
 .\scripts\build.ps1
@@ -175,12 +177,11 @@ bin/neko/plugins/L4D2DangoMusic/config.json
 
 ### Linux / MinGW
 
-安装 .NET 8 SDK、支持 C++17 的 GCC、Python 3，以及 i686 MinGW-w64 POSIX 工具链：
+安装支持 C++17 的 GCC、Python 3，以及 i686 MinGW-w64 POSIX 工具链：
 
 ```bash
 bash scripts/test.sh
 bash scripts/build-mingw.sh
-dotnet publish media-bridge/DangoMediaBridge.csproj -c Release -o build/media-bridge
 ```
 
 可通过 `DANGO_CXX` 环境变量指定 MinGW 编译器路径。Windows D3D9 验证程序可通过 `scripts/smoke.ps1` 运行；打包使用 Python 3：
@@ -210,3 +211,17 @@ python scripts/package.py
 本项目采用 [GPL-3.0](LICENSE) 许可。第三方代码与 SDK 头文件遵循各自的许可及声明，详见 [NOTICE.md](NOTICE.md)。
 
 本版新增：原文与翻译按演唱进度显字（无逐字时间轴默认整句，可选择估算渐显）、单行长度倍率，以及世界歌词换句时沿用视野内原位置。墙面挂画也接入歌词和翻译动画。设置路径和说明见 [歌词设置说明](docs/0.8.1-lyrics-controls.md)。
+
+## AFK 自动运镜
+
+主菜单第 6 项。默认关闭，首次闲置默认 10 秒；新配置默认鸟瞰追踪。支持人物环绕、建筑歌词、场景远景、鸟瞰追踪、墙面运镜，以及可选择参与镜头的混合运镜。修改后通过主菜单第 8 项保存设置。键鼠接管默认返回第一人称，也可选择保留 FreeCamera。
+
+AFK 运镜需要兼容 FreeCamera ABI v4 的 [L4D2Visual](https://github.com/yeyunyyds/L4D2-Visual-Effects) 并主动授权外部接口。配套版本为 [Visual v1.1.0](https://github.com/yeyunyyds/L4D2-Visual-Effects/releases/tag/v1.1.0)。未安装或未授权时不会接管原生相机，普通歌词功能仍可独立使用。
+
+- 连续平滑追踪人物和估算移动方向，验证路径与世界遮挡；空间不足时调整构图，远离人物或失去视线时进行受限恢复。
+- 鸟瞰歌词在每句开始时从八个方向寻找经过地面支撑、视线和屏幕检查的位置。选定后世界坐标和朝向固定，人物和相机运动均不会拖动歌词；找不到位置则整句使用屏幕字幕。遮挡只隐藏，不在句中改换显示模式。
+- 建筑及墙面歌词使用场景表面，其余镜头使用动态歌词。关闭 AFK 不运行其路径规划、追踪或地面搜索。
+
+## Folia 音乐来源
+
+选择 Folia (Stage API)，在 Folia 中启用 Stage Mode / Stage API 与歌词接口。插件读取本地 Stage API，无需 SMTC 桥接 EXE。普通歌词仍支持原有来源。游戏内效果、第三方模型及联机兼容性需要实际验证。

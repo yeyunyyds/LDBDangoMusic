@@ -71,3 +71,7 @@ Native NetEase playback adapter:
 - The local reader, bounded file tailing/process-lifetime validation and async
   WinHTTP song-ID lyric adapter are native implementations. Raw client log
   records, music URLs, cookies and credentials are not copied or uploaded.
+
+Experimental Visual FreeCamera API client:
+- vendor/l4d2visual_camera_api.h: common C ABI v1 header from yeyunyyds/L4D2-Visual-Effects feature/external-freecamera-abi (GPL-3.0).
+- src/visual_camera_client.hpp: optional local L4N plugin adapter. Uses GetModuleHandleW/GetProcAddress to locate L4D2Visual; it does not copy FreeCamera's hook/runtime implementation and does not distribute its DLL.

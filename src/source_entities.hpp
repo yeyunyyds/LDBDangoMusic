@@ -15,7 +15,7 @@ namespace source_entities {
 using namespace dango;
 namespace wire=dango::entitywire;
 using Record=dango::inventory::Record;using Frame=dango::inventory::Frame;
-inline std::atomic<bool> browseRequested{false},autoRequested{false};
+inline std::atomic<bool> browseRequested{false},autoRequested{false},cinematicRequested{false};
 inline std::shared_ptr<const dango::inventory::FollowRequest> followRequest=std::make_shared<dango::inventory::FollowRequest>();
 inline std::shared_ptr<const Frame> followSnapshot=std::make_shared<Frame>();
 inline std::shared_ptr<const inventory::FollowRequest> automaticRequest=std::make_shared<inventory::FollowRequest>();
@@ -96,7 +96,7 @@ inline std::optional<Record> readRecord(unsigned i,const wire::Entry& entry,uint
  r.worldModelIndex=field<int>(base,info,"m_iWorldModelIndex",0);auto carry=field<uint8_t>(base,info,"m_isCarryable",0);if(carry&&*carry<=1)r.isCarryable=*carry!=0;r.effects=field<int>(base,info,"m_fEffects",0);
  r.networkOrigin=vectorField(base,info,"m_vecOrigin");r.networkAngles=vectorField(base,info,"m_angRotation");r.team=field<int>(base,info,"m_iTeamNum",0);r.zombieClass=field<int>(base,info,"m_zombieClass",0);r.character=field<int>(base,info,"m_survivorCharacter",0);r.health=field<int>(base,info,"m_iHealth",0);r.lifeState=field<uint8_t>(base,info,"m_lifeState",0);
  auto index=field<int16_t>(base,info,"m_nModelIndex",0);if(index){r.modelIndex=int(*index);r.modelName=modelName(*index);}
- r.parent=field<uint32_t>(base,info,"moveparent",0);r.parentAttachment=field<uint8_t>(base,info,"m_iParentAttachment",0);r.owner=field<uint32_t>(base,info,"m_hOwnerEntity",0);r.weaponOwner=field<uint32_t>(base,info,"m_hOwner",0);r.activeWeapon=field<uint32_t>(base,info,"m_hActiveWeapon",0);r.viewModel=field<uint32_t>(base,info,"m_hViewModel[0]",0);
+ r.parent=field<uint32_t>(base,info,"moveparent",0);r.parentAttachment=field<uint8_t>(base,info,"m_iParentAttachment",0);r.owner=field<uint32_t>(base,info,"m_hOwnerEntity",0);r.weaponOwner=field<uint32_t>(base,info,"m_hOwner",0);r.activeWeapon=field<uint32_t>(base,info,"m_hActiveWeapon",0);r.viewModel=field<uint32_t>(base,info,"m_hViewModel[0]",0);r.observerTarget=field<uint32_t>(base,info,"m_hObserverTarget",0);
  }return r;
 }
 inline bool prepare(const GameCameraFrame& camera,Frame& frame){
@@ -132,6 +132,26 @@ inline Frame captureSelected(const GameCameraFrame& camera,const inventory::Foll
  }
  return f;
 }
+// Bounded player-only inventory for survivor takeover / spectator transitions.
+inline Frame capturePlayers(const GameCameraFrame& camera,unsigned count){
+ Frame f;f.epoch=camera.epoch;f.tick=camera.tick;if(!prepare(camera,f))return f;
+ auto object=uint32_t(reinterpret_cast<uintptr_t>(list)),entries=uint32_t(int64_t(object)+profile::EntryBaseDelta);
+ for(unsigned index=1;index<=std::min(count,64u)&&index<profile::MaxNetworked;++index){
+  wire::Entry entry;uint32_t net=0;
+  if(!wire::load(reader,entries+index*sizeof(wire::Entry),entry)||!entry.entity||!wire::load(reader,object+profile::CacheOffset+index*8,net)||!net)continue;
+  auto record=readRecord(index,entry,net,f);if(record)f.records.push_back(std::move(*record));
+ }
+ return f;
+}
+inline Frame captureLocal(const GameCameraFrame& camera,unsigned index){
+ Frame f;f.epoch=camera.epoch;f.tick=camera.tick;
+ if(index>=profile::MaxNetworked||!prepare(camera,f))return f;
+ auto object=uint32_t(reinterpret_cast<uintptr_t>(list));wire::Entry entry;
+ auto entries=uint32_t(int64_t(object)+profile::EntryBaseDelta);
+ if(!wire::load(reader,entries+index*sizeof(wire::Entry),entry)||!entry.entity)return f;
+ auto handle=wire::handle(index,entry.serial);if(!handle)return f;
+ return captureSelected(camera,{true,camera.epoch,*handle},*handle);
+}
 inline void captureFollow(const GameCameraFrame& camera,const inventory::FollowRequest& request){
  gnomeBridge.begin(request);auto f=captureSelected(camera,request,gnomeBridge.current);
  auto finish=[&](){f.bindingChecks=bindingChecks;f.modelLookup=modelReady;std::atomic_store(&followSnapshot,std::make_shared<const Frame>(std::move(f)));};
@@ -144,7 +164,7 @@ inline void captureFollow(const GameCameraFrame& camera,const inventory::FollowR
  f.status=f.records.empty()?"Follow target unavailable":"Target-only network pose update";finish();
 }
 inline void onFrame(const GameCameraFrame& camera)noexcept{
- try{auto request=std::atomic_load(&followRequest);bool active=enabled.load()||browseRequested.load()||autoRequested.load()||request->enabled;if(!active){if(wasEnabled){classes.clear();models.clear();bound=faulted=modelReady=false;bindingChecks.clear();list=modelInfo=nullptr;std::atomic_store(&followSnapshot,std::make_shared<const Frame>());Frame f;f.epoch=camera.epoch;f.tick=camera.tick;publish(std::move(f));}wasEnabled=false;return;}
+ try{auto request=std::atomic_load(&followRequest);bool active=enabled.load()||browseRequested.load()||autoRequested.load()||cinematicRequested.load()||request->enabled;if(!active){if(wasEnabled){classes.clear();models.clear();bound=faulted=modelReady=false;bindingChecks.clear();list=modelInfo=nullptr;std::atomic_store(&followSnapshot,std::make_shared<const Frame>());Frame f;f.epoch=camera.epoch;f.tick=camera.tick;publish(std::move(f));}wasEnabled=false;return;}
  if(resetRequested.exchange(false)||!wasEnabled||epoch!=camera.epoch){classes.clear();models.clear();bound=faulted=modelReady=false;bindingChecks.clear();nextCapture=nextFollow=nextGnomeScan=nextAutomatic=0;gnomeBridge={};epoch=camera.epoch;wasEnabled=true;}
  auto automatic=std::atomic_load(&automaticRequest);if(automatic->enabled&&camera.tick>=nextAutomatic){nextAutomatic=camera.tick+33;auto frame=captureSelected(camera,*automatic,automatic->handle);std::atomic_store(&automaticSnapshot,std::make_shared<const Frame>(std::move(frame)));}
  if(request->enabled&&camera.tick>=nextFollow){nextFollow=camera.tick+33;captureFollow(camera,*request);}

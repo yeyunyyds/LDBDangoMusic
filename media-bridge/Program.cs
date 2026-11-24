@@ -15,6 +15,8 @@ void Log(string message) { try { if (File.Exists(log) && new FileInfo(log).Lengt
 bool ParentAlive() { try { using var p = Process.GetProcessById(parentId); return !p.HasExited && p.StartTime.ToUniversalTime().ToFileTimeUtc() == parentStart; } catch { return false; } }
 int Source() { try { using var c = JsonDocument.Parse(File.ReadAllText(Path.Combine(folder, "media-request-" + parentId + ".json"))); return c.RootElement.GetProperty("source").GetInt32(); } catch { return 0; } }
 var service = new LyricsService();
+using var folia = new FoliaLyrics();
+int lastSource = -1;
 string key = "", app = "", title = "", artist = "";
 long generation = 0, retryAt = 0;
 Task<List<LrcLine>?>? search = null;
@@ -22,13 +24,20 @@ string searchKey = "";
 List<LrcLine> lyrics = new();
 string message = "Waiting for Windows media session", lastInventory = "";
 GlobalSystemMediaTransportControlsSessionManager? manager = null;
-Log("Bridge started; Windows SMTC, Netease/QQ/Kugou/LRCLIB; parent=" + parentId);
+Log("Bridge started; Windows SMTC and optional Folia localhost lyrics; parent=" + parentId);
 while (ParentAlive())
 {
     try
     {
         manager ??= await GlobalSystemMediaTransportControlsSessionManager.RequestAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(3));
         int source = Source();
+        if (source != lastSource)
+        {
+            // Reject an in-flight result from the previous selected player.
+            lastSource = source; key = ""; app = ""; title = ""; artist = "";
+            lyrics = new(); search = null; retryAt = 0; service.Cancel(); generation++;
+            message = source == 8 ? "Waiting for Folia SMTC and localhost lyrics" : "Waiting for Windows media session";
+        }
         var allSessions = manager.GetSessions().Take(32).ToList();
         var availableSources = allSessions.Select(s => s.SourceAppUserModelId).ToArray();
         string inventory = "source=" + source + " sessions=" + (availableSources.Length == 0 ? "<none>" : string.Join(" | ", availableSources));
@@ -58,18 +67,41 @@ while (ParentAlive())
         string nextKey = Protocol.Key(app, title, artist, duration);
         if (nextKey != key)
         {
-            key = nextKey; lyrics = new(); search = null; retryAt = 0; service.Cancel(); generation++;
-            message = "Searching synchronized lyrics"; Log("Track source=" + app + " title=" + title + " artist=" + artist + " duration=" + duration);
+            key = nextKey; lyrics = new(); search = null; retryAt = source == 8 ? Environment.TickCount64 + 750 : 0; service.Cancel(); generation++;
+            message = source == 8 ? "Waiting for Folia lyrics API (127.0.0.1:32109)" : "Searching synchronized lyrics"; Log("Track source=" + app + " title=" + title + " artist=" + artist + " duration=" + duration);
         }
         if (search is { IsCompleted: true })
         {
-            try { var result = await search; if (searchKey == key && result is { Count: > 0 }) { lyrics = result; message = "Synchronized lyrics ready"; Log("Lyrics ready; lines=" + lyrics.Count + " words=" + lyrics.Count(l => l.WordTimings?.Count > 0)); } }
-            catch (Exception e) { message = "Lyric search failed"; Log(e.GetType().Name + ": " + e.Message); }
-            search = null; retryAt = Environment.TickCount64 + 30000;
-            if (lyrics.Count == 0) message = "No synchronized lyrics; retry in 30s";
+            try
+            {
+                var result = await search;
+                if (searchKey == key && lastSource == source)
+                {
+                    if (source == 8)
+                    {
+                        // Folia may update its own lyrics/offset without changing the SMTC song.
+                        // A JSON null is normal: clear lyrics rather than showing stale words.
+                        lyrics = result ?? new();
+                        message = lyrics.Count > 0 ? "Folia synchronized lyrics ready" : "Folia lyrics unavailable or still loading";
+                    }
+                    else if (result is { Count: > 0 })
+                    {
+                        lyrics = result;
+                        message = "Synchronized lyrics ready";
+                    }
+                    if (lyrics.Count > 0) Log("Lyrics ready; lines=" + lyrics.Count + " words=" + lyrics.Count(l => l.WordTimings?.Count > 0));
+                }
+            }
+            catch (Exception e) { message = source == 8 ? "Folia lyric API unavailable; enable port 32109" : "Lyric search failed"; Log(e.GetType().Name + ": " + e.Message); }
+            search = null; retryAt = Environment.TickCount64 + (source == 8 ? 1000 : 30000);
+            if (source != 8 && lyrics.Count == 0) message = "No synchronized lyrics; retry in 30s";
         }
-        if (!string.IsNullOrWhiteSpace(title) && duration > 0 && lyrics.Count == 0 && search == null && Environment.TickCount64 >= retryAt)
-        { searchKey = key; search = service.SearchAsync(title, artist, TimeSpan.FromSeconds(duration)); }
+        if (!string.IsNullOrWhiteSpace(title) && duration > 0 && (source == 8 || lyrics.Count == 0) &&
+            search == null && Environment.TickCount64 >= retryAt)
+        {
+            searchKey = key;
+            search = source == 8 ? folia.FetchAsync(title, artist) : service.SearchAsync(title, artist, TimeSpan.FromSeconds(duration));
+        }
         Protocol.Write(output, new { schema = 1, parent = parentId, selection = source, tick = Environment.TickCount64, status = playing ? "playing" : "paused", name = title, singer = artist, duration, progress = position, playbackRate = rate, sourceId = app, generation, message, availableSources, lines = Protocol.Lines(lyrics) });
     }
     catch (Exception e)

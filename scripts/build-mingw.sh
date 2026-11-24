@@ -29,3 +29,6 @@ fi
 "$compiler" -std=c++17 -O2 -Ivendor -Isrc tests/visual_presets_test.cpp -static -o build/visual_presets_test.exe
 
 "$compiler" -std=c++17 -O2 -Ivendor -Isrc tests/menu_navigation_test.cpp -static -o build/menu_navigation_test.exe
+
+# Optional external FreeCamera ABI caller (no L4D2Visual dependency at link time).
+"$compiler" -std=c++17 -O2 -Wall -Wextra -Werror -Wno-cast-function-type -Isrc -Ivendor tests/visual_camera_client_win32_smoke.cpp -static -o build/visual_camera_client_win32_smoke.exe -luser32

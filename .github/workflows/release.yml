@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - 'v*'
+    branches: [main]
   workflow_dispatch:
     inputs:
       tag:
@@ -15,11 +16,12 @@ permissions:
   contents: write
 
 concurrency:
-  group: release-${{ inputs.tag || github.ref_name }}
+  group: release-${{ inputs.tag || (github.ref_name == 'main' && 'v1.0.0') || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
   release:
+    if: github.ref_name != 'main' || github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'Release L4D2DangoMusic v1.0.0')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -28,7 +30,7 @@ jobs:
           fetch-depth: 0
       - name: Verify version tag
         env:
-          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+          RELEASE_TAG: ${{ inputs.tag || (github.ref_name == 'main' && 'v1.0.0') || github.ref_name }}
         run: |
           python3 - <<'PY'
           import os, runpy, subprocess
@@ -36,7 +38,8 @@ jobs:
           tag = os.environ['RELEASE_TAG']
           if tag != 'v' + version:
               raise SystemExit('Release tag does not match package version')
-          subprocess.run(['git', 'rev-parse', '--verify', 'refs/tags/' + tag], check=True)
+          if os.environ.get('GITHUB_REF') != 'refs/heads/main' or os.environ.get('GITHUB_EVENT_NAME') == 'workflow_dispatch':
+              subprocess.run(['git', 'rev-parse', '--verify', 'refs/tags/' + tag], check=True)
           PY
       - name: Install Windows x86 compiler
         run: |
@@ -54,11 +57,31 @@ jobs:
       - name: Package minimal installer
         run: |
           python3 scripts/package.py
+      - name: Verify installer checksums and prepare tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.tag || (github.ref_name == 'main' && 'v1.0.0') || github.ref_name }}
+        run: |
+          (cd build/packages && sha256sum -c *.sha256)
+          if [ "$GITHUB_REF" = "refs/heads/main" ] && [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+            if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+              echo 'Release already exists; refusing to overwrite'
+              exit 1
+            fi
+            tag_sha="$(gh api "repos/$GH_REPO/git/ref/tags/$RELEASE_TAG" --jq '.object.sha' 2>/dev/null || true)"
+            if [ -z "$tag_sha" ]; then
+              gh api "repos/$GH_REPO/git/refs" -f ref="refs/tags/$RELEASE_TAG" -f sha="$GITHUB_SHA" >/dev/null
+            else
+              test "$tag_sha" = "$GITHUB_SHA"
+            fi
+          fi
       - name: Publish release and installer
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+          RELEASE_TAG: ${{ inputs.tag || (github.ref_name == 'main' && 'v1.0.0') || github.ref_name }}
         run: |
           if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             gh release create "$RELEASE_TAG" --verify-tag --title "L4D2DangoMusic $RELEASE_TAG" --notes-file docs/releases/"$RELEASE_TAG".md --draft

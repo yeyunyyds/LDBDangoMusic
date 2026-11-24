@@ -1,7 +1,7 @@
 #pragma once
 #include "core.hpp"
 namespace dango::media {
-inline const char* sourceName(int source){static const char* labels[]={u8"自动（LX 优先）",u8"LX 本地 API",u8"Windows 音乐会话",u8"网易云音乐",u8"QQ 音乐",u8"酷狗音乐",u8"Spotify",u8"Tidal"};return source>=0&&source<8?labels[source]:labels[0];}
+inline const char* sourceName(int source){static const char* labels[]={u8"自动（LX 优先）",u8"LX 本地 API",u8"Windows 音乐会话",u8"网易云音乐",u8"QQ 音乐",u8"酷狗音乐",u8"Spotify",u8"Tidal",u8"Folia（Stage API）"};return source>=0&&source<9?labels[source]:labels[0];}
 inline State readStatus(const nlohmann::json& j,int64_t tick,uint32_t parent){
  if(j.at("schema")!=1||j.at("parent").get<uint32_t>()!=parent)throw std::runtime_error("Media bridge identity mismatch");
  auto sampled=j.at("tick").get<int64_t>();if(sampled>tick||tick-sampled>3000)throw std::runtime_error("Media bridge snapshot expired");
