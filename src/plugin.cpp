@@ -360,7 +360,7 @@ bool drawCinematicLyrics(IDirect3DDevice9* dev,const GameCameraFrame& camera,flo
  const auto& selected=side?shot->panels.second:shot->panels.first;
  const bool visible=side?shot->secondVisible:shot->firstVisible;
  const double clock=now()/1000.;
- life.update(music.key,at,music.timeline[at].text,clock,cfg.lingerMs,cfg.transition,false,2);
+ life.update(music.key,at,music.timeline[at].text,clock,cfg.lingerMs,cfg.transition,false,shot->panels.hasSecond?2:1,true);
  entries.erase(std::remove_if(entries.begin(),entries.end(),[&](const auto& e){return std::none_of(life.entries.begin(),life.entries.end(),[&](const auto& l){return l.id==e.lease;});}),entries.end());
  for(const auto& l:life.entries)if(l.index==at&&std::none_of(entries.begin(),entries.end(),[&](const auto& e){return e.lease==l.id;})){
   const auto next=at+1<int(music.timeline.size())?music.timeline[at+1].start:music.timeline[at].start+5000;
@@ -466,7 +466,7 @@ void WINAPI render(IDirect3DDevice9* dev,const PresentInfo* present){
  else if(display.lyrics)peakFrame(dev,*state,at,lyricPosition(position,cfg.demo?0:cfg.offset),true,gameFrame,pose,float(desc.Width),float(desc.Height),&target,followState->size);
  else{entityPeakEntries.clear();entityLyricLifecycle.reset();}
  }
- else if(!wallMode&&cameraGood&&drawCinematicLyrics(dev,gameFrame,float(desc.Width),float(desc.Height),*state,display,at)){}
+ else if(cameraGood&&drawCinematicLyrics(dev,gameFrame,float(desc.Width),float(desc.Height),*state,display,at)){if(wallMode&&!wallTextState.texts.empty())wallTextState.reset();}
  else if(wallMode){drawWallExperiment(dev,gameFrame,float(desc.Width),float(desc.Height),*state,display,at);
  if(cfg.wallLiveLyrics&&display.lyrics&&wallTextState.route.fallback){worldDrawn=true;if(cameraGood)anchors.update(gameFrame,pose,state->key,at);else anchors.reset();peakFrame(dev,*state,at,lyricPosition(position,cfg.demo?0:cfg.offset),cameraGood,gameFrame,pose,float(desc.Width),float(desc.Height));}
  else if(!display.lyrics){worldPeakEntries.clear();worldLyricLifecycle.reset();}}
@@ -942,8 +942,10 @@ void startExternalCameraTest(){
  resetExternalCameraLocked(true,false);
  externalCameraTest=true;
 }
+unsigned cinematicTraceBudget=0;
 bool cinematicPathClear(Vec3 from,Vec3 to){
- if(!externalCameraTrace||!wall::finite(from)||!wall::finite(to))return false;
+ if(!externalCameraTrace||!wall::finite(from)||!wall::finite(to)||cinematicTraceBudget<7)return false;
+ cinematicTraceBudget-=7;
  // Bounded world-only clearance sampling, not a full swept hull. No new hooks.
  constexpr Vec3 offsets[]={{0,0,0},{5,0,0},{-5,0,0},{0,5,0},{0,-5,0},{0,0,5},{0,0,-5}};
  for(const auto offset:offsets){
@@ -1058,7 +1060,10 @@ void tickExternalCameraTest(const GameCameraFrame& frame){
   clearCinematicComposition();
   if(config->cinematicLyrics&&(requested==cinematic::Style::Architecture||(requested==cinematic::Style::Mixed&&cinematic::choose(requested,length(actor.velocity),externalDirector.sequence,true)==cinematic::Style::Architecture)))cinematicPanels=findCinematicPanels(actor,at);
   unsigned span=config->cinematicLyrics&&music->playing?cinematic::duration(music->timeline,lyricSong,music->rate):6000;
+  cinematicTraceBudget=224; // bounded per-shot world traces
   bool planned=externalDirector.plan(at,span,actor,requested,cinematicPanels,cinematicPathClear);
+  if(!planned&&cinematicPanels.hasSecond){cinematicPanels.hasSecond=false;externalDirector.last=current;cinematicTraceBudget=112;planned=externalDirector.plan(at,span,actor,requested,cinematicPanels,cinematicPathClear);}
+  if(!planned&&cinematicPanels.ready){clearCinematicComposition();externalDirector.last=current;cinematicTraceBudget=112;planned=externalDirector.plan(at,span,actor,requested,cinematicPanels,cinematicPathClear);}
   if(!planned||externalDirector.active!=cinematic::Style::Architecture)clearCinematicComposition();
   note("Cinematic shot style="+std::to_string(int(externalDirector.active))+" moving="+std::to_string(planned)+" actor="+std::to_string(actor.handle));
  }
@@ -1081,14 +1086,13 @@ void tickExternalCameraTest(const GameCameraFrame& frame){
 }
 void captureSourceFeatures(const GameCameraFrame& frame){
  source_entities::cinematicRequested=externalCameraTest.load();
- tickExternalCameraTest(frame);
  auto current=std::atomic_load(&settings);source_roster::enabled=!syncResetRequested.load()&&current->sync.enabled&&current->sync.discover&&!current->demo&&current->musicSource<=1;source_roster::capture(frame);
  auto config=std::atomic_load(&settings);bool automatic=config->enabled&&config->autoFollow.enabled&&!config->autoFollow.rules.empty();source_entities::autoRequested=automatic;
  CameraPose view;static std::shared_ptr<const Config> previousConfig;static uint64_t previousTick=0;static uint32_t previousEpoch=0;static inventory::FollowRequest cached;
  if(!automatic){cached={};previousConfig.reset();}else if(cameraPose(frame,view)){auto inventory=std::atomic_load(&source_entities::snapshot);if(previousConfig!=config||previousTick!=inventory->tick||previousEpoch!=frame.epoch){cached=autoSelector.choose(*inventory,config->autoFollow,view,frame.epoch,frame.tick);previousConfig=config;previousTick=inventory->tick;previousEpoch=frame.epoch;}if(frame.tick<inventory->tick||frame.tick-inventory->tick>600)cached={};}
  inventory::FollowRequest request=cached;
  auto old=std::atomic_load(&source_entities::automaticRequest);if(old->enabled!=request.enabled||old->handle!=request.handle||old->epoch!=request.epoch)std::atomic_store(&source_entities::automaticRequest,std::make_shared<const inventory::FollowRequest>(request));
- source_walls::onFrame(frame);source_entities::onFrame(frame);
+ source_walls::onFrame(frame);source_entities::onFrame(frame);tickExternalCameraTest(frame);
 }
 class LyricsPlugin final:public IL4NPlugin {
  bool started=false,attempted=false,duplicate=false;HANDLE renderOwner=nullptr;
