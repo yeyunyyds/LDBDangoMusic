@@ -210,3 +210,9 @@ python scripts/package.py
 本项目采用 [GPL-3.0](LICENSE) 许可。第三方代码与 SDK 头文件遵循各自的许可及声明，详见 [NOTICE.md](NOTICE.md)。
 
 本版新增：原文与翻译按演唱进度显字（无逐字时间轴默认整句，可选择估算渐显）、单行长度倍率，以及世界歌词换句时沿用视野内原位置。墙面挂画也接入歌词和翻译动画。设置路径和说明见 [歌词设置说明](docs/0.8.1-lyrics-controls.md)。
+
+## 实验性外部 FreeCamera 接口
+
+[feature/visual-freecamera-abi-client](https://github.com/yeyunyyds/LDBDangoMusic/tree/feature/visual-freecamera-abi-client) 包含 L4D2Visual FreeCamera C ABI v1 的**可选客户端适配层**：`src/visual_camera_client.hpp`。通过 `GetModuleHandleW` 和 `GetProcAddress` 动态探测 `L4D2Visual.dll`，可以读取控制状态、请求启停、提交世界坐标和镜头角度；没有安装 L4D2Visual 时调用安全失败，不会新增任何 ClientMode Hook。
+
+用户必须先在 L4D2Visual 的 FreeCamera 菜单授权外部接口，才能实际接管。用户操作期间 `pose()` 只更新候选位置，`status().owner` 表示真实所有权。**当前实验分支仅提供调用适配层，尚未接入具体自动运镜策略或主动发送镜头坐标**，不会改变既有歌词播放和镜头行为。
