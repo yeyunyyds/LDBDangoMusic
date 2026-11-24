@@ -7,8 +7,8 @@
 
 namespace dango::cinematic {
 constexpr float pi=3.14159265358979323846f;
-enum class Style {Mixed,Orbit,Architecture,Wide,Bird};
-inline const char* styleName(int n){const char* names[]={u8"混合运镜",u8"人物环绕",u8"建筑歌词",u8"场景远景",u8"鸟瞰追踪"};return names[std::clamp(n,0,4)];}
+enum class Style {Mixed,Orbit,Architecture,Wide,Bird,Wall};
+inline const char* styleName(int n){const char* names[]={u8"混合运镜",u8"人物环绕",u8"建筑歌词",u8"场景远景",u8"鸟瞰追踪",u8"墙面运镜"};return names[std::clamp(n,0,5)];}
 inline float wrap(float degrees){return std::remainder(degrees,360.f);}
 inline float ease(float t){t=std::clamp(t,0.f,1.f);return t*t*t*(t*(t*6.f-15.f)+10.f);}
 inline float mix(float a,float b,float t){return a+(b-a)*t;}
@@ -45,11 +45,12 @@ template<class Timeline> unsigned duration(const Timeline& lines,std::int64_t so
  for(const auto& line:lines){if(line.start<=song)continue;double ms=double(line.start-song)/rate;if(ms>=4000&&ms<=10000)return unsigned(ms);if(ms>10000)break;}
  return 6000;
 }
+inline bool surfaceStyle(Style s){return s==Style::Architecture||s==Style::Wall;}
 inline Style choose(Style requested,float speed,unsigned sequence,bool architecture){
  if(requested!=Style::Mixed)return requested;
  if(speed>190.f)return Style::Bird;
- const Style cycle[]={Style::Orbit,Style::Architecture,Style::Wide,Style::Orbit,Style::Bird};
- auto style=cycle[sequence%5];return style==Style::Architecture&&!architecture?Style::Wide:style;
+ const Style cycle[]={Style::Orbit,Style::Architecture,Style::Wide,Style::Wall,Style::Bird};
+ auto style=cycle[sequence%5];return surfaceStyle(style)&&!architecture?Style::Wide:style;
 }
 inline Vec3 quadratic(Vec3 a,Vec3 b,Vec3 c,float t){return mix(mix(a,b,t),mix(b,c,t),t);}
 struct Director {
@@ -71,36 +72,51 @@ struct Director {
  template<class Clear> bool plan(uint64_t now,unsigned milliseconds,const Actor& actor,Style requested,const Composition& comp,Clear clear){
   if(!actor.ready)return false;
   from=last;anchor=actor.center;selected=requested;active=choose(requested,length(actor.velocity),sequence,comp.ready);actorEpoch=actor.epoch;actorHandle=actor.handle;
-  if(active==Style::Architecture&&!comp.ready)active=Style::Wide;
+  if(surfaceStyle(active)&&!comp.ready)active=Style::Wide;
   const unsigned n=sequence++;begin=now;span=std::clamp(milliseconds,4000u,10000u);planned=true;moving=false;
   const float heading=(length(Vec3{actor.velocity.x,actor.velocity.y,0})>40?std::atan2(actor.velocity.y,actor.velocity.x):actor.yaw*pi/180.f);
   Vec3 predicted=actor.center;
   if(active==Style::Bird){auto v=actor.velocity;float speed=length(v);if(speed>600)v=v*(600/speed);predicted=predicted+v*.6f;}
   focus=predicted;
-  if(active==Style::Architecture&&comp.ready)focus=mix(actor.center,comp.hasSecond?mix(comp.first.center,comp.second.center,.5f):comp.first.center,.32f);
-  const float radius=active==Style::Orbit?325.f:active==Style::Wide?620.f:active==Style::Bird?400.f:390.f;
-  const float height=active==Style::Orbit?100.f:active==Style::Wide?260.f:active==Style::Bird?540.f:115.f;
+  if(surfaceStyle(active)&&comp.ready)focus=mix(actor.center,comp.hasSecond?mix(comp.first.center,comp.second.center,.5f):comp.first.center,active==Style::Architecture?.52f:.40f);
+  const float radius=active==Style::Orbit?325.f:active==Style::Wide?620.f:active==Style::Bird?400.f:active==Style::Wall?275.f:620.f;
+  const float height=active==Style::Orbit?100.f:active==Style::Wide?260.f:active==Style::Bird?540.f:active==Style::Wall?45.f:340.f;
   float initial=std::atan2(from.eye.y-anchor.y,from.eye.x-anchor.x);
   if(length(Vec3{from.eye.x-anchor.x,from.eye.y-anchor.y,0})<70)initial=heading+pi;
   if(active==Style::Bird)initial=heading+pi;
-  if(active==Style::Architecture&&comp.ready)initial=std::atan2(comp.first.normal.y,comp.first.normal.x);
+  if(surfaceStyle(active)&&comp.ready)initial=std::atan2(comp.first.normal.y,comp.first.normal.x);
   const float sign=active==Style::Orbit?1.f:(n%2?1.f:-1.f);
   const float angles[]={sign*.95f,-sign*.75f,sign*1.65f,0.f};
-  for(float scale:{1.f,.65f,.4f})for(float angle:angles){
+  const float facadeAngles[]={sign*.62f,-sign*.62f,sign*.95f,-sign*.95f};
+  for(float scale:{1.f,.65f,.4f})for(unsigned ai=0;ai<4;++ai){
+   const float angle=surfaceStyle(active)&&comp.ready?facadeAngles[ai]:angles[ai];
    const float az=initial+angle;
    Vec3 radial{std::cos(az),std::sin(az),0};
    Vec3 candidate=predicted+radial*(radius*scale)+Vec3{0,0,height*scale};
+   if(surfaceStyle(active)&&comp.ready){
+    // Orbit around the joint subject/lyric composition, not around an arbitrary wall ray.
+    const auto& panel=comp.first;
+    candidate=focus+radial*(radius*scale);
+    if(active==Style::Wall)candidate.z=std::clamp(actor.center.z+height*scale,panel.center.z-60.f,panel.center.z+70.f);
+    else candidate.z=std::max(actor.center.z+height*scale,panel.center.z+55.f*scale);
+   }
    if(length(candidate-from.eye)>1800.f||length(candidate-actor.center)<100.f)continue;
    // Rounded orbit/slide with a verified four-chord path; if curved travel
    // is blocked, try the straight segment to the same composition.
    Vec3 mid=mix(from.eye,candidate,.5f);
    Vec3 bend=mid+radial*(active==Style::Orbit?radius*scale*.22f:25.f*scale);
    if(!clear(candidate,actor.center))continue;
-   if(active==Style::Architecture&&comp.ready){
-    if(wall::dot(comp.first.normal,candidate-comp.first.center)<12.f||!clear(candidate,comp.first.center+comp.first.normal*8.f))continue;
-    if(comp.hasSecond&&(wall::dot(comp.second.normal,candidate-comp.second.center)<12.f||!clear(candidate,comp.second.center+comp.second.normal*8.f)))continue;
-    auto a=normalize(actor.center-candidate),b=normalize(comp.first.center-candidate);
-    if(wall::dot(a,b)<.68f)continue;
+   if(surfaceStyle(active)&&comp.ready){
+    auto readable=[&](const wall::Panel& p){
+     auto toEye=normalize(candidate-p.center);auto view=normalize(focus-candidate);
+     float incidence=wall::dot(p.normal,toEye);float distance=length(candidate-p.center);
+     // Modest perspective, enough apparent size, and the whole panel in a conservative FOV.
+     if(incidence<.55f||distance<75.f||p.width*incidence/distance<.12f)return false;
+     for(float u:{0.f,1.f})for(float v:{0.f,1.f})if(wall::dot(normalize(wall::point(p,u,v)-candidate),view)<.84f)return false;
+     return clear(candidate,p.center+p.normal*8.f);
+    };
+    if(!readable(comp.first)||(comp.hasSecond&&!readable(comp.second)))continue;
+    if(wall::dot(normalize(actor.center-candidate),normalize(focus-candidate))<.84f)continue;
    }
    for(auto midPoint:{bend,mid}){
     Vec3 prev=from.eye;bool safe=true;
