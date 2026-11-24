@@ -18,7 +18,7 @@ struct SentenceRoute {
 inline bool fresh(const Ticket& t,uint64_t now,uint32_t epoch){return t.active&&t.serial&&t.epoch==epoch&&now>=t.tick&&now-t.tick<=1000;}
 inline float alpha(const Item& item,uint64_t now,const Options& o){
  if(!item.token)return 0;if(item.retired<0)return 1;
- double age=double(now)-double(item.retired)-o.lingerMs;return float(std::clamp(1-age/std::max(1,o.fadeMs),0.,1.));
+ double age=double(now)-double(item.retired)-o.lingerMs;if(o.fadeMs<=0)return age<0?1.f:0.f;return float(std::clamp(1-age/o.fadeMs,0.,1.));
 }
 inline bool onScreen(const wall::Panel& panel,const GameCameraFrame& camera,float width,float height){
  std::array<wall::Vertex,4> corners;if(!wall::projectPanel(panel,camera,width,height,corners))return false;
