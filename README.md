@@ -167,7 +167,7 @@ bin/neko/plugins/L4D2DangoMusic/config.json
 
 ### Windows / MSVC
 
-安装 .NET 8 SDK 和 Visual Studio C++ 构建工具，在 **x86 开发者 PowerShell** 中进入源码根目录并运行：
+安装 Visual Studio C++ 构建工具，在 **x86 开发者 PowerShell** 中进入源码根目录并运行：
 
 ```powershell
 .\scripts\build.ps1
@@ -177,12 +177,11 @@ bin/neko/plugins/L4D2DangoMusic/config.json
 
 ### Linux / MinGW
 
-安装 .NET 8 SDK、支持 C++17 的 GCC、Python 3，以及 i686 MinGW-w64 POSIX 工具链：
+安装支持 C++17 的 GCC、Python 3，以及 i686 MinGW-w64 POSIX 工具链：
 
 ```bash
 bash scripts/test.sh
 bash scripts/build-mingw.sh
-dotnet publish media-bridge/DangoMediaBridge.csproj -c Release -o build/media-bridge
 ```
 
 可通过 `DANGO_CXX` 环境变量指定 MinGW 编译器路径。Windows D3D9 验证程序可通过 `scripts/smoke.ps1` 运行；打包使用 Python 3：
@@ -215,11 +214,11 @@ python scripts/package.py
 
 ## 实验性 AFK 运镜与 Folia
 
-当前分支使用 L4D2Visual FreeCamera ABI v3，两个插件必须同时更新。原生 Folia Stage API 替换旧 SMTC EXE；选择 Folia (Stage API) 音乐来源，并在 Folia 开启 Stage Mode / Stage API 和歌词接口。自动发现连接文件，只读本地 HTTP。
+当前分支使用 L4D2Visual FreeCamera ABI v4，两个插件必须同时更新。原生 Folia Stage API 替换旧 SMTC EXE；选择 Folia (Stage API) 音乐来源，并在 Folia 开启 Stage Mode / Stage API 和歌词接口。自动发现连接文件，只读本地 HTTP。
 
-- 系统与恢复 → FreeCamera 闲置运镜（实验）：启用后保持第一人称游戏，首次闲置默认 10 秒（1–120 秒）才开启 FreeCamera。键鼠接管保持镜头原位；再次闲置依照 Visual 的交还时间恢复，F6 结束当前 AFK 会话。
-- 可选混合、人物环绕、建筑歌词、场景远景、鸟瞰追踪。读取经验证的本地存活求生者网络姿态和估算速度；每段以当前相机和最新人物位置规划。半径按风格约 325–620 游戏单位，受世界静态碰撞和视线检查约束，空间不足则缩短或原地构图。真正切换到旁观者且本地实体无效时不盲目飞行。
-- 建筑歌词通过真实墙面固定透视平面表现，规划两个可选侧边位置并依据实际歌词时间轮换；无合适表面时恢复普通歌词。手动实体跟随优先。
+- 系统与恢复 → FreeCamera 闲置运镜（实验）：启用后保持第一人称游戏，首次闲置默认 10 秒（1–120 秒）才开启 FreeCamera。键鼠接管保持镜头原位；再次闲置依照 Visual 的交还时间恢复，F6 仅退出当前自由相机，保留 AFK 功能并重新等待完整闲置时间。只有 DangoMusic 菜单关闭 AFK 功能才停止自动请求。
+- 可选混合、人物环绕、建筑歌词、场景远景、鸟瞰追踪、墙面运镜。读取经验证的本地存活求生者网络姿态和估算速度；每段以当前相机和最新人物位置规划。半径按风格约 325–620 游戏单位，受世界静态碰撞和视线检查约束，空间不足则缩短或原地构图。Bot 接管或旁观者模式切换时，通过完整实体 Handle、唯一角色编号和观察目标继续追踪；无可靠目标时保持外部相机原位，不主动交还给原生运镜。
+- 建筑歌词通过立面、屋顶上沿及屋顶支撑探测，在建筑上方生成固定朝向的悬浮平面，抬高镜头寻找可读的斜向构图。墙面运镜则沿用贴墙平面，采用低位侧移。两者在无可靠几何时恢复普通歌词和远景。手动实体跟随优先。
 - 全局和独立挂画退场均允许 0 ms；保留停留时间语义，结束即消失。
 - 不添加运行时 EXE；仅单 DLL、config.json 和 README。编译产物及游戏内行为需验证，未合并 main。
 

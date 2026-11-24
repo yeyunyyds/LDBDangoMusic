@@ -13,7 +13,7 @@
 #define L4D2VISUAL_CAMERA_CALL
 #endif
 
-#define L4D2VISUAL_CAMERA_ABI_VERSION 3u
+#define L4D2VISUAL_CAMERA_ABI_VERSION 4u
 #define L4D2VISUAL_CAMERA_OWNER_NATIVE 0u
 #define L4D2VISUAL_CAMERA_OWNER_USER 1u
 #define L4D2VISUAL_CAMERA_OWNER_EXTERNAL 2u
@@ -36,8 +36,8 @@ typedef struct L4D2VisualCameraStatusV1 {
     uint32_t camera_active;    /* camera is actually overriding the view */
 } L4D2VisualCameraStatusV1;
 
-/* Version 3: Request(1) arms AFK; a fresh input sample after the initial idle interval turns on the shared camera. Explicit
- * user OFF cancels the session. SetPose while USER owns the camera renews
+/* Version 4: Request(1) arms AFK; foreground polling after the initial idle interval turns on the shared camera, including spectator mode.
+ * User OFF returns to native view and restarts the initial idle interval; it does not cancel the provider session. SetPose while USER owns the camera renews
  * the lease but discards coordinates. On handoff, GetPose returns the actual
  * detached pose, not the last submitted target. It fails if no active view.
  * SetExternalActive(0) releases an existing session; a stale release cannot
