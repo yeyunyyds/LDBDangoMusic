@@ -46,6 +46,8 @@ typedef struct L4D2VisualCameraStatusV1 {
 typedef uint32_t (L4D2VISUAL_CAMERA_CALL *L4D2VisualCameraGetVersionFn)(void);
 typedef int (L4D2VISUAL_CAMERA_CALL *L4D2VisualCameraSetExternalActiveFn)(int active);
 typedef int (L4D2VISUAL_CAMERA_CALL *L4D2VisualCameraSetInitialIdleFn)(uint32_t seconds);
+/* Optional v4 extension: default native view on genuine user takeover. */
+typedef int (L4D2VISUAL_CAMERA_CALL *L4D2VisualCameraSetNativeOnInputFn)(int enabled);
 typedef int (L4D2VISUAL_CAMERA_CALL *L4D2VisualCameraSetPoseFn)(const L4D2VisualCameraPoseV1* pose);
 typedef int (L4D2VISUAL_CAMERA_CALL *L4D2VisualCameraGetPoseFn)(L4D2VisualCameraPoseV1* out);
 typedef int (L4D2VISUAL_CAMERA_CALL *L4D2VisualCameraGetStatusFn)(L4D2VisualCameraStatusV1* out);
@@ -56,6 +58,7 @@ extern "C" {
 uint32_t L4D2VISUAL_CAMERA_CALL L4D2VisualCameraGetVersion(void);
 int L4D2VISUAL_CAMERA_CALL L4D2VisualCameraSetExternalActive(int active);
 int L4D2VISUAL_CAMERA_CALL L4D2VisualCameraSetInitialIdle(uint32_t seconds);
+int L4D2VISUAL_CAMERA_CALL L4D2VisualCameraSetNativeOnInput(int enabled);
 int L4D2VISUAL_CAMERA_CALL L4D2VisualCameraSetPose(const L4D2VisualCameraPoseV1* pose);
 int L4D2VISUAL_CAMERA_CALL L4D2VisualCameraGetPose(L4D2VisualCameraPoseV1* out);
 int L4D2VISUAL_CAMERA_CALL L4D2VisualCameraGetStatus(L4D2VisualCameraStatusV1* out);
