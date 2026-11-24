@@ -13,7 +13,7 @@ VERSION = '0.9.8'
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--variant', choices=['native-hud', 'music-platforms', 'netease-native', 'steam-sync', 'combined', 'auto-listening', 'visual-preview', 'menu-preview', 'folia-smtc'], help='Name a preview package separately from stable installs')
+    parser.add_argument('--variant', choices=['native-hud', 'netease-native', 'steam-sync', 'combined', 'auto-listening', 'visual-preview', 'menu-preview', 'folia-stage'], help='Name a preview package separately from stable installs')
     parser.add_argument('--output-dir', type=Path, default=ROOT / 'build/packages')
     args = parser.parse_args()
     dll = ROOT / 'build/L4D2DangoMusic.dll'
@@ -30,8 +30,7 @@ def main():
         raise RuntimeError('The install DLL must be Windows x86')
     commit = subprocess.check_output(['git', 'rev-parse', '--verify', 'HEAD^{commit}'], cwd=ROOT, text=True).strip()
     source_url = f'https://github.com/yeyunyyds/LDBDangoMusic/tree/{commit}'
-    native = args.variant not in ('music-platforms', 'folia-smtc')
-    template = 'README-folia-smtc.md' if args.variant == 'folia-smtc' else 'README-menu-preview.md' if args.variant == 'menu-preview' else 'README-visual-preview.md' if args.variant == 'visual-preview' else ('README-combined.md' if args.variant != 'music-platforms' else 'README.md')
+    template = 'README-folia-stage.md' if args.variant == 'folia-stage' else 'README-menu-preview.md' if args.variant == 'menu-preview' else 'README-visual-preview.md' if args.variant == 'visual-preview' else 'README-combined.md'
     readme = (ROOT / 'packaging' / template).read_text(encoding='utf-8').replace('@VERSION@', VERSION).replace('@SOURCE_URL@', source_url)
     disclaimer = (ROOT / 'DISCLAIMER.md').read_text(encoding='utf-8')
     if '@DISCLAIMER@' in readme:
@@ -39,14 +38,12 @@ def main():
     else:
         readme += '\n\n' + disclaimer
     notices = [('项目及参考代码声明', 'NOTICE.md'), ('GPL-3.0 许可全文', 'LICENSE'), ('nlohmann/json MIT 许可', 'vendor/JSON-LICENSE.MIT'), ('Bridge 原生菜单 MIT 许可', 'vendor/BRIDGE-LICENSE.MIT'), ('Dear ImGui MIT 许可', 'vendor/imgui/LICENSE.txt'), ('Desktop Lyric MIT 许可', 'vendor/DESKTOP-LYRIC-LICENSE.MIT'), ('网易云 elog 参考代码 MIT 许可', 'vendor/NETEASE-ELOG-LICENSE.MIT')]
-    if not native:
-        notices += [('.NET Runtime 许可', 'vendor/DOTNET-RUNTIME-LICENSE.txt'), ('.NET 第三方声明', 'vendor/DOTNET-RUNTIME-NOTICES.txt')]
     for title, file in notices:
         readme += f'\n\n## {title}\n\n' + (ROOT / file).read_text(encoding='utf-8')
     config = (ROOT / 'config.example.json').read_bytes()
-    if args.variant in ('netease-native', 'folia-smtc'):
+    if args.variant in ('netease-native', 'folia-stage'):
         defaults = json.loads(config)
-        defaults['musicSource'] = 8 if args.variant == 'folia-smtc' else 3
+        defaults['musicSource'] = 8 if args.variant == 'folia-stage' else 3
         defaults['demo'] = False
         config = (json.dumps(defaults, ensure_ascii=False, indent=2) + '\n').encode('utf-8')
     files = {
@@ -54,17 +51,6 @@ def main():
         'bin/neko/plugins/L4D2DangoMusic/config.json': config,
         'README.md': readme.encode('utf-8'),
     }
-    if not native:
-        bridge = ROOT / 'build/media-bridge/DangoMediaBridge.exe'
-        if not bridge.exists():
-            raise RuntimeError('Build the self-contained Windows media bridge before packaging')
-        bridge_blob = bridge.read_bytes()
-        if len(bridge_blob) < 64 or bridge_blob[:2] != b'MZ':
-            raise RuntimeError('Media bridge is not a Windows executable')
-        bridge_pe = struct.unpack_from('<I', bridge_blob, 0x3c)[0]
-        if bridge_pe + 6 > len(bridge_blob) or bridge_blob[bridge_pe:bridge_pe+4] != b'PE\0\0' or struct.unpack_from('<H', bridge_blob, bridge_pe+4)[0] != 0x8664:
-            raise RuntimeError('The Windows media bridge must be x64')
-        files['bin/neko/plugins/L4D2DangoMusic/DangoMediaBridge.exe'] = bridge_blob
     args.output_dir.mkdir(parents=True, exist_ok=True)
     variant = args.variant or 'l4n'
     output = args.output_dir / f'L4D2DangoMusic-{VERSION}-{variant}.zip'
