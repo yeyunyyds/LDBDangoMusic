@@ -87,6 +87,9 @@ int main(){
  assert(choose(Style::Bird,0,0,false,0)==Style::Bird);
  assert(nextSequence(0,Style::Wide)==3);
  assert(healthyView(true,500,850)&&!healthyView(false,100,850)&&!healthyView(true,900,850));
+ RecoveryGate gate;assert(gate.healthy(1000,false,200,850,false));
+ assert(gate.healthy(1240,false,200,850,false));assert(!gate.healthy(1360,false,200,850,false));
+ assert(gate.healthy(1400,true,200,850,false));assert(!gate.healthy(1500,false,1500,850,false));
  MotionController motion;Pose actual{{0,0,64},0,179,0};Pose desired{{100,0,64},0,-179,0};
  auto first=motion.step(actual,desired,.004f);assert(first.eye.x>0&&first.eye.x<1&&std::abs(wrap(first.yaw-actual.yaw))<1);
  auto second=motion.step(first,desired,.004f);assert(second.eye.x-first.eye.x>first.eye.x);
@@ -99,6 +102,9 @@ int main(){
  auto pre=predictive.step(2200.25,runner);runner.center.x+=30;
  auto pre2=predictive.step(2300.25,runner);assert(length(pre.eye-pre2.eye)<.01f);
  assert(!predictive.needsPlan(2300.25,runner,Style::Orbit));
+ runner.velocity={-220,0,0};assert(predictive.needsPlan(2300.25,runner,Style::Orbit));
+ Director lateRunner;assert(lateRunner.start({{-200,0,80},0,0,0}));
+ assert(lateRunner.plan(1000,6000,a,Style::Orbit,{},clear));assert(lateRunner.needsPlan(2300,runner,Style::Orbit));
  auto seq=predictive.sequence;assert(predictive.rebase(pre2)&&predictive.sequence==seq);
  Director noAllowed;assert(noAllowed.start({{0,0,64},0,0,0}));
  assert(!noAllowed.plan(1000,6000,a,Style::Mixed,{},clear,false,styleBit(Style::Wall)));

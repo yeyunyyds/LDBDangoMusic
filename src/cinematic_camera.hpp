@@ -110,10 +110,10 @@ struct MotionController {
  Vec3 linear{},angular{};
  void reset(){*this={};}
  void blocked(){linear={};}
- Pose step(Pose current,Pose target,float dt,bool rapid=false){
+ Pose step(Pose current,Pose target,float dt,bool rapid=false,bool interceptShot=false){
   dt=std::clamp(dt,0.f,.05f);
   const float distance=length(target.eye-current.eye);
-  const float omega=rapid?10.f:distance>220.f?7.f:5.f;
+  const float omega=rapid?10.f:interceptShot?9.f:distance>220.f?7.f:5.f;
   auto eye=spring(current.eye,target.eye,linear,dt,omega,rapid?720.f:900.f);
   Vec3 angles{current.pitch,current.yaw,current.roll};
   Vec3 desired{target.pitch,current.yaw+wrap(target.yaw-current.yaw),current.roll+wrap(target.roll-current.roll)};
@@ -122,6 +122,16 @@ struct MotionController {
  }
 };
 inline bool healthyView(bool visible,float distance,float range){return visible&&distance<range;}
+struct RecoveryGate {
+ uint64_t unhealthySince=0;
+ void reset(){unhealthySince=0;}
+ bool healthy(uint64_t now,bool visible,float distance,float range,bool recovering){
+  if(healthyView(visible,distance,range)){reset();return true;}
+  if(recovering||distance>=range+250.f)return false;
+  if(!unhealthySince||now<unhealthySince)unhealthySince=now;
+  return now-unhealthySince<360;
+ }
+};
 inline Vec3 quadratic(Vec3 a,Vec3 b,Vec3 c,float t){return mix(mix(a,b,t),mix(b,c,t),t);}
 // Brief, independently planned departure from the initial survivor eye.
 // Static world clearance is checked before translating; no blind teleport.
@@ -151,7 +161,7 @@ struct Director {
  Pose from{},to{},last{};
  Vec3 control{},anchor{},focus{},intercept{};
  double begin=0,lastTick=0;uint32_t actorEpoch=0,actorHandle=0;
- unsigned span=6000,sequence=0,selectedMask=allStyles;float travelMs=6000;
+ unsigned span=6000,sequence=0,selectedMask=allStyles;float travelMs=6000,plannedSpeed=0;
  Style active=Style::Orbit,selected=Style::Mixed;
  bool ready=false,planned=false,moving=false,departureChecked=false,lyricFocus=false,anticipating=false,fixedSurface=false;
  Departure departure;
@@ -163,9 +173,15 @@ struct Director {
   if(!actor.ready)return false;
   // Update world reference at every shot boundary; fast-moving players may
   // force an earlier continuous transition, not an instantaneous teleport.
-  if(anticipating&&now-begin>=travelMs+450){
-   auto away=actor.center-intercept;auto direction=intercept-anchor;
-   if(length(away)>240.f||wall::dot(away,direction)>length(direction)*100.f)return true;
+  const float speed=std::hypot(actor.velocity.x,actor.velocity.y);
+  if(!fixedSurface&&!anticipating&&plannedSpeed<100.f&&speed>130.f&&now-begin>=1200)return true;
+  if(anticipating&&now-begin>=700){
+   const auto direction=intercept-anchor;const Vec3 velocity{actor.velocity.x,actor.velocity.y,0};
+   if(speed>100.f&&wall::dot(normalize(direction),normalize(velocity))<.25f)return true;
+   if(now-begin>=travelMs+450){
+    auto away=actor.center-intercept;
+    if(length(away)>240.f||wall::dot(away,direction)>length(direction)*100.f)return true;
+   }
   }
   if(!moving)return now-begin>=1200;
   return fixedSurface&&now-begin>=700&&length(actor.center-anchor)>160.f;
@@ -174,7 +190,7 @@ struct Director {
   if(!actor.ready)return false;
   lyricFocus=lyrics;from=last;anchor=actor.center;selected=requested;selectedMask=mask;active=choose(requested,length(actor.velocity),sequence,comp.ready,mask);actorEpoch=actor.epoch;actorHandle=actor.handle;
   if(surfaceStyle(active)&&!comp.ready&&requested!=Style::Mixed)active=Style::Wide;
-  const unsigned n=sequence;sequence=nextSequence(sequence,active);begin=now;span=std::clamp(milliseconds,4000u,10000u);travelMs=float(span);planned=true;moving=false;anticipating=false;fixedSurface=surfaceStyle(active)&&comp.ready;
+  const unsigned n=sequence;sequence=nextSequence(sequence,active);begin=now;span=std::clamp(milliseconds,4000u,10000u);travelMs=float(span);plannedSpeed=std::hypot(actor.velocity.x,actor.velocity.y);planned=true;moving=false;anticipating=false;fixedSurface=surfaceStyle(active)&&comp.ready;
   if(active==Style::Mixed){focus=actor.center;to=look(from.eye,focus,from.yaw);control=from.eye;return false;}
   const float heading=(length(Vec3{actor.velocity.x,actor.velocity.y,0})>40?std::atan2(actor.velocity.y,actor.velocity.x):actor.yaw*pi/180.f);
   Vec3 predicted=actor.center;
