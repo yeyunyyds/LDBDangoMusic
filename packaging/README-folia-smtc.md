@@ -47,3 +47,7 @@ Folia API 参考：https://github.com/chthollyphile/folia-major/blob/main/docs/l
 第三方来源、许可和项目安全免责声明在后文附录。Folia 源码未嵌入或修改，独立调用其公开本机接口。
 
 @DISCLAIMER@
+
+## 合并实验分支中的闲置运镜
+
+若本包来自 feature/visual-freecamera-abi-client，已同时包含 FreeCamera ABI v2 客户端和闲置运镜。搭配 Visual 同步实验版 DLL（ABI v2），先授权外部接口，再从 DangoMusic「系统与恢复 → FreeCamera 闲置运镜（实验）」启动。F6 或 Visual 菜单关闭会结束当前会话；重新启动才恢复。Folia 音乐来源与运镜均可独立使用。不需要安装 ABI smoke EXE。仅离线测试，实际镜头与 Folia SMTC 兼容性尚待验证。
