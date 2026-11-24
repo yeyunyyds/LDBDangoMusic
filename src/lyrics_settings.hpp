@@ -19,7 +19,7 @@ struct Config {
  sync::Settings sync;
  uint64_t playbackSourceRevision=1;
  int musicSource=0;
- int cinematicStyle=0,cinematicIdleSeconds=10,cinematicMixedMask=31;bool cinematicEnabled=false,cinematicLyrics=true,cinematicKeepFreeCamera=false;
+ int cinematicStyle=4,cinematicIdleSeconds=10,cinematicMixedMask=31;bool cinematicEnabled=false,cinematicLyrics=true,cinematicKeepFreeCamera=false;
  int colorEffect=0;float colorSpeed=.2f,colorAmount=1;
  AutoFollowConfig autoFollow;bool entitySmooth=true,lyricMove=false,wallIndependentTiming=false;int moveCurve=0,moveMs=350;
  int port=23330,size=32;bool enabled=true,worldLyrics=false,worldTestAnchor=false;
@@ -54,7 +54,7 @@ inline Config decodeConfig(const nlohmann::json& j){
  if(j.contains("visualPresets")){auto slots=j.at("visualPresets");if(!slots.is_array()||slots.size()>8||slots.dump().size()>65536)throw std::runtime_error("Invalid visual preset slots");for(auto& slot:slots)if(!slot.is_null()&&(!slot.is_object()||slot.value("schema",0)!=1||!slot.contains("settings")||!slot.at("settings").is_object()||slot.value("name",std::string{}).size()>64))throw std::runtime_error("Invalid saved visual preset");c.visualPresets=slots;}
  if(j.contains("steamSync"))c.sync=sync::readSettings(j["steamSync"]);
  if(j.contains("autoFollow"))c.autoFollow=readAutoFollow(j["autoFollow"]);c.moveCurve=integer("moveCurve",0,0,4);c.moveMs=integer("moveMs",350,100,2000);
- c.cinematicEnabled=j.value("cinematicEnabled",false);c.cinematicMixedMask=integer("cinematicMixedMask",31,0,31);c.cinematicStyle=integer("cinematicStyle",0,0,5);c.cinematicIdleSeconds=integer("cinematicIdleSeconds",10,1,120);c.cinematicLyrics=j.value("cinematicLyrics",true);c.cinematicKeepFreeCamera=j.value("cinematicKeepFreeCamera",false);
+ c.cinematicEnabled=j.value("cinematicEnabled",false);c.cinematicMixedMask=integer("cinematicMixedMask",31,0,31);c.cinematicStyle=integer("cinematicStyle",4,0,5);c.cinematicIdleSeconds=integer("cinematicIdleSeconds",10,1,120);c.cinematicLyrics=j.value("cinematicLyrics",true);c.cinematicKeepFreeCamera=j.value("cinematicKeepFreeCamera",false);
  c.musicSource=integer("musicSource",0,0,8);if(c.musicSource!=0&&c.musicSource!=1&&c.musicSource!=3&&c.musicSource!=8)c.musicSource=0;
  c.colorEffect=integer("colorEffect",0,0,4);c.colorSpeed=number("colorSpeed",.2f,0,2);c.colorAmount=number("colorAmount",1,0,1);
  c.wallSurface=integer("wallSurface",0,0,1);if(j.contains("wallLayout"))c.wallLayout=readWallLayout(j.at("wallLayout"));
