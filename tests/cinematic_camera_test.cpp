@@ -47,6 +47,17 @@ int main(){
  auto b=tracker.sample(1,100,1100,{30,0,40},0);
  assert(b.velocity.x>100);
  auto c=tracker.sample(1,101,1200,{3000,0,40},0);assert(length(c.velocity)==0);
+ Departure departure;
+ auto safe=[](Vec3,Vec3){return true;};
+ Pose initial{{0,0,64},0,0,0};
+ assert(departure.plan(1000,initial,a,safe));
+ assert(length(departure.step(1000).eye-initial.eye)<.001f);
+ assert(length(departure.step(1150).eye-initial.eye)>30);
+ auto cleared=departure.step(1300);assert(!departure.active&&length(cleared.eye-initial.eye)>=64);
+ assert(!departure.plan(1400,cleared,a,safe));
+ assert(!departure.plan(1500,initial,a,[](Vec3,Vec3){return false;}));
+ assert(departure.plan(1600,initial,a,[](Vec3 from,Vec3 to){return to.x<from.x;}));
+ assert(departure.step(1900).eye.x<0);
  Director d;assert(d.start({{0,0,64},80,179,0}));
  auto clear=[](Vec3,Vec3){return true;};
  Composition comp;
