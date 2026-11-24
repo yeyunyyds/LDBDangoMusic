@@ -39,9 +39,9 @@ int main(){
  assert(attempts==2&&std::abs(groundPanel.center.z-.75f)<.01f);
  GroundTrack track;unsigned placements=0;
  auto place=[&](wall::Panel& p){++placements;p=groundPanel;return true;};
- track.update(1,100,500,true,place);auto fixed=track.anchors.front().panel;
+ track.update(1,100,500,true,place);auto fixedGround=track.anchors.front().panel;
  groundActor.center.x+=300;groundPanel.center.x+=300;track.update(1,200,500,true,place);
- assert(placements==1&&length(track.anchors.front().panel.center-fixed.center)<.01f);
+ assert(placements==1&&length(track.anchors.front().panel.center-fixedGround.center)<.01f);
  track.update(2,300,500,true,place);assert(placements==2&&track.anchors.size()==2&&track.anchors.front().expires==800);
  track.update(2,800,500,true,place);assert(track.anchors.size()==1);
  track.update(3,900,500,true,[](wall::Panel&){return false;});
