@@ -23,6 +23,7 @@ int main(int argc,char**){using namespace dango;
  check(adjustReanchor(0,3)==100&&adjustReanchor(100,2)==0&&adjustReanchor(299900,5)==300000);
  check(reanchorSeconds(0)=="0"&&reanchorSeconds(100)=="0.1"&&reanchorSeconds(1875)=="1.875"&&reanchorSeconds(300000)=="300");
  c.reanchorMs=123400;auto custom=decodeConfig(encodeConfig(c));check(custom.reanchorMs==123400&&decodeConfig({{"reanchorMs",999999}}).reanchorMs==300000);
+ check(exitFrame(1000,1000,0).done);check(!exitFrame(999,1000,0).done);check(exitFrame(0,0,0).done);
  auto hold=exitFrame(999,1000,400);check(hold.alpha==1&&!hold.done);auto fade=exitFrame(1200,1000,400);check(std::abs(fade.alpha-.5f)<.001&&!fade.done);check(exitFrame(1400,1000,400).done);
  Config wallConfig;check(!wallConfig.wallReuse&&wallConfig.wallSurface==0&&!wallConfig.wallFloorFollow);
  wallConfig.wallFloorFollow=true;wallConfig.wallReuse=true;wallConfig.wallSurface=1;wallConfig.wallLayout.title.x=.2f;wallConfig.wallLayout.artist.y=.35f;wallConfig.wallLayout.lyrics.size=1.5f;wallConfig.wallLayout.lyrics.depth=2;
