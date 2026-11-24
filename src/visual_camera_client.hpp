@@ -1,5 +1,5 @@
 #pragma once
-// Optional VisualEffects FreeCamera v2 client; no new Source/ClientMode hooks.
+// Optional VisualEffects FreeCamera v3 client; no new Source/ClientMode hooks.
 // GPL-3.0: shared ABI contract from yeyunyyds/L4D2-Visual-Effects.
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -13,8 +13,9 @@ struct Api {
  L4D2VisualCameraSetPoseFn setPose=nullptr;
  L4D2VisualCameraGetStatusFn getStatus=nullptr;
  L4D2VisualCameraGetPoseFn getPose=nullptr;
+ L4D2VisualCameraSetInitialIdleFn setInitialIdle=nullptr;
 
- explicit operator bool() const noexcept {return setActive&&setPose&&getStatus&&getPose;}
+ explicit operator bool() const noexcept {return setActive&&setPose&&getStatus&&getPose&&setInitialIdle;}
 };
 
 // Resolve each time; do not retain unowned pointers across plugin reloads.
@@ -34,6 +35,7 @@ inline Api resolve() noexcept {
   GetProcAddress(module,"L4D2VisualCameraGetStatus"));
  api.getPose=reinterpret_cast<L4D2VisualCameraGetPoseFn>(
   GetProcAddress(module,"L4D2VisualCameraGetPose"));
+ api.setInitialIdle=reinterpret_cast<L4D2VisualCameraSetInitialIdleFn>(GetProcAddress(module,"L4D2VisualCameraSetInitialIdle"));
  return api;
 }
 inline bool status(L4D2VisualCameraStatusV1& result) noexcept {
