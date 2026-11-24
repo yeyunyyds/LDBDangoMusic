@@ -53,13 +53,38 @@ inline Style choose(Style requested,float speed,unsigned sequence,bool architect
  auto style=cycle[sequence%5];return surfaceStyle(style)&&!architecture?Style::Wide:style;
 }
 inline Vec3 quadratic(Vec3 a,Vec3 b,Vec3 c,float t){return mix(mix(a,b,t),mix(b,c,t),t);}
+// Brief, independently planned departure from the initial survivor eye.
+// Static world clearance is checked before translating; no blind teleport.
+struct Departure {
+ Pose from{},to{};uint64_t begin=0;bool active=false;
+ static constexpr unsigned milliseconds=300;
+ template<class Clear> bool plan(uint64_t now,Pose p,const Actor& actor,Clear clear){
+  active=false;if(!actor.ready||!valid(p))return false;
+  auto delta=p.eye-actor.center;
+  if(std::hypot(delta.x,delta.y)>=48.f||std::abs(delta.z)>70.f)return false;
+  const float yaw=p.yaw*pi/180.f;
+  Vec3 f{std::cos(yaw),std::sin(yaw),0},side{-f.y,f.x,0};
+  for(float distance:{80.f,64.f})for(Vec3 dir:{f,f*-1.f,side,side*-1.f}){
+   auto eye=p.eye+dir*distance;auto radial=eye-actor.center;
+   if(std::hypot(radial.x,radial.y)<60.f||!clear(p.eye,eye))continue;
+   from=to=p;to.eye=eye;begin=now;active=true;return true;
+  }
+  return false;
+ }
+ Pose step(uint64_t now){
+  const auto elapsed=now>=begin?now-begin:0;
+  Pose p=from;p.eye=mix(from.eye,to.eye,ease(float(elapsed)/milliseconds));
+  if(elapsed>=milliseconds){p=to;active=false;}return p;
+ }
+};
 struct Director {
  Pose from{},to{},last{};
  Vec3 control{},anchor{},focus{};
  uint64_t begin=0,lastTick=0;uint32_t actorEpoch=0,actorHandle=0;
  unsigned span=6000,sequence=0;
  Style active=Style::Orbit,selected=Style::Mixed;
- bool ready=false,planned=false,moving=false;
+ bool ready=false,planned=false,moving=false,departureChecked=false;
+ Departure departure;
  void reset(){*this={};}
  bool start(Pose pose){if(!valid(pose))return false;reset();ready=true;last=from=to=pose;return true;}
  bool needsPlan(uint64_t now,const Actor& actor,Style requested)const{

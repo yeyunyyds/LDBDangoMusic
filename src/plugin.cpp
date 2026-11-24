@@ -36,6 +36,8 @@ extern "C" __declspec(dllexport) const char DangoBuildFlavor[]="DANGO_PRODUCTION
 #include "sync/runtime.hpp"
 #include "media_protocol.hpp"
 #include "folia_native.hpp"
+#include "auto_music_source.hpp"
+#include "config_save_policy.hpp"
 #include "visual_camera_client.hpp"
 #include "cinematic_camera.hpp"
 #include "cinematic_architecture.hpp"
@@ -159,23 +161,51 @@ std::string httpGetRaw(const wchar_t* path,size_t limit,unsigned port=0,const wc
 nlohmann::json get(const wchar_t* path,size_t limit){return nlohmann::json::parse(httpGetRaw(path,limit));}
 constexpr auto statusPath=L"/status?filter=status,name,singer,duration,progress,playbackRate";
 void run() noexcept {
- try {cfg=*std::atomic_load(&settings);CameraWriter cameraWriter;PlayerSession player;sync::Runtime syncRuntime(syncRequests,note);folia::Native foliaNative;netease::Native neteaseNative(&stopping,note);int activeSource=-1;uint64_t lastSelectionRevision=0,sourceEpoch=0,lastPublishedRevision=0;sync::Provider lastProvider=sync::Provider::Unavailable;bool useMedia=false;int64_t nextLxProbe=0;auto demoStart=now();
+ try {cfg=*std::atomic_load(&settings);CameraWriter cameraWriter;PlayerSession player;sync::Runtime syncRuntime(syncRequests,note);folia::Native foliaNative;netease::Native neteaseNative(&stopping,note);int activeSource=-1;uint64_t lastSelectionRevision=0,sourceEpoch=0,lastPublishedRevision=0;sync::Provider lastProvider=sync::Provider::Unavailable;int autoSource=0;int64_t nextAutoProbe=0;auto demoStart=now();
  while(!stopping||std::atomic_load(&pendingSave)){
  cfg=*std::atomic_load(&settings);if(syncResetRequested.exchange(false))syncRuntime.reset();source_roster::enabled=cfg.sync.enabled&&cfg.sync.discover;
  sync::Provider provider=sync::Provider::Unavailable;
- if(activeSource!=cfg.musicSource||lastSelectionRevision!=cfg.playbackSourceRevision){lastSelectionRevision=cfg.playbackSourceRevision;activeSource=cfg.musicSource;foliaNative.reset();useMedia=cfg.musicSource>=2;nextLxProbe=0;player=PlayerSession{};publish(player.disconnect(now()));}
- if(auto requested=std::atomic_exchange(&pendingSave,std::shared_ptr<const Config>{})){saveState=1;try{auto path=directory/L"config.json";nlohmann::json stored=nlohmann::json::object();if(std::filesystem::exists(path)){std::ifstream old(path);stored=nlohmann::json::parse(old);if(!stored.is_object())throw std::runtime_error("Existing config is not an object");}stored.update(encodeConfig(*requested));std::filesystem::create_directories(directory);auto temp=directory/L"config.json.tmp";{std::ofstream file(temp,std::ios::binary|std::ios::trunc);file<<stored.dump(2)<<'\n';file.flush();if(!file)throw std::runtime_error("Config write failed");}if(std::filesystem::exists(path))std::filesystem::copy_file(path,directory/L"config.json.bak",std::filesystem::copy_options::overwrite_existing);if(!MoveFileExW(temp.c_str(),path.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH))throw std::runtime_error("Config replace failed");std::atomic_store(&savedSettings,requested);saveState=2;note("Settings saved");}catch(const std::exception& e){saveState=-1;note(e.what());}}
+ if(activeSource!=cfg.musicSource||lastSelectionRevision!=cfg.playbackSourceRevision){lastSelectionRevision=cfg.playbackSourceRevision;activeSource=cfg.musicSource;foliaNative.reset();autoSource=0;nextAutoProbe=0;player=PlayerSession{};publish(player.disconnect(now()));}
+ if(auto requested=std::atomic_exchange(&pendingSave,std::shared_ptr<const Config>{})){saveState=1;try{auto path=directory/L"config.json";nlohmann::json stored=nlohmann::json::object();if(std::filesystem::exists(path)){std::ifstream old(path);stored=nlohmann::json::parse(old);if(!stored.is_object())throw std::runtime_error("Existing config is not an object");}stored.update(encodeConfig(*requested));std::filesystem::create_directories(directory);auto temp=directory/L"config.json.tmp";{std::ofstream file(temp,std::ios::binary|std::ios::trunc);file<<stored.dump(2)<<'\n';file.flush();if(!file)throw std::runtime_error("Config write failed");}savepolicy::commit([&](){
+ if(std::filesystem::exists(path)){
+  auto backup=directory/L"config.json.bak";
+  // Native Windows overwrite semantics, independent of filesystem copy_file.
+  if(!CopyFileW(path.c_str(),backup.c_str(),FALSE))throw std::runtime_error("CopyFileW error "+std::to_string(GetLastError()));
+ }
+ },[&](){if(!MoveFileExW(temp.c_str(),path.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH))throw std::runtime_error("Config replace failed: "+std::to_string(GetLastError()));},[](const std::string& warning){note(warning);});std::atomic_store(&savedSettings,requested);saveState=2;note("Settings saved");}catch(const std::exception& e){saveState=-1;note(e.what());}}
  cameraWriter.drain();source_entities::drain(directory);try{State s;
  if(cfg.demo){provider=sync::Provider::Demo;s.connected=s.playing=true;s.title="Offline demonstration";s.key="demo";s.duration=16000;s.position=(now()-demoStart)%16000;s.sampled=now();s.timeline=parse("[00:01.00]<1000,500>你好 <1500,500>求生之路\n[00:05.00]Left and right floating lyrics\n[00:09.00]暂停、换歌与逐字时间轴\n[00:13.00]L4D2DangoMusic");s.message="Offline demo";}
  else {
- State probed;bool haveProbe=false;
- if(cfg.musicSource<=1&&(!useMedia||now()>=nextLxProbe)){
-  try{probed=status(get(statusPath,65536),now());haveProbe=true;if(useMedia){player=PlayerSession{};useMedia=false;note("Music source: LX local API");}}
-  catch(...){if(cfg.musicSource==1)throw;if(!useMedia){player=PlayerSession{};useMedia=true;note("LX unavailable; falling back to native Netease lyrics");}nextLxProbe=now()+5000;}
+ auto fetch=[](const wchar_t* path,size_t limit,unsigned port,const wchar_t* header){return nlohmann::json::parse(httpGetRaw(path,limit,port,header));};
+ auto readLx=[&](){return status(get(statusPath,65536),now());};
+ auto readFolia=[&](){return foliaNative.status(fetch,[](){return now();});};
+ auto readNetease=[&](){return neteaseNative.status();};
+ std::optional<State> lxProbe,foliaProbe,neteaseProbe;
+ int selected=cfg.musicSource;
+ if(selected==0){
+  if(now()>=nextAutoProbe){
+   // Probe status, not lyrics, only on the existing music worker. A paused
+   // LX API must not mask a playing Folia source.
+   try{lxProbe=readLx();}catch(...){}
+   try{foliaProbe=readFolia();}catch(...){}
+   if(!(lxProbe&&lxProbe->playing)&&!(foliaProbe&&foliaProbe->playing)){
+    try{neteaseProbe=readNetease();}catch(...){}
+   }
+   const std::array<autosource::Probe,3> candidates{{
+    {1,lxProbe&&lxProbe->connected,lxProbe&&lxProbe->playing},
+    {8,foliaProbe&&foliaProbe->connected,foliaProbe&&foliaProbe->playing},
+    {3,neteaseProbe&&neteaseProbe->connected,neteaseProbe&&neteaseProbe->playing}}};
+   const int next=autosource::choose(candidates,autoSource);
+   if(next!=autoSource){autoSource=next;player=PlayerSession{};publish(player.disconnect(now()));note("Auto music source: "+std::string(next==8?"Folia Stage API":next==1?"LX local API":next==3?"Netease native":"unavailable"));}
+   nextAutoProbe=now()+2000;
+  }
+  selected=autoSource;
  }
- if(cfg.musicSource==3||(cfg.musicSource==0&&useMedia)){provider=sync::Provider::Netease;player.poll([&](){return neteaseNative.status();},[&](){return neteaseNative.lyrics();},[](){return now();},[](State state){if(state.message=="Connected to BLF / LX")state.message="Netease native lyrics ready";publish(std::move(state));});}
- else if(cfg.musicSource==8){provider=sync::Provider::Folia;auto fetch=[](const wchar_t* path,size_t limit,unsigned port,const wchar_t* header){return nlohmann::json::parse(httpGetRaw(path,limit,port,header));};player.poll([&](){return foliaNative.status(fetch,[](){return now();});},[&](){return foliaNative.lyrics(fetch);},[](){return now();},[](State state){if(state.message=="Connected to BLF / LX")state.message="Synchronized lyrics ready";state.message="Folia: "+state.message;publish(std::move(state));});}
- else {provider=sync::Provider::LX;player.poll([&](){if(haveProbe){haveProbe=false;return probed;}return status(get(statusPath,65536),now());},[](){return peak::splitTimeline(lyrics(get(L"/lyric-all",2*1024*1024)));},[](){return now();},[](State state){publish(std::move(state));});}
+ auto reuse=[](std::optional<State>& cached,auto read){if(cached){auto state=std::move(*cached);cached.reset();return state;}return read();};
+ if(selected==3){provider=sync::Provider::Netease;player.poll([&](){return reuse(neteaseProbe,readNetease);},[&](){return neteaseNative.lyrics();},[](){return now();},[](State state){if(state.message=="Connected to BLF / LX")state.message="Netease native lyrics ready";publish(std::move(state));});}
+ else if(selected==8){provider=sync::Provider::Folia;player.poll([&](){return reuse(foliaProbe,readFolia);},[&](){return foliaNative.lyrics(fetch);},[](){return now();},[](State state){if(state.message=="Connected to BLF / LX")state.message="Synchronized lyrics ready";state.message="Folia: "+state.message;publish(std::move(state));});}
+ else if(selected==1){provider=sync::Provider::LX;player.poll([&](){return reuse(lxProbe,readLx);},[](){return peak::splitTimeline(lyrics(get(L"/lyric-all",2*1024*1024)));},[](){return now();},[](State state){publish(std::move(state));});}
+ else throw std::runtime_error("Auto: no available LX, Folia or Netease source");
  }
  if(cfg.demo)publish(std::move(s));
  }catch(const std::exception& e){provider=sync::Provider::Unavailable;bool wasOnline=player.online;auto disconnected=player.disconnect(now());disconnected.message=e.what();publish(std::move(disconnected));if(wasOnline)note(std::string("Player disconnected; lyric cache invalidated: ")+e.what());}
@@ -183,7 +213,7 @@ void run() noexcept {
  auto resetRevision=resetDisplayRevision.load();if(resetRevision&&cfg.playbackSourceRevision>=resetRevision)resetDisplayRevision.compare_exchange_strong(resetRevision,0);
  if(provider!=lastProvider||lastPublishedRevision!=cfg.playbackSourceRevision){lastProvider=provider;lastPublishedRevision=cfg.playbackSourceRevision;++sourceEpoch;}
  if(!stopping){auto local=cfg.demo?std::make_shared<const State>():std::atomic_load(&snapshot);sync::SourceContext source{provider,cfg.playbackSourceRevision,sourceEpoch};auto sourceGuard=[&](){auto latest=std::atomic_load(&settings);if(syncResetRequested.load()||!latest->sync.enabled||!latest->sync.discover||latest->playbackSourceRevision!=source.revision||latest->demo||latest->musicSource>1||!sync::lxAllowed(source))throw std::runtime_error("LX-only command cancelled: selected music source changed");};auto result=syncRuntime.tick(cfg.sync,*local,now(),[&](){sourceGuard();return status(get(statusPath,65536),now());},[&](const std::string& path){sourceGuard();std::wstring w(path.begin(),path.end());auto response=httpGetRaw(w.c_str(),4096);if(response!="OK")throw std::runtime_error("LX control did not return OK");},source,*std::atomic_load(&source_roster::snapshot),[&](const std::string& uri){sourceGuard();if(uri.rfind("lxmusic://music/searchPlay?data=",0)!=0)throw std::runtime_error("Unsupported LX Scheme action");std::wstring w(uri.begin(),uri.end());auto result=reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr,L"open",w.c_str(),nullptr,nullptr,SW_SHOWNOACTIVATE));if(result<=32)throw std::runtime_error("LX Scheme dispatch failed; register lxmusic protocol; code="+std::to_string(result));},[&](){auto latest=std::atomic_load(&settings);return !syncResetRequested.load()&&latest->sync.enabled&&latest->sync.discover&&!latest->demo&&latest->musicSource<=1&&latest->playbackSourceRevision==source.revision;});std::atomic_store(&syncStatus,std::make_shared<const sync::Status>(std::move(result)));}
- std::unique_lock<std::mutex> lock(sleepMutex);wake.wait_for(lock,std::chrono::milliseconds(cfg.demo?50:cfg.musicSource==8?250:150),[]{return stopping.load();});
+ std::unique_lock<std::mutex> lock(sleepMutex);wake.wait_for(lock,std::chrono::milliseconds(cfg.demo?50:(cfg.musicSource==8||(cfg.musicSource==0&&autoSource==8))?250:150),[]{return stopping.load();});
  }
  cameraWriter.drain();
  }catch(...){if(logger)logger(LDB_HOST_LOG_ERROR,"Music worker stopped unexpectedly");}
@@ -1035,7 +1065,17 @@ void tickExternalCameraTest(const GameCameraFrame& frame){
  if(!externalCameraTest.load(std::memory_order_acquire))return;
  std::lock_guard<std::mutex> lock(externalCameraMutex);
  if(!externalCameraTest.load())return;
- if(!frame.active){if(externalCameraInitialized)resetExternalCameraLocked(true,false);return;}
+ if(!frame.active){
+  const auto state=source_camera::captureState.load();
+  if(externalCameraInitialized&&externalCameraEpoch==frame.epoch&&(state==3||state==4)){
+   // Invalid post-render matrices are not a map exit. Freeze planning, but
+   // renew the live external view rather than issuing Request(0).
+   auto api=visualcamera::resolve();L4D2VisualCameraPoseV1 hold{};hold.size=sizeof(hold);
+   if(api&&api.getPose(&hold))(void)api.setPose(&hold);
+   externalDirector.reset();externalCameraLastFrame=0;clearCinematicComposition();return;
+  }
+  if(externalCameraInitialized){note("AFK map inactive state="+std::to_string(state));resetExternalCameraLocked(true,false);}return;
+ }
  if(externalCameraInitialized&&externalCameraEpoch!=frame.epoch){resetExternalCameraLocked(true,false);return;}
  const auto at=uint64_t(now());
  auto config=std::atomic_load(&settings);
@@ -1095,6 +1135,20 @@ void tickExternalCameraTest(const GameCameraFrame& frame){
  }
  if(!externalDirector.ready){if(!externalDirector.start(current)){resetExternalCameraLocked(true,false);return;}note("Cinematic acquired actual GetPose");}
  if(!externalCameraTraceProbed){externalCameraTraceProbed=true;externalCameraTrace=source_walls::resolveWorldTrace();if(!externalCameraTrace)note("Cinematic world trace unavailable; stationary fallback");}
+ // The normal shot clock only starts after the initial short departure.
+ if(!externalDirector.departureChecked){
+  externalDirector.departureChecked=true;
+  cinematicTraceBudget=112;
+  if(externalDirector.departure.plan(at,current,actor,cinematicPathClear))note("Cinematic initial model clearance started");
+ }
+ if(externalDirector.departure.active){
+  const auto p=externalDirector.departure.step(at);
+  L4D2VisualCameraPoseV1 target{sizeof(target),{p.eye.x,p.eye.y,p.eye.z},{p.pitch,p.yaw,p.roll}};
+  if(!api.setPose(&target)){resetExternalCameraLocked(false,false);return;}
+  externalDirector.last=p;externalCameraActive=true;
+  if(!externalDirector.departure.active)note("Cinematic initial model clearance completed");
+  return;
+ }
  const auto requested=cinematic::Style(std::clamp(config->cinematicStyle,0,5));
  const auto music=std::atomic_load(&snapshot);
  const auto song=music->at(static_cast<int64_t>(at));
