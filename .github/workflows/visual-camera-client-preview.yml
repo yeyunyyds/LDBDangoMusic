@@ -1,7 +1,7 @@
 name: Optional Visual FreeCamera ABI client smoke (no release)
 on:
   push:
-    branches: [feature/visual-freecamera-abi-client]
+    branches: [feature/visual-freecamera-abi-client, work/next-cinematic-recovery]
   workflow_dispatch:
 permissions:
   contents: read
@@ -19,7 +19,7 @@ jobs:
           sudo apt-get install -y g++-mingw-w64-i686-posix
       - name: Check portable ABI structures
         run: |
-          g++ -std=c++17 -Wall -Wextra -Werror tests/visual_camera_api_test.cpp -o /tmp/visual-camera-api
+          g++ -std=c++17 -Wall -Wextra -Werror -Ivendor tests/visual_camera_api_test.cpp -o /tmp/visual-camera-api
           /tmp/visual-camera-api
           g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc -Ivendor tests/folia_protocol_test.cpp -o /tmp/folia-protocol
           /tmp/folia-protocol
