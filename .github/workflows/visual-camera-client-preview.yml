@@ -1,0 +1,34 @@
+name: Optional Visual FreeCamera ABI client smoke (no release)
+on:
+  push:
+    branches: [feature/visual-freecamera-abi-client]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  camera-client-x86:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install cross compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++-mingw-w64-i686-posix
+      - name: Check portable ABI structures
+        run: |
+          g++ -std=c++17 -Wall -Wextra -Werror tests/visual_camera_api_test.cpp -o /tmp/visual-camera-api
+          /tmp/visual-camera-api
+      - name: Build optional camera client caller and plugin
+        env:
+          DANGO_CXX: i686-w64-mingw32-g++-posix
+        run: |
+          bash scripts/build-mingw.sh
+          file build/L4D2DangoMusic.dll
+          test -f build/visual_camera_client_win32_smoke.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DangoMusic-VisualCamera-Client-Preview
+          path: |
+            build/L4D2DangoMusic.dll
+            build/visual_camera_client_win32_smoke.exe
+          if-no-files-found: error
