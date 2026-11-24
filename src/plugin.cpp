@@ -35,6 +35,7 @@ extern "C" __declspec(dllexport) const char DangoBuildFlavor[]="DANGO_PRODUCTION
 #include "player_session.hpp"
 #include "sync/runtime.hpp"
 #include "media_bridge.hpp"
+#include "visual_camera_client.hpp"
 #include "netease_native.hpp"
 #include "camera_diagnostics.hpp"
 #include "source_camera.hpp"
