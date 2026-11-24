@@ -25,18 +25,25 @@ template<class Cast> bool roofPanel(const trace::Result& facade,uint32_t epoch,C
  }
  // Require upward-facing support behind the edge, at center and both sides.
  // Reject open sky, tall ceilings, ambiguous corners or unrelated surfaces.
- float roof=0;for(float x:{0.f,-54.f,54.f}){
-  auto p=base+right*x-normal*26+Vec3{0,0,upper};trace::Result r;
-  if(!cast(p+Vec3{0,0,54},p-Vec3{0,0,42},r)||!trace::wallHit(r)||r.plane.normal.z<.65f||std::abs(r.end.z-p.z)>30)return false;
-  if(x==0)roof=r.end.z;else if(std::abs(roof-r.end.z)>20)return false;else roof=std::max(roof,r.end.z);
+ // Try full-size roof first, then a smaller supported roof span. A
+ // narrow facade is not sufficient evidence of a wide roof.
+ for(float width:{220.f,160.f,120.f}){
+  float roof=0;bool supported=true;
+  for(float x:{0.f,-width*.245f,width*.245f}){
+   auto p=base+right*x-normal*26+Vec3{0,0,upper};trace::Result r;
+   if(!cast(p+Vec3{0,0,54},p-Vec3{0,0,42},r)||!trace::wallHit(r)||r.plane.normal.z<.65f||std::abs(r.end.z-p.z)>30){supported=false;break;}
+   if(x==0)roof=r.end.z;else if(std::abs(roof-r.end.z)>24){supported=false;break;}else roof=std::max(roof,r.end.z);
+  }
+  if(!supported)continue;
+  float height=width*.273f;Vec3 center=base-normal*18;center.z=roof+height*.5f+22;
+  wall::Panel candidate;if(!wall::makePanel(center,normal,width,height,epoch,candidate,0))continue;
+  bool air=true;
+  for(float y:{0.f,.5f,1.f})for(float x:{0.f,.5f,1.f}){
+   auto p=wall::point(candidate,x,y);trace::Result r;
+   if(!cast(p+normal*8,p-normal*8,r)||r.startSolid||r.allSolid||r.fraction<.999f)air=false;
+  }
+  if(air){out=candidate;return true;}
  }
- Vec3 center=base-normal*18;center.z=roof+52;
- if(!wall::makePanel(center,normal,220,60,epoch,out,0))return false;
- // Text plane is above the roof, not on its wall. Verify open air across it.
- for(float y:{0.f,.5f,1.f})for(float x:{0.f,.5f,1.f}){
-  auto p=wall::point(out,x,y);trace::Result r;
-  if(!cast(p+normal*8,p-normal*8,r)||r.startSolid||r.allSolid||r.fraction<.999f)return false;
- }
- return true;
+ return false;
 }
 }

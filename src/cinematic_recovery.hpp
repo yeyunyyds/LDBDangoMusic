@@ -3,7 +3,7 @@
 namespace dango::cinematic {
 struct Recovery {
  bool active=false,hasTarget=false;
- uint64_t badSince=0,nextProbe=0,lastCut=0;
+ uint64_t badSince=0,nextProbe=0,lastCut=0,settledSince=0;
  Vec3 target{};
  void reset(){*this={};}
  enum class Action { Normal, Follow, Hold, Cut, Native };
@@ -12,7 +12,13 @@ struct Recovery {
   if(now<nextProbe)return active?(hasTarget?Action::Follow:Action::Hold):Action::Normal;
   nextProbe=now+120;
   const float distance=length(current.eye-actor.center);
-  if(healthy&&(!active||distance<330.f)){active=hasTarget=false;badSince=0;return Action::Normal;}
+  if(healthy&&!active)return Action::Normal;
+  if(healthy&&active&&distance<330.f){
+   hasTarget=false;if(!settledSince)settledSince=now;
+   if(now-settledSince>=600){active=false;badSince=settledSince=0;return Action::Normal;}
+   return Action::Hold;
+  }
+  settledSince=0;
   if(!active){active=true;badSince=now;}
   hasTarget=false;
   const auto elapsed=now>=badSince?now-badSince:0;

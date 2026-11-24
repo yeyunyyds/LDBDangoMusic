@@ -52,7 +52,7 @@ inline Style choose(Style requested,float speed,unsigned sequence,bool architect
  const Style cycle[]={Style::Orbit,Style::Architecture,Style::Wide,Style::Wall,Style::Bird};
  auto style=cycle[sequence%5];return surfaceStyle(style)&&!architecture?Style::Wide:style;
 }
-inline wall::Panel freePanel(Style style,const Actor& actor,Vec3 eye){
+inline wall::Panel freePanel(Style style,const Actor& actor,Vec3 eye,bool alternate=false){
  auto normal=normalize(Vec3{eye.x-actor.center.x,eye.y-actor.center.y,0});
  if(length(normal)<.9f)normal={-std::cos(actor.yaw*pi/180.f),-std::sin(actor.yaw*pi/180.f),0};
  auto right=normalize(wall::cross(Vec3{0,0,1},normal));
@@ -61,7 +61,7 @@ inline wall::Panel freePanel(Style style,const Actor& actor,Vec3 eye){
   return {actor.center+side*104.f+Vec3{0,0,-22},{0,0,1},side,up,180,60,actor.epoch};
  }
  const bool wide=style==Style::Wide||style==Style::Architecture;
- return {actor.center+right*(wide?170.f:100.f)+Vec3{0,0,wide?80.f:34.f},normal,right,{0,0,1},wide?270.f:150.f,wide?85.f:50.f,actor.epoch};
+ return {actor.center+right*((wide?170.f:100.f)*(alternate?-1.f:1.f))+Vec3{0,0,wide?80.f:34.f},normal,right,{0,0,1},wide?270.f:150.f,wide?85.f:50.f,actor.epoch};
 }
 inline Vec3 quadratic(Vec3 a,Vec3 b,Vec3 c,float t){return mix(mix(a,b,t),mix(b,c,t),t);}
 // Brief, independently planned departure from the initial survivor eye.
@@ -159,7 +159,7 @@ struct Director {
     Vec3 prev=from.eye;bool safe=true;
     for(int i=1;i<=4;++i){auto next=quadratic(from.eye,midPoint,candidate,float(i)/4);if(!clear(prev,next)){safe=false;break;}prev=next;}
     if(!safe)continue;
-    control=midPoint;auto aim=lyricFocus&&!surfaceStyle(active)?mix(actor.center,freePanel(active,actor,candidate).center,.38f):focus;to=look(candidate,aim,from.yaw);moving=true;return true;
+    control=midPoint;auto aim=lyricFocus&&!surfaceStyle(active)&&active!=Style::Wide?mix(actor.center,freePanel(active,actor,candidate).center,.38f):focus;to=look(candidate,aim,from.yaw);moving=true;return true;
    }
   }
   // Never fly through unsupported geometry. No fake free-space orbit.
@@ -174,7 +174,7 @@ struct Director {
   if(actor.ready){
    const auto delta=actor.center-anchor;
    if(moving&&!surfaceStyle(active))eye=eye+delta;
-   if(!surfaceStyle(active))aim=lyricFocus?mix(actor.center,freePanel(active,actor,eye).center,.38f):actor.center;
+   if(!surfaceStyle(active))aim=lyricFocus&&active!=Style::Wide?mix(actor.center,freePanel(active,actor,eye).center,.38f):actor.center;
    else aim=aim+delta*.55f;
   }
   auto target=look(eye,aim,from.yaw);

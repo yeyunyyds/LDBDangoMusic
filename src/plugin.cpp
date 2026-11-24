@@ -391,7 +391,7 @@ void drawWallContents(IDirect3DDevice9* dev,const wall::Panel& panel,const GameC
  if(showTranslation)wallGlyphs(dev,face,camera,width,height,sentence.translated,sentence.translatedMotion,translation,unit*cfg.visual.translationSize,top-(original.height*cfg.visual.originalSize+cfg.visual.translationGap)*unit,song,clock,true,opacity,cinematicLayout);
 }
 bool drawCinematicLyrics(IDirect3DDevice9* dev,const GameCameraFrame& camera,float width,float height,const State& music,const PlaybackDisplayFrame& display,int at){
- struct Entry {uint64_t lease=0;wall::Panel panel;std::unique_ptr<WallSentence> text;};
+ struct Entry {uint64_t lease=0;wall::Panel panel;std::unique_ptr<WallSentence> text;bool second=false;};
  static LyricLifecycle life;static std::vector<Entry> entries;static uint64_t serial=0,generation=0;
  const auto shot=std::atomic_load(&cinematicLyricShot);const auto tick=uint64_t(now());
  if(!externalCameraActive.load()||!cfg.cinematicLyrics||!shot->panels.ready||shot->panels.epoch!=camera.epoch||
@@ -399,25 +399,25 @@ bool drawCinematicLyrics(IDirect3DDevice9* dev,const GameCameraFrame& camera,flo
   life.reset();entries.clear();serial=0;return false;
  }
  if(serial!=shot->panels.serial||generation!=music.generation){life.reset();entries.clear();serial=shot->panels.serial;generation=music.generation;}
- const bool side=shot->panels.hasSecond&&((at-shot->index)&1)!=0;
+ bool side=shot->panels.hasSecond&&((at-shot->index)&1)!=0;
+ if(shot->panels.hasSecond){if(side&&!shot->secondVisible&&shot->firstVisible)side=false;else if(!side&&!shot->firstVisible&&shot->secondVisible)side=true;}
  const auto& selected=side?shot->panels.second:shot->panels.first;
- const bool visible=side?shot->secondVisible:shot->firstVisible;
  const double clock=now()/1000.;
  life.update(music.key,at,music.timeline[at].text,clock,cfg.lingerMs,cfg.transition,false,shot->panels.hasSecond?2:1,true);
  entries.erase(std::remove_if(entries.begin(),entries.end(),[&](const auto& e){return std::none_of(life.entries.begin(),life.entries.end(),[&](const auto& l){return l.id==e.lease;});}),entries.end());
  for(const auto& l:life.entries)if(l.index==at&&std::none_of(entries.begin(),entries.end(),[&](const auto& e){return e.lease==l.id;})){
   const auto next=at+1<int(music.timeline.size())?music.timeline[at+1].start:music.timeline[at].start+5000;
-  entries.push_back({l.id,selected,std::make_unique<WallSentence>(music.timeline[at],next,music)});
+  entries.push_back({l.id,selected,std::make_unique<WallSentence>(music.timeline[at],next,music),side});
  }
  bool currentDrawn=false;
  for(auto& e:entries){auto l=std::find_if(life.entries.begin(),life.entries.end(),[&](const auto& x){return x.id==e.lease;});if(l==life.entries.end())continue;
-  if(shot->dynamic)e.panel=shot->panels.first;
-  bool sameFirst=shot->dynamic||length(e.panel.center-shot->panels.first.center)<1;
+  if(shot->dynamic)e.panel=e.second&&shot->panels.hasSecond?shot->panels.second:shot->panels.first;
+  bool sameFirst=shot->dynamic?!(e.second&&shot->panels.hasSecond):length(e.panel.center-shot->panels.first.center)<1;
   if(!(sameFirst?shot->firstVisible:shot->secondVisible)||!wallscene::onScreen(e.panel,camera,width,height))continue;
   const auto fade=l->retired<0?ExitFrame{}:exitFrame((clock-l->retired)*1000,l->lingerMs,l->fadeMs);
   if(fade.done)continue;
   drawWallContents(dev,e.panel,camera,width,height,*e.text,lyricPosition(display.position,cfg.demo?0:cfg.offset),clock,fade.alpha,false,true);
-  if(l->index==at&&visible)currentDrawn=true;
+  if(l->index==at)currentDrawn=true;
  }
  return currentDrawn;
 }
@@ -518,7 +518,10 @@ void WINAPI render(IDirect3DDevice9* dev,const PresentInfo* present){
  if(!cfg.enabled&&!preview&&!followPositionPreview.load()){}
  else if(preview){if(wallPositionPreview.load())drawWallLayoutPreview(dev,gameFrame,cameraGood,pose,float(desc.Width),float(desc.Height));else drawPositionPreview(dev,gameFrame,cameraValid,pose,float(desc.Width),float(desc.Height));}
  else if(cinematicRoute){
-  if(!cameraGood||!drawCinematicLyrics(dev,gameFrame,float(desc.Width),float(desc.Height),*state,display,at))drawCinematicSubtitle(dev,*state,display,at,float(desc.Width),float(desc.Height));
+  bool panelDrawn=cameraGood&&drawCinematicLyrics(dev,gameFrame,float(desc.Width),float(desc.Height),*state,display,at);
+  if(!panelDrawn)drawCinematicSubtitle(dev,*state,display,at,float(desc.Width),float(desc.Height));
+  static int previousMode=-1;static uint64_t previousLog=0;auto tick=uint64_t(now());int mode=panelDrawn?1:0;
+  if(display.lyrics&&at>=0&&mode!=previousMode&&(!previousLog||tick-previousLog>=500)){note(panelDrawn?"Cinematic lyrics: panel":"Cinematic lyrics: dedicated subtitle fallback");previousMode=mode;previousLog=tick;}
  }
  else if(entityValid){
  auto id=follow::effectiveHandle(*chosenFrame,chosenRequest);auto record=follow::find(*chosenFrame,id);auto raw=follow::anchor(chosen,*followState);if(automaticChosen&&record)raw.z+=autofollow::headLift(*record);auto target=entityTracker.select(raw,gameFrame.epoch,id,now()/1000.,cfg.entitySmooth,cfg.moveMs/1000.f,cfg.moveCurve);target.z+=follow::bobOffset(*followState,now()/1000.);
@@ -1061,7 +1064,7 @@ cinematic::Composition findCinematicPanels(const cinematic::Actor& actor,const c
  if(!externalCameraTrace||!cinematic::surfaceStyle(style))return result;
  const bool roof=style==cinematic::Style::Architecture;
  const float heading=actor.yaw*cinematic::pi/180.f;
- unsigned budget=160;
+ unsigned budget=220;
  auto cast=[&](Vec3 a,Vec3 b,trace::Result& r){if(!budget)return false;--budget;return cinematicRay(a,b,r);};
  // Use both a raised survey origin and the player's lower reference.
  // Elevated samples must have a verified free approach from the actor.
@@ -1204,7 +1207,7 @@ void tickExternalCameraTest(const GameCameraFrame& frame){
   const auto shotStyle=cinematic::choose(requested,length(actor.velocity),shotSequence,true);
   if(config->cinematicLyrics&&cinematic::surfaceStyle(shotStyle))cinematicPanels=findCinematicPanels(actor,current,shotStyle,at);
   unsigned span=config->cinematicLyrics&&music->playing?cinematic::duration(music->timeline,lyricSong,music->rate):6000;
-  cinematicTraceBudget=224; // bounded per-shot world traces
+  cinematicTraceBudget=336; // bounded per-shot world traces
   bool planned=externalDirector.plan(at,span,actor,requested,cinematicPanels,cinematicPathClear,config->cinematicLyrics);
   if(!planned&&cinematicPanels.hasSecond){cinematicPanels.hasSecond=false;externalDirector.last=current;externalDirector.sequence=shotSequence;cinematicTraceBudget=112;planned=externalDirector.plan(at,span,actor,requested,cinematicPanels,cinematicPathClear,config->cinematicLyrics);}
   if(!planned&&cinematicPanels.ready){clearCinematicComposition();externalDirector.last=current;externalDirector.sequence=shotSequence;cinematicTraceBudget=112;planned=externalDirector.plan(at,span,actor,requested,cinematicPanels,cinematicPathClear,config->cinematicLyrics);}
@@ -1240,7 +1243,10 @@ void tickExternalCameraTest(const GameCameraFrame& frame){
  }
  if(config->cinematicLyrics&&(cinematicRecovery.active||!cinematic::surfaceStyle(externalDirector.active)||!cinematicPanels.ready)){
   if(!cinematicDynamicPanel){cinematicPanels={};cinematicPanels.epoch=actor.epoch;cinematicPanels.serial=++cinematicSerial;cinematicPanels.ready=true;cinematicDynamicPanel=true;}
-  cinematicPanels.first=cinematic::freePanel(cinematicRecovery.active?cinematic::Style::Orbit:externalDirector.active,actor,p.eye);
+  auto style=cinematicRecovery.active?cinematic::Style::Orbit:externalDirector.active;
+  cinematicPanels.first=cinematic::freePanel(style,actor,p.eye);
+  cinematicPanels.hasSecond=style==cinematic::Style::Wide;
+  if(cinematicPanels.hasSecond)cinematicPanels.second=cinematic::freePanel(style,actor,p.eye,true);
  }
  L4D2VisualCameraPoseV1 target{sizeof(target),{p.eye.x,p.eye.y,p.eye.z},{p.pitch,p.yaw,p.roll}};
  if(!api.setPose(&target)){resetExternalCameraLocked(false,false);return;}

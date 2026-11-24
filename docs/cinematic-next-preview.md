@@ -1,0 +1,8 @@
+# Next cinematic preview
+
+Replace both L4D2Visual.dll and L4D2DangoMusic.dll while the game is closed. The v4 ABI keeps its original structs; this DangoMusic preview requires the new L4D2VisualCameraSetNativeOnInput export. Older Visual builds are refused rather than silently keeping detached user control.
+
+- AFK takeover defaults to native gameplay view; choose Keep FreeCamera in the AFK menu to retain manual camera. Save settings to persist `cinematicKeepFreeCamera`.
+- Orbit/Bird/Wide track live survivor coordinates; architecture/wall shots recompose when the survivor leaves the frame. Continuous translations are checked against world geometry. Recovery uses multi-point visibility and low follow; an emergency camera cut can cross intervening walls but requires validated landing and visibility near the actor. No valid landing -> native view and rearm. These are bounded ray heuristics, not full map navigation or dynamic entity collision.
+- Cinematic lyrics own rendering while external camera controls the view and lyric coupling is enabled. Fixed roof/wall, actor-relative orbit, large alternating wide panels, ground-facing bird panels; occluded/unavailable compositions use dedicated subtitles. User settings are not overwritten.
+- Both DLLs are process-lifetime pinned, including hook thunks chained by other plugins. Normal Source Shutdown/explicit shutdown closes admission, waits for a native worker handle (2.5s) and callback drain (1s); timeout defers cleanup without unloading code. Destructor only signals stop. Hot reload is intentionally unsupported; restart the game. Explicit shutdown exports must be called outside Loader Lock. In-game exit/overlap and abnormal process termination remain validation targets.

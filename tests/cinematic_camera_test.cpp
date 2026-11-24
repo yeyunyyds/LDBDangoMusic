@@ -95,7 +95,7 @@ int main(){
  auto tracked=follow.step(3000,shifted);assert(std::abs(tracked.eye.x-fixed.eye.x-250)<.01f);
  auto birdPanel=freePanel(Style::Bird,a,{100,100,500});assert(birdPanel.normal.z==1&&birdPanel.center.z<a.center.z);
  auto orbitPanel=freePanel(Style::Orbit,a,{-200,0,80});assert(orbitPanel.normal.x<-.9f);
- auto widePanel=freePanel(Style::Wide,a,{-200,0,80});assert(widePanel.width>orbitPanel.width);
+ auto widePanel=freePanel(Style::Wide,a,{-200,0,80});assert(widePanel.width>orbitPanel.width);auto wideOther=freePanel(Style::Wide,a,{-200,0,80},true);assert(length(wideOther.center-widePanel.center)>300);
  Recovery recovery;auto far=a;far.center={1500,0,40};Pose stuck{{0,0,80},0,0,0};
  auto localClear=[](Vec3 from,Vec3 to){return from.x>1000&&to.x>1000;};
  auto seen=[](Vec3,const Actor&){return true;};
