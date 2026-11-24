@@ -25,6 +25,11 @@ jobs:
           /tmp/folia-protocol
           g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc tests/cinematic_camera_test.cpp -o /tmp/cinematic-camera
           /tmp/cinematic-camera
+          g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc -Ivendor tests/settings_lifecycle_test.cpp -o /tmp/settings-lifecycle
+          /tmp/settings-lifecycle
+          g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc -Ivendor tests/menu_navigation_test.cpp -o /tmp/menu-navigation
+          /tmp/menu-navigation
+          python3 scripts/generate_factory_defaults.py --check
           g++ -std=c++17 -Wall -Wextra -Werror -Isrc tests/hud_menu_policy_test.cpp -o /tmp/camera-menu
           /tmp/camera-menu
       - name: Build optional camera client caller and plugin
