@@ -34,7 +34,8 @@ extern "C" __declspec(dllexport) const char DangoBuildFlavor[]="DANGO_PRODUCTION
 #include "lyric_lifecycle.hpp"
 #include "player_session.hpp"
 #include "sync/runtime.hpp"
-#include "media_bridge.hpp"
+#include "media_protocol.hpp"
+#include "folia_native.hpp"
 #include "visual_camera_client.hpp"
 #include "cinematic_camera.hpp"
 #include "netease_native.hpp"
@@ -82,13 +83,18 @@ HMODULE ownModule=nullptr;std::filesystem::path ownPath;
 std::filesystem::path directory;using LogFn=void(*)(int,const char*);LogFn logger=nullptr;
 constexpr int LDB_HOST_LOG_INFO=0,LDB_HOST_LOG_WARNING=1,LDB_HOST_LOG_ERROR=2;
 // Explicit, opt-in ABI demonstration; never auto-starts during normal lyrics.
-std::atomic<bool> externalCameraTest{false},externalCameraActive{false},externalCameraLyricSync{true};
+std::atomic<bool> externalCameraTest{false},externalCameraActive{false};
 std::mutex externalCameraMutex;
 bool externalCameraInitialized=false,externalCameraTraceProbed=false;
 std::uint64_t externalCameraLastFrame=0;
 std::uint32_t externalCameraEpoch=0;
 void* externalCameraTrace=nullptr;
 cinematic::Director externalDirector;
+cinematic::Tracker cinematicActor;
+uint64_t cinematicSampleAt=0,cinematicVisibilityAt=0,cinematicSerial=0;
+cinematic::Composition cinematicPanels;
+struct CinematicLyricShot {cinematic::Composition panels;std::string key;uint64_t generation=0;int index=0;bool firstVisible=false,secondVisible=false;};
+std::shared_ptr<const CinematicLyricShot> cinematicLyricShot=std::make_shared<CinematicLyricShot>();
 std::atomic<bool> positionPreview{false},wallPositionPreview{false},positionPreviewMotion{false};bool lastPositionPreview=false,lastWallMode=false,escapeHeld=false;uint64_t layoutGeneration=0;
 PlaybackDisplay playbackDisplay;
 PlaybackCursor playbackCursor;LyricLifecycle worldLyricLifecycle,entityLyricLifecycle;std::atomic<int> visibleLyricIndex{-1};std::atomic<uint64_t> presentationCount{0},restoreErrors{0};
@@ -133,13 +139,13 @@ struct CameraWriter{void drain(){}};
 bool checked(HRESULT hr,unsigned stage,const char* operation){if(SUCCEEDED(hr))return true;auto bit=uint64_t(1)<<stage;if(!(reportedErrors&bit)){reportedErrors|=bit;char msg[256];std::snprintf(msg,sizeof(msg),"L4D2DangoMusic render-error operation=%s hr=0x%08lx",operation,static_cast<unsigned long>(hr));if(logger)logger(LDB_HOST_LOG_WARNING,msg);}return false;}
 void publish(State s){auto old=std::atomic_load(&snapshot);if(old->connected!=s.connected||old->playing!=s.playing||old->generation!=s.generation||old->message!=s.message)note("Player state connected="+std::to_string(s.connected)+" playing="+std::to_string(s.playing)+" generation="+std::to_string(s.generation)+" position_ms="+std::to_string(s.position)+" timeline_lines="+std::to_string(s.timeline.size())+" message="+s.message);std::atomic_store(&snapshot,std::make_shared<const State>(std::move(s)));}
 struct Internet {HINTERNET h; explicit Internet(HINTERNET v):h(v){if(!h)throw std::runtime_error("WinHTTP handle failed");}~Internet(){WinHttpCloseHandle(h);}Internet(const Internet&)=delete;};
-std::string httpGetRaw(const wchar_t* path,size_t limit){
+std::string httpGetRaw(const wchar_t* path,size_t limit,unsigned port=0,const wchar_t* headers=nullptr){
  Internet session(WinHttpOpen(L"L4D2DangoMusic/0.9.8",WINHTTP_ACCESS_TYPE_NO_PROXY,WINHTTP_NO_PROXY_NAME,WINHTTP_NO_PROXY_BYPASS,0));
  WinHttpSetTimeouts(session.h,500,500,500,500);
- Internet connection(WinHttpConnect(session.h,L"127.0.0.1",static_cast<INTERNET_PORT>(cfg.port),0));
+ Internet connection(WinHttpConnect(session.h,L"127.0.0.1",static_cast<INTERNET_PORT>(port?port:cfg.port),0));
  Internet request(WinHttpOpenRequest(connection.h,L"GET",path,nullptr,WINHTTP_NO_REFERER,WINHTTP_DEFAULT_ACCEPT_TYPES,0));
- DWORD policy=WINHTTP_OPTION_REDIRECT_POLICY_NEVER;WinHttpSetOption(request.h,WINHTTP_OPTION_REDIRECT_POLICY,&policy,sizeof(policy));
- if(!WinHttpSendRequest(request.h,WINHTTP_NO_ADDITIONAL_HEADERS,0,WINHTTP_NO_REQUEST_DATA,0,0,0)||!WinHttpReceiveResponse(request.h,nullptr))throw std::runtime_error("Player API unavailable");
+ DWORD policy=WINHTTP_OPTION_REDIRECT_POLICY_NEVER;if(!WinHttpSetOption(request.h,WINHTTP_OPTION_REDIRECT_POLICY,&policy,sizeof(policy)))throw std::runtime_error("Cannot disable HTTP redirects");
+ if(!WinHttpSendRequest(request.h,headers?headers:WINHTTP_NO_ADDITIONAL_HEADERS,headers?DWORD(-1):0,WINHTTP_NO_REQUEST_DATA,0,0,0)||!WinHttpReceiveResponse(request.h,nullptr))throw std::runtime_error("Player API unavailable");
  DWORD code=0,length=sizeof(code);if(!WinHttpQueryHeaders(request.h,WINHTTP_QUERY_STATUS_CODE|WINHTTP_QUERY_FLAG_NUMBER,WINHTTP_HEADER_NAME_BY_INDEX,&code,&length,WINHTTP_NO_HEADER_INDEX)||code!=200)throw std::runtime_error("Player HTTP status rejected");
  std::string body;char buffer[8192];DWORD count=0;auto deadline=now()+2000;
  for(;;){if(stopping||now()>deadline)throw std::runtime_error("Request cancelled or timed out");if(!WinHttpReadData(request.h,buffer,sizeof(buffer),&count))throw std::runtime_error("Read failed");if(!count)break;if(body.size()+count>limit)throw std::runtime_error("Response too large");body.append(buffer,count);}
@@ -148,11 +154,11 @@ std::string httpGetRaw(const wchar_t* path,size_t limit){
 nlohmann::json get(const wchar_t* path,size_t limit){return nlohmann::json::parse(httpGetRaw(path,limit));}
 constexpr auto statusPath=L"/status?filter=status,name,singer,duration,progress,playbackRate";
 void run() noexcept {
- try {cfg=*std::atomic_load(&settings);CameraWriter cameraWriter;PlayerSession player;sync::Runtime syncRuntime(syncRequests,note);media::Bridge mediaBridge;netease::Native neteaseNative(&stopping,note);int activeSource=-1;uint64_t lastSelectionRevision=0,sourceEpoch=0,lastPublishedRevision=0;sync::Provider lastProvider=sync::Provider::Unavailable;bool useMedia=false;int64_t nextLxProbe=0;auto demoStart=now();
+ try {cfg=*std::atomic_load(&settings);CameraWriter cameraWriter;PlayerSession player;sync::Runtime syncRuntime(syncRequests,note);folia::Native foliaNative;netease::Native neteaseNative(&stopping,note);int activeSource=-1;uint64_t lastSelectionRevision=0,sourceEpoch=0,lastPublishedRevision=0;sync::Provider lastProvider=sync::Provider::Unavailable;bool useMedia=false;int64_t nextLxProbe=0;auto demoStart=now();
  while(!stopping||std::atomic_load(&pendingSave)){
  cfg=*std::atomic_load(&settings);if(syncResetRequested.exchange(false))syncRuntime.reset();source_roster::enabled=cfg.sync.enabled&&cfg.sync.discover;
  sync::Provider provider=sync::Provider::Unavailable;
- if(activeSource!=cfg.musicSource||lastSelectionRevision!=cfg.playbackSourceRevision){lastSelectionRevision=cfg.playbackSourceRevision;activeSource=cfg.musicSource;useMedia=cfg.musicSource>=2;nextLxProbe=0;player=PlayerSession{};publish(player.disconnect(now()));}
+ if(activeSource!=cfg.musicSource||lastSelectionRevision!=cfg.playbackSourceRevision){lastSelectionRevision=cfg.playbackSourceRevision;activeSource=cfg.musicSource;foliaNative.reset();useMedia=cfg.musicSource>=2;nextLxProbe=0;player=PlayerSession{};publish(player.disconnect(now()));}
  if(auto requested=std::atomic_exchange(&pendingSave,std::shared_ptr<const Config>{})){saveState=1;try{auto path=directory/L"config.json";nlohmann::json stored=nlohmann::json::object();if(std::filesystem::exists(path)){std::ifstream old(path);stored=nlohmann::json::parse(old);if(!stored.is_object())throw std::runtime_error("Existing config is not an object");}stored.update(encodeConfig(*requested));std::filesystem::create_directories(directory);auto temp=directory/L"config.json.tmp";{std::ofstream file(temp,std::ios::binary|std::ios::trunc);file<<stored.dump(2)<<'\n';file.flush();if(!file)throw std::runtime_error("Config write failed");}if(std::filesystem::exists(path))std::filesystem::copy_file(path,directory/L"config.json.bak",std::filesystem::copy_options::overwrite_existing);if(!MoveFileExW(temp.c_str(),path.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH))throw std::runtime_error("Config replace failed");std::atomic_store(&savedSettings,requested);saveState=2;note("Settings saved");}catch(const std::exception& e){saveState=-1;note(e.what());}}
  cameraWriter.drain();source_entities::drain(directory);try{State s;
  if(cfg.demo){provider=sync::Provider::Demo;s.connected=s.playing=true;s.title="Offline demonstration";s.key="demo";s.duration=16000;s.position=(now()-demoStart)%16000;s.sampled=now();s.timeline=parse("[00:01.00]<1000,500>你好 <1500,500>求生之路\n[00:05.00]Left and right floating lyrics\n[00:09.00]暂停、换歌与逐字时间轴\n[00:13.00]L4D2DangoMusic");s.message="Offline demo";}
@@ -163,7 +169,7 @@ void run() noexcept {
   catch(...){if(cfg.musicSource==1)throw;if(!useMedia){player=PlayerSession{};useMedia=true;note("LX unavailable; falling back to native Netease lyrics");}nextLxProbe=now()+5000;}
  }
  if(cfg.musicSource==3||(cfg.musicSource==0&&useMedia)){provider=sync::Provider::Netease;player.poll([&](){return neteaseNative.status();},[&](){return neteaseNative.lyrics();},[](){return now();},[](State state){if(state.message=="Connected to BLF / LX")state.message="Netease native lyrics ready";publish(std::move(state));});}
- else if(useMedia){provider=sync::Provider::Windows;mediaBridge.ensure(directory,cfg.musicSource,now());player.poll([&](){return mediaBridge.status(now());},[&](){return mediaBridge.lyrics(now());},[](){return now();},[](State state){if(state.message=="Connected to BLF / LX")state.message="Synchronized lyrics ready";state.message="Windows media: "+state.message;publish(std::move(state));});}
+ else if(cfg.musicSource==8){provider=sync::Provider::Folia;auto fetch=[](const wchar_t* path,size_t limit,unsigned port,const wchar_t* header){return nlohmann::json::parse(httpGetRaw(path,limit,port,header));};player.poll([&](){return foliaNative.status(fetch,[](){return now();});},[&](){return foliaNative.lyrics(fetch);},[](){return now();},[](State state){if(state.message=="Connected to BLF / LX")state.message="Synchronized lyrics ready";state.message="Folia: "+state.message;publish(std::move(state));});}
  else {provider=sync::Provider::LX;player.poll([&](){if(haveProbe){haveProbe=false;return probed;}return status(get(statusPath,65536),now());},[](){return peak::splitTimeline(lyrics(get(L"/lyric-all",2*1024*1024)));},[](){return now();},[](State state){publish(std::move(state));});}
  }
  if(cfg.demo)publish(std::move(s));
@@ -172,7 +178,7 @@ void run() noexcept {
  auto resetRevision=resetDisplayRevision.load();if(resetRevision&&cfg.playbackSourceRevision>=resetRevision)resetDisplayRevision.compare_exchange_strong(resetRevision,0);
  if(provider!=lastProvider||lastPublishedRevision!=cfg.playbackSourceRevision){lastProvider=provider;lastPublishedRevision=cfg.playbackSourceRevision;++sourceEpoch;}
  if(!stopping){auto local=cfg.demo?std::make_shared<const State>():std::atomic_load(&snapshot);sync::SourceContext source{provider,cfg.playbackSourceRevision,sourceEpoch};auto sourceGuard=[&](){auto latest=std::atomic_load(&settings);if(syncResetRequested.load()||!latest->sync.enabled||!latest->sync.discover||latest->playbackSourceRevision!=source.revision||latest->demo||latest->musicSource>1||!sync::lxAllowed(source))throw std::runtime_error("LX-only command cancelled: selected music source changed");};auto result=syncRuntime.tick(cfg.sync,*local,now(),[&](){sourceGuard();return status(get(statusPath,65536),now());},[&](const std::string& path){sourceGuard();std::wstring w(path.begin(),path.end());auto response=httpGetRaw(w.c_str(),4096);if(response!="OK")throw std::runtime_error("LX control did not return OK");},source,*std::atomic_load(&source_roster::snapshot),[&](const std::string& uri){sourceGuard();if(uri.rfind("lxmusic://music/searchPlay?data=",0)!=0)throw std::runtime_error("Unsupported LX Scheme action");std::wstring w(uri.begin(),uri.end());auto result=reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr,L"open",w.c_str(),nullptr,nullptr,SW_SHOWNOACTIVATE));if(result<=32)throw std::runtime_error("LX Scheme dispatch failed; register lxmusic protocol; code="+std::to_string(result));},[&](){auto latest=std::atomic_load(&settings);return !syncResetRequested.load()&&latest->sync.enabled&&latest->sync.discover&&!latest->demo&&latest->musicSource<=1&&latest->playbackSourceRevision==source.revision;});std::atomic_store(&syncStatus,std::make_shared<const sync::Status>(std::move(result)));}
- std::unique_lock<std::mutex> lock(sleepMutex);wake.wait_for(lock,std::chrono::milliseconds(cfg.demo?50:150),[]{return stopping.load();});
+ std::unique_lock<std::mutex> lock(sleepMutex);wake.wait_for(lock,std::chrono::milliseconds(cfg.demo?50:cfg.musicSource==8?250:150),[]{return stopping.load();});
  }
  cameraWriter.drain();
  }catch(...){if(logger)logger(LDB_HOST_LOG_ERROR,"Music worker stopped unexpectedly");}
@@ -214,7 +220,6 @@ void peakFrame(IDirect3DDevice9* dev,const State& state,int at,int64_t song,bool
  auto& peakEntries=attached?entityPeakEntries:worldPeakEntries;auto& lifecycle=attached?entityLyricLifecycle:worldLyricLifecycle;
  auto& worldMode=attached?entityWorldMode:lastWorldMode;auto& oldWidth=attached?entityWidth:lastWidth;auto& oldHeight=attached?entityHeight:lastHeight;
  double clock=now()/1000.;
- const bool cameraLinked=world&&!attached&&!outgoingOnly&&externalCameraActive.load()&&externalCameraLyricSync.load();
  bool contextChanged=worldMode!=world||oldWidth!=width||oldHeight!=height||(!peakEntries.empty()&&world&&peakEntries.back()->epoch!=camera.epoch);
  worldMode=world;oldWidth=width;oldHeight=height;
  if(contextChanged){lifecycle.reset();peakEntries.clear();}
@@ -237,9 +242,8 @@ void peakFrame(IDirect3DDevice9* dev,const State& state,int at,int64_t song,bool
  auto position=attached?ComponentPosition{.5f,.44f,200,attachmentSize}:cfg.layout.lyrics[entry.slot];Placement place=screenComponent(position,width,height,cfg.size);
  if(!attached&&entry.travel.active){if(entry.retired<0)entry.travel.to=world?entry.anchor:Vec3{position.x,position.y,0};auto moving=entry.travel.at(clock,cfg.moveMs/1000.f,cfg.moveCurve);if(!world){place.x=moving.x*width;place.y=moving.y*height;}}
  if(world){if(attached){entry.anchor=*attached;}
- if(cameraLinked){Vec3 current{};if(!componentAnchor(camera,pose,position,current))continue;entry.anchor=current;entry.travel.active=false;}
- if(!cameraLinked&&!attached&&entry.retired<0&&refreshWorldComponentAnchor(camera,pose,position,entry.anchor,cfg.reuseVisibleAnchor,cfg.reuseDistanceFactor,clock,entry.lastPlaced,cfg.reanchorMs)){anchors.slots.remember(entry.slot,entry.anchor);anchors.current=entry.anchor;}
- if(!cameraLinked&&!attached&&cfg.keepAway){entry.anchor=peak::keepDistance(entry.anchor,pose,position.distance);if(entry.retired<0){anchors.slots.remember(entry.slot,entry.anchor);anchors.current=entry.anchor;}}if(!worldComponent(camera,(!attached&&entry.travel.active)?entry.travel.at(clock,cfg.moveMs/1000.f,cfg.moveCurve):entry.anchor,position,width,height,cfg.worldHeight,cfg.size,place))continue;}
+ if(!attached&&entry.retired<0&&refreshWorldComponentAnchor(camera,pose,position,entry.anchor,cfg.reuseVisibleAnchor,cfg.reuseDistanceFactor,clock,entry.lastPlaced,cfg.reanchorMs)){anchors.slots.remember(entry.slot,entry.anchor);anchors.current=entry.anchor;}
+ if(!attached&&cfg.keepAway){entry.anchor=peak::keepDistance(entry.anchor,pose,position.distance);if(entry.retired<0){anchors.slots.remember(entry.slot,entry.anchor);anchors.current=entry.anchor;}}if(!worldComponent(camera,(!attached&&entry.travel.active)?entry.travel.at(clock,cfg.moveMs/1000.f,cfg.moveCurve):entry.anchor,position,width,height,cfg.worldHeight,cfg.size,place))continue;}
  if(entry.measureRevision!=layoutGeneration){float maxPixels=width*cfg.width*cfg.lineWidthScale/std::max(place.scale,.02f);entry.layout=peak::layout(entry.animation.glyphs,[&](const std::string& glyph){return image(dev,glyph).advance;},maxPixels/cfg.visual.originalSize,cfg.size*1.35f);entry.translationLayout=peak::layout(entry.translated.glyphs,[&](const std::string& glyph){return image(dev,glyph).advance;},maxPixels/cfg.visual.translationSize,cfg.size*1.35f);entry.measureRevision=layoutGeneration;}
  float scale=entry.sizeMotion.sample(place.scale*cfg.size,clock,cfg.visual.smoothScale,cfg.visual.smoothMs)/cfg.size,center=place.x,top=place.y-entry.layout.height*scale*cfg.visual.originalSize*.5f;top+=visual::bobOffset(cfg.visual,clock,0)*height;
  top-=(cfg.visual.exit==0?life.lift:0)*(world?20.f*scale*cfg.size/cfg.worldHeight:height*.025f);
@@ -283,9 +287,8 @@ void drawSongInfo(IDirect3DDevice9* dev,const State& state,const GameCameraFrame
  if(song!=state.key||epoch!=camera.epoch||!placed||(!lastSettings||visual::metadataAnchorChanged(*lastSettings,cfg))||(cfg.reanchorMs>0&&now()-placed>=cfg.reanchorMs)){song=state.key;epoch=camera.epoch;componentAnchor(camera,pose,cfg.layout.title,titleAnchor);componentAnchor(camera,pose,cfg.layout.artist,artistAnchor);placed=now();lastSettings=renderedSettings;}
  if(valid&&cfg.keepAway){titleAnchor=peak::keepDistance(titleAnchor,pose,cfg.layout.title.distance);artistAnchor=peak::keepDistance(artistAnchor,pose,cfg.layout.artist.distance);}
  auto limited=[](const std::string& text){std::string out;auto chars=graphemes(text);for(size_t i=0;i<std::min<size_t>(80,chars.size());++i)out+=chars[i].text;return out;};
- const bool cameraLinked=valid&&externalCameraActive.load()&&externalCameraLyricSync.load();
- if(cfg.showTitle)drawPositionedText(dev,limited(state.title),cfg.layout.title,camera,valid,pose,width,height,cfg.textColor,.7f,cameraLinked?nullptr:&titleAnchor,&titleSize);
- if(cfg.showArtist)drawPositionedText(dev,limited(state.artist),cfg.layout.artist,camera,valid,pose,width,height,cfg.accent,.7f,cameraLinked?nullptr:&artistAnchor,&artistSize);
+ if(cfg.showTitle)drawPositionedText(dev,limited(state.title),cfg.layout.title,camera,valid,pose,width,height,cfg.textColor,.7f,&titleAnchor,&titleSize);
+ if(cfg.showArtist)drawPositionedText(dev,limited(state.artist),cfg.layout.artist,camera,valid,pose,width,height,cfg.accent,.7f,&artistAnchor,&artistSize);
  if(!valid){song.clear();placed=0;}
 }
 void wallQuad(IDirect3DDevice9* dev,const wall::Panel& panel,const GameCameraFrame& camera,float width,float height,Image im,DWORD color){
@@ -343,6 +346,36 @@ void drawWallContents(IDirect3DDevice9* dev,const wall::Panel& panel,const GameC
  auto face=wallTextPanel(panel,cfg.wallLayout.lyrics);float top=contentHeight*unit*.5f;
  wallGlyphs(dev,face,camera,width,height,sentence.original,sentence.originalMotion,original,unit*cfg.visual.originalSize,top,song,clock,false,opacity);
  if(showTranslation)wallGlyphs(dev,face,camera,width,height,sentence.translated,sentence.translatedMotion,translation,unit*cfg.visual.translationSize,top-(original.height*cfg.visual.originalSize+cfg.visual.translationGap)*unit,song,clock,true,opacity);
+}
+bool drawCinematicLyrics(IDirect3DDevice9* dev,const GameCameraFrame& camera,float width,float height,const State& music,const PlaybackDisplayFrame& display,int at){
+ struct Entry {uint64_t lease=0;wall::Panel panel;std::unique_ptr<WallSentence> text;};
+ static LyricLifecycle life;static std::vector<Entry> entries;static uint64_t serial=0,generation=0;
+ const auto shot=std::atomic_load(&cinematicLyricShot);const auto tick=uint64_t(now());
+ if(!externalCameraActive.load()||!cfg.cinematicLyrics||!shot->panels.ready||shot->panels.epoch!=camera.epoch||
+  tick<shot->panels.tick||tick-shot->panels.tick>350||shot->key!=music.key||shot->generation!=music.generation||!display.lyrics||at<0){
+  life.reset();entries.clear();serial=0;return false;
+ }
+ if(serial!=shot->panels.serial||generation!=music.generation){life.reset();entries.clear();serial=shot->panels.serial;generation=music.generation;}
+ const bool side=shot->panels.hasSecond&&((at-shot->index)&1)!=0;
+ const auto& selected=side?shot->panels.second:shot->panels.first;
+ const bool visible=side?shot->secondVisible:shot->firstVisible;
+ const double clock=now()/1000.;
+ life.update(music.key,at,music.timeline[at].text,clock,cfg.lingerMs,cfg.transition,false,2);
+ entries.erase(std::remove_if(entries.begin(),entries.end(),[&](const auto& e){return std::none_of(life.entries.begin(),life.entries.end(),[&](const auto& l){return l.id==e.lease;});}),entries.end());
+ for(const auto& l:life.entries)if(l.index==at&&std::none_of(entries.begin(),entries.end(),[&](const auto& e){return e.lease==l.id;})){
+  const auto next=at+1<int(music.timeline.size())?music.timeline[at+1].start:music.timeline[at].start+5000;
+  entries.push_back({l.id,selected,std::make_unique<WallSentence>(music.timeline[at],next,music)});
+ }
+ bool currentDrawn=false;
+ for(auto& e:entries){auto l=std::find_if(life.entries.begin(),life.entries.end(),[&](const auto& x){return x.id==e.lease;});if(l==life.entries.end())continue;
+  bool sameFirst=length(e.panel.center-shot->panels.first.center)<1;
+  if(!(sameFirst?shot->firstVisible:shot->secondVisible)||!wallscene::onScreen(e.panel,camera,width,height))continue;
+  const auto fade=l->retired<0?ExitFrame{}:exitFrame((clock-l->retired)*1000,l->lingerMs,l->fadeMs);
+  if(fade.done)continue;
+  drawWallContents(dev,e.panel,camera,width,height,*e.text,lyricPosition(display.position,cfg.demo?0:cfg.offset),clock,fade.alpha);
+  if(l->index==at&&visible)currentDrawn=true;
+ }
+ return currentDrawn;
 }
 void drawWallLayoutPreview(IDirect3DDevice9* dev,GameCameraFrame camera,bool valid,const CameraPose& pose,float width,float height){
  CameraPose view=pose;if(!valid){camera.active=1;camera.epoch=1;camera.worldToView={0,-1,0,0,0,0,1,0,1,0,0,0,0,0,0,1};camera.worldToClip={0,-1,0,0,0,0,1,0,1.0001f,0,0,-1.0001f,1,0,0,0};if(!cameraPose(camera,view))return;}
@@ -433,6 +466,7 @@ void WINAPI render(IDirect3DDevice9* dev,const PresentInfo* present){
  else if(display.lyrics)peakFrame(dev,*state,at,lyricPosition(position,cfg.demo?0:cfg.offset),true,gameFrame,pose,float(desc.Width),float(desc.Height),&target,followState->size);
  else{entityPeakEntries.clear();entityLyricLifecycle.reset();}
  }
+ else if(!wallMode&&cameraGood&&drawCinematicLyrics(dev,gameFrame,float(desc.Width),float(desc.Height),*state,display,at)){}
  else if(wallMode){drawWallExperiment(dev,gameFrame,float(desc.Width),float(desc.Height),*state,display,at);
  if(cfg.wallLiveLyrics&&display.lyrics&&wallTextState.route.fallback){worldDrawn=true;if(cameraGood)anchors.update(gameFrame,pose,state->key,at);else anchors.reset();peakFrame(dev,*state,at,lyricPosition(position,cfg.demo?0:cfg.offset),cameraGood,gameFrame,pose,float(desc.Width),float(desc.Height));}
  else if(!display.lyrics){worldPeakEntries.clear();worldLyricLifecycle.reset();}}
@@ -599,7 +633,7 @@ catalog::State menuCatalogState(const Config& c){catalog::State state;state.scop
  auto position=music->at(now());auto at=position<0?-1:indexAt(music->timeline,lyricPosition(position,c.demo?0:c.offset));if(at>=0&&size_t(at)<music->timeline.size()){const auto& line=music->timeline[size_t(at)];auto next=size_t(at+1)<music->timeline.size()?music->timeline[size_t(at+1)].start:line.start+5000;state.wordTiming=peak::Animation(line,next).hasWordTiming;}return state;}
 void selectPreviewPage(uintptr_t id){bool effect=id==5060||id==27;positionPreview=effect||navigation::ordinaryPreview(id);positionPreviewMotion=effect;wallPositionPreview=navigation::wallPreview(id);followPositionPreview=navigation::followPreview(id);}
 void restoreAllState(const Config& current){
- stopExternalCameraTest();externalCameraLyricSync=true;
+ stopExternalCameraTest();
  auto next=reset::all(current);auto revision=current.playbackSourceRevision+1;resetDisplayRevision=revision;syncResetRequested=true;source_roster::enabled=false;syncRequests.drain();
  positionPreview=false;positionPreviewMotion=false;wallPositionPreview=false;followPositionPreview=false;
  source_entities::browseRequested=false;source_entities::autoRequested=false;source_entities::enabled=false;source_entities::dumpRequested=false;source_entities::resetRequested=true;
@@ -610,14 +644,21 @@ const char* menuActionImpl(void* argument){uintptr_t id=reinterpret_cast<uintptr
   if(externalCameraTest.load())stopExternalCameraTest();
   else startExternalCameraTest();
  }
- if(id==9752)externalCameraLyricSync=!externalCameraLyricSync.load();
- if(id==9750||id==9751||id==9752){
+ if(id==9752){c.cinematicLyrics=!c.cinematicLyrics;changeSettings(c);return nullptr;}
+ if(id==9753){c.cinematicStyle=(c.cinematicStyle+1)%5;changeSettings(c);return nullptr;}
+ if(id==9754||id==9755){c.cinematicIdleSeconds=std::clamp(c.cinematicIdleSeconds+(id==9754?-1:1),1,120);changeSettings(c);return nullptr;}
+ if(id==9750||id==9751){
   L4D2VisualCameraStatusV1 s{};
   const bool found=visualcamera::status(s);
   const char* owner=found?(s.owner==L4D2VISUAL_CAMERA_OWNER_EXTERNAL?"DangoMusic":s.owner==L4D2VISUAL_CAMERA_OWNER_USER?"User FreeCamera":"Native"):"Unavailable";
   std::string rows;
-  rows+=item(externalCameraTest.load()?u8"关闭运镜":u8"启动运镜（实验）",9751);
-  rows+=item(externalCameraLyricSync.load()?u8"运镜与歌词联动：[开]":u8"运镜与歌词联动：[关]",9752);
+  rows+=item(externalCameraTest.load()?u8"关闭 AFK 运镜":u8"启用 AFK 运镜（实验）",9751);
+  rows+=item(c.cinematicLyrics?u8"运镜与歌词联动：[开]":u8"运镜与歌词联动：[关]",9752);
+  rows+=item(std::string(u8"运镜风格：")+cinematic::styleName(c.cinematicStyle),9753);
+  rows+=item(u8"首次闲置等待 -1s · "+std::to_string(c.cinematicIdleSeconds)+"s",9754);
+  rows+=item(u8"首次闲置等待 +1s",9755);
+  rows+=item(externalCameraActive.load()?u8"运镜中":externalCameraTest.load()?u8"已启用 · 等待闲置":u8"已关闭",0);
+  if(found&&s.external_requested&&s.owner==L4D2VISUAL_CAMERA_OWNER_NATIVE)rows+=item(u8"剩余等待："+std::to_string((s.idle_remaining_ms+999)/1000)+"s",0);
   rows+=item(std::string(u8"Visual ABI：")+(found?u8"已连接":u8"未找到或版本不匹配"),0);
   rows+=item(std::string(u8"接口授权：")+(found?(s.external_allowed?u8"允许":u8"关闭"):u8"不可用"),0);
   rows+=item(std::string(u8"当前控制权：")+owner,0);
@@ -801,7 +842,7 @@ const char* menuActionImpl(void* argument){uintptr_t id=reinterpret_cast<uintptr
  if(id==40||id==41)return menuPage(menus::channels(c,id==41));
  if(id>=400&&id<=402)return channelMenu(c,false,unsigned(id-400));if(id>=410&&id<=412)return channelMenu(c,true,unsigned(id-410));
  if(id==13)return page(u8"显字动画速度 · "+positionValue(c.animationSpeed)+u8"x（不改变歌曲进度）",item("0.5x",500)+item("0.75x",501)+item("1x",502)+item("1.5x",503)+item("2x",504));
- if(id==14)return page(u8"退场耗时 · "+std::to_string(c.transition)+" ms",item("200 ms",520)+item("400 ms",521)+item("700 ms",522)+item("1000 ms",523)+item("1500 ms",524));
+ if(id==14)return page(u8"退场耗时 · "+std::to_string(c.transition)+" ms",item("0 ms",525)+item("200 ms",520)+item("400 ms",521)+item("700 ms",522)+item("1000 ms",523)+item("1500 ms",524));
  if(id==15)return page(u8"换句后额外停留 · "+std::to_string(c.lingerMs)+" ms",item("0 ms",540)+item("500 ms",541)+item("1000 ms",542)+item("1500 ms",543)+item("2000 ms",544));
  if(id==16)return page(menus::value(u8"同步偏移",std::to_string(c.offset)+"ms")+u8"（正值提前）",item("-100 ms",560)+item("-50 ms",561)+item("+50 ms",562)+item("+100 ms",563)+item(u8"重设为 500ms",564));
  if(id==18){saveState=1;std::atomic_store(&pendingSave,std::make_shared<const Config>(c));return page(u8"保存设置",item(u8"已提交后台保存，返回主菜单查看结果",0));}
@@ -809,6 +850,7 @@ const char* menuActionImpl(void* argument){uintptr_t id=reinterpret_cast<uintptr
  else if(id>=300&&id<=317&&(id<=307||id>=310)){uint32_t colors[]={0xf7e1d7,0xffffff,0xff99cc,0x70d6ff,0xffcc66,0x99ffcc,0xc5a3ff,0xff8855};if(id>=310)c.accent=colors[id-310];else c.textColor=colors[id-300];c.presetId=-1;}
  else if(id>=10000&&id<11209){bool accent=id>=11000;unsigned encoded=unsigned(id-(accent?11000:10000)),channel=encoded/100,choice=encoded%100;if(channel>2||choice>8)return nullptr;auto& color=accent?c.accent:c.textColor;unsigned shift=(2-channel)*8;int value=int((color>>shift)&255);const int deltas[]={-16,-1,1,16};const int fixed[]={0,64,128,192,255};value=choice<4?std::clamp(value+deltas[choice],0,255):fixed[choice-4];color=(color&~(255u<<shift))|(uint32_t(value)<<shift);c.presetId=-1;changeSettings(c);return channelMenu(c,accent,channel);}
  else if(id>=500&&id<=504){float values[]={.5f,.75f,1,1.5f,2};c.animationSpeed=values[id-500];}
+ else if(id==525)c.transition=0;
  else if(id>=520&&id<=524){int values[]={200,400,700,1000,1500};c.transition=values[id-520];}
  else if(id>=540&&id<=544){int values[]={0,500,1000,1500,2000};c.lingerMs=values[id-540];}
  else if(id>=620&&id<=626){const float values[]={1,1.5f,2,3,4,5,10};c.reuseDistanceFactor=values[id-620];}
@@ -831,7 +873,7 @@ const char* menuAction(void* argument){
  auto status=[&](const char* label,bool value){text=std::string(label)+(value?u8"：已开启":u8"：已关闭");};
  switch(id){case 847:case 820:case 821:case 822:case 823:case 824:case 825:case 826:case 827:case 828:case 829:case 830:case 831:case 832:case 833:case 840:case 841:case 842:case 843:case 844:case 845:case 846:text=followNotice.empty()?u8"实体跟随设置已应用":followNotice;break;case 801:status(u8"实体诊断采集",source_entities::enabled.load());break;case 802:text=u8"已请求后台导出当前实体快照";break;case 1:status(u8"歌词显示",c.enabled);break;case 2:status(u8"翻译",c.translation);break;case 3:status(u8"抖动",c.wiggle);break;case 4:status(u8"弹跳",c.pop);break;case 5:status(u8"歌名",c.showTitle);break;case 6:status(u8"作者",c.showArtist);break;case 7:status(u8"世界歌词",c.worldLyrics);break;case 8:status(u8"柔光",c.glow);break;case 9:status(u8"靠近后退（悬浮世界歌词）",c.keepAway);break;case 28:status(u8"按演唱进度显字",c.progressiveReveal);break;case 29:status(u8"沿用可见锚点",c.reuseVisibleAnchor);break;case 32:text=c.fallbackReveal?u8"无逐字时间轴：估算渐显":u8"无逐字时间轴：整句显示";break;case 18:case 2098:text=u8"已提交保存设置";break;case 2099:text=u8"已结束位置预览";break;case 700:status(u8"场景挂画",c.wallEnabled);break;case 702:text=c.wallLiveLyrics?u8"挂画内容：歌词轮换":u8"挂画内容：固定示例";break;case 703:status(u8"挂画背景",c.wallBackdrop);break;case 705:status(u8"挂画调试标识",c.wallDebug);break;case 709:text=c.wallAutomatic?u8"自动寻找墙面":u8"手动挂画轮换";break;case 710:status(u8"新句无墙面时固定世界歌词",c.wallFallback);break;case 704:text=u8"已请求清空挂画，下一句重新寻找墙面";break;default:break;}
  if(id==9751)text=externalCameraTest.load()?u8"运镜已启动，关闭菜单后等待接管":u8"运镜已关闭";
- if(id==9752)text=externalCameraLyricSync.load()?u8"歌词联动已开启":u8"歌词联动已关闭";
+ if(id==9752)text=c.cinematicLyrics?u8"歌词联动已开启":u8"歌词联动已关闭";
  if(id==6900)text=u8"已恢复默认外观，布局与收藏保留；有改动请保存设置";
  if(id==6901)text=u8"已恢复全部设置，联机关闭、收藏保留；请保存设置";
  if(id==6902)text=u8"已取消恢复设置";
@@ -839,7 +881,7 @@ const char* menuAction(void* argument){
  if(id>=6100&&id<6117)text=u8"已应用 "+catalog::theme(unsigned(id-6100)).at("name").get<std::string>()+" · "+catalog::scopeName(presetScope);
  if(id>=9620&&id<=9627)text=u8"已提交后台控制请求，请查看回调结果";
  if(id>=9640&&id<=9644)text=u8"已提交后台测试，请查看结果";
- if(id>=9510&&id<=9517)text=std::string(u8"音乐来源：")+media::sourceName(c.musicSource);
+ if(id>=9510&&id<=9518)text=std::string(u8"音乐来源：")+media::sourceName(c.musicSource);
  if(id>=100&&id<=105)text=std::string(u8"预设：")+presetName(c.presetId);
  if(id>=10000&&id<11209)text=std::string(id>=11000?u8"光晕颜色：":u8"正文颜色：")+colorText(id>=11000?c.accent:c.textColor);
  if(id>=2201&&id<=2209)text=u8"歌词位置数量："+std::to_string(c.layout.lyricCount);
@@ -888,7 +930,8 @@ void resetExternalCameraLocked(bool release,bool disarm){
  externalCameraInitialized=false;externalCameraActive=false;
  externalCameraLastFrame=0;externalCameraEpoch=0;
  externalCameraTrace=nullptr;externalCameraTraceProbed=false;
- externalDirector.reset();
+ externalDirector.reset();cinematicActor.reset();cinematicSampleAt=0;cinematicPanels={};cinematicVisibilityAt=0;
+ std::atomic_store(&cinematicLyricShot,std::make_shared<const CinematicLyricShot>());
 }
 void stopExternalCameraTest(){
  std::lock_guard<std::mutex> lock(externalCameraMutex);
@@ -912,6 +955,47 @@ bool cinematicPathClear(Vec3 from,Vec3 to){
  }
  return true;
 }
+// Actor identity and network origin are independent of the detached eye.
+cinematic::Actor readCinematicActor(const GameCameraFrame& frame,uint64_t at){
+ if(cinematicSampleAt&&at-cinematicSampleAt<33)return cinematicActor.value;
+ cinematicSampleAt=at;
+ auto index=source_roster::localIndex();if(index<1){cinematicActor.reset();return {};}
+ auto f=source_entities::captureLocal(frame,unsigned(index));
+ auto r=std::find_if(f.records.begin(),f.records.end(),[&](const auto& x){return x.index==unsigned(index);});
+ if(r==f.records.end()||r->className!="CTerrorPlayer"||!r->team||*r->team!=2||!r->health||*r->health<=0||!r->lifeState||*r->lifeState!=0||!r->dormant||*r->dormant||!r->networkOrigin||!r->networkAngles){cinematicActor.reset();return {};}
+ return cinematicActor.sample(frame.epoch,r->handle,at,*r->networkOrigin+Vec3{0,0,38},r->networkAngles->y);
+}
+bool cinematicRay(Vec3 from,Vec3 to,trace::Result& hit){
+ if(!externalCameraTrace)return false;
+ if(!source_walls::castWorld(externalCameraTrace,from,to,hit)){externalCameraTrace=nullptr;return false;}
+ return true;
+}
+cinematic::Composition findCinematicPanels(const cinematic::Actor& actor,uint64_t at){
+ cinematic::Composition result;result.epoch=actor.epoch;result.tick=at;result.serial=++cinematicSerial;
+ if(!externalCameraTrace)return result;
+ const float heading=actor.yaw*cinematic::pi/180.f;
+ // Probe nearby static surfaces, first one side then the other. The panel
+ // normal/axes come from actual world geometry, not the detached camera.
+ const float sides[]={.85f,-.85f,1.45f,-1.45f,0.f,2.3f,-2.3f};
+ for(float side:sides){
+  const Vec3 direction{std::cos(heading+side),std::sin(heading+side),0};
+  trace::Result hit;if(!cinematicRay(actor.center+Vec3{0,0,24},actor.center+Vec3{0,0,24}+direction*520,hit)||!trace::wallHit(hit))continue;
+  if(length(hit.end-actor.center)<85)continue;
+  wall::Panel panel;
+  if(!wall::makePanel(hit.end,hit.plane.normal,180,48,actor.epoch,panel,2.f))continue;
+  // The shared surface support check expects its normal offset to be .75.
+  auto supported=panel;supported.center=panel.center-panel.normal*1.25f;
+  if(!trace::supported(supported,cinematicRay))continue;
+  if(!result.ready){result.first=panel;result.ready=true;}
+  else if(length(panel.center-result.first.center)>150){result.second=panel;result.hasSecond=true;break;}
+ }
+ return result;
+}
+void clearCinematicComposition(){
+ if(cinematicPanels.ready||std::atomic_load(&cinematicLyricShot)->panels.ready){
+  cinematicPanels={};std::atomic_store(&cinematicLyricShot,std::make_shared<const CinematicLyricShot>());
+ }
+}
 void tickExternalCameraTest(const GameCameraFrame& frame){
  if(!externalCameraTest.load(std::memory_order_acquire))return;
  std::lock_guard<std::mutex> lock(externalCameraMutex);
@@ -919,72 +1003,84 @@ void tickExternalCameraTest(const GameCameraFrame& frame){
  if(!frame.active){resetExternalCameraLocked(true,true);return;}
  if(externalCameraInitialized&&externalCameraEpoch!=frame.epoch){resetExternalCameraLocked(true,true);return;}
  const auto at=uint64_t(now());
+ auto config=std::atomic_load(&settings);
  const auto api=visualcamera::resolve();
  L4D2VisualCameraStatusV1 status{};status.size=sizeof(status);
  if(!api||!api.getStatus(&status)||!status.external_allowed){
-  if(externalCameraInitialized)note("Cinematic session waiting for renewed Visual ABI permission");
-  resetExternalCameraLocked(false,false);
-  return;
+  if(externalCameraInitialized)note("AFK camera waiting for Visual authorization");
+  resetExternalCameraLocked(false,false);return;
  }
- if(externalCameraInitialized&&!status.external_requested){
-  // F6/menu/emergency OFF or expiry: never re-arm until a new user request.
-  note("Cinematic session ended by shared FreeCamera switch");
-  resetExternalCameraLocked(false,true);return;
+ if(externalCameraInitialized&&!status.external_requested){note("AFK camera ended by shared FreeCamera switch");resetExternalCameraLocked(false,true);return;}
+ auto actor=readCinematicActor(frame,at);
+ if(!actor.ready){
+  if(externalCameraInitialized)resetExternalCameraLocked(true,false);
+  return; // do not detach from native gameplay without a valid subject
+ }
+ if(nativeHud.isOpen()&&!status.camera_active){
+  if(externalCameraInitialized)resetExternalCameraLocked(true,false);
+  return; // first idle countdown starts AFTER closing DangoMusic menu
  }
  if(!externalCameraInitialized){
-  CameraPose start{};
-  if(!cameraPose(frame,start)||!api.setActive(1))return;
+  if(!api.setInitialIdle(unsigned(config->cinematicIdleSeconds))||!api.setActive(1))return;
   externalCameraInitialized=true;externalCameraEpoch=frame.epoch;
-  note("Cinematic requested shared FreeCamera ON");
-  status.owner=L4D2VISUAL_CAMERA_OWNER_USER;
+  note("AFK camera armed; native gameplay stays active until idle");
+  status.owner=L4D2VISUAL_CAMERA_OWNER_NATIVE;
  }
  L4D2VisualCameraPoseV1 actual{};actual.size=sizeof(actual);
  if(!api.getPose(&actual)){
-  // Startup heartbeat: never write stale coordinates into an active view.
-  externalCameraActive=false;externalDirector.reset();
-  if(status.owner==L4D2VISUAL_CAMERA_OWNER_USER){
-   CameraPose view{};
-   if(cameraPose(frame,view)){
-    actual.origin[0]=view.eye.x;actual.origin[1]=view.eye.y;actual.origin[2]=view.eye.z;
-    actual.angles[0]=std::clamp(std::atan2(-view.forward.z,std::hypot(view.forward.x,view.forward.y))*180.f/cinematic::pi,-89.f,89.f);
-    actual.angles[1]=std::atan2(view.forward.y,view.forward.x)*180.f/cinematic::pi;
-    if(!api.setPose(&actual))resetExternalCameraLocked(false,true);
-   }
+  externalCameraActive=false;externalDirector.reset();clearCinematicComposition();
+  CameraPose view{};
+  if(cameraPose(frame,view)){
+   actual.origin[0]=view.eye.x;actual.origin[1]=view.eye.y;actual.origin[2]=view.eye.z;
+   actual.angles[0]=std::clamp(std::atan2(-view.forward.z,std::hypot(view.forward.x,view.forward.y))*180.f/cinematic::pi,-89.f,89.f);
+   actual.angles[1]=std::atan2(view.forward.y,view.forward.x)*180.f/cinematic::pi;
+   if(!api.setPose(&actual))resetExternalCameraLocked(false,true);
   }
-  return;
+  return; // pending native poses are heartbeat only; Visual does not apply them
  }
  if(status.owner!=L4D2VISUAL_CAMERA_OWNER_EXTERNAL||!status.camera_active||nativeHud.isOpen()){
-  externalCameraActive=false;externalDirector.reset();externalCameraLastFrame=0;
-  // Visual discards user-owned pose coordinates; this only keeps the lease.
+  externalCameraActive=false;externalDirector.reset();externalCameraLastFrame=0;clearCinematicComposition();
   if(!api.setPose(&actual))resetExternalCameraLocked(false,true);
   return;
  }
  if(externalCameraLastFrame&&at-externalCameraLastFrame>500)externalDirector.reset();
  externalCameraLastFrame=at;
- if(!externalDirector.ready){
-  const cinematic::Pose current{{actual.origin[0],actual.origin[1],actual.origin[2]},
-      actual.angles[0],actual.angles[1],actual.angles[2]};
-  if(!externalDirector.start(current)){resetExternalCameraLocked(true,true);return;}
-  note("Cinematic acquired camera from actual GetPose()");
+ const cinematic::Pose current{{actual.origin[0],actual.origin[1],actual.origin[2]},actual.angles[0],actual.angles[1],actual.angles[2]};
+ if(!externalDirector.ready){if(!externalDirector.start(current)){resetExternalCameraLocked(true,true);return;}note("Cinematic acquired actual GetPose");}
+ if(!externalCameraTraceProbed){externalCameraTraceProbed=true;externalCameraTrace=source_walls::resolveWorldTrace();if(!externalCameraTrace)note("Cinematic world trace unavailable; stationary fallback");}
+ const auto requested=cinematic::Style(std::clamp(config->cinematicStyle,0,4));
+ const auto music=std::atomic_load(&snapshot);
+ const auto song=music->at(static_cast<int64_t>(at));
+ const auto lyricSong=song<0?song:song+(config->demo?0:config->offset);
+ if(externalDirector.needsPlan(at,actor,requested)){
+  // Replan from the exact last rendered pose rather than an old target.
+  externalDirector.last=current;
+  clearCinematicComposition();
+  if(config->cinematicLyrics&&(requested==cinematic::Style::Architecture||(requested==cinematic::Style::Mixed&&cinematic::choose(requested,length(actor.velocity),externalDirector.sequence,true)==cinematic::Style::Architecture)))cinematicPanels=findCinematicPanels(actor,at);
+  unsigned span=config->cinematicLyrics&&music->playing?cinematic::duration(music->timeline,lyricSong,music->rate):6000;
+  bool planned=externalDirector.plan(at,span,actor,requested,cinematicPanels,cinematicPathClear);
+  if(!planned||externalDirector.active!=cinematic::Style::Architecture)clearCinematicComposition();
+  note("Cinematic shot style="+std::to_string(int(externalDirector.active))+" moving="+std::to_string(planned)+" actor="+std::to_string(actor.handle));
  }
- if(!externalCameraTraceProbed){
-  externalCameraTraceProbed=true;
-  externalCameraTrace=source_walls::resolveWorldTrace();
-  if(!externalCameraTrace)note("Cinematic world trace unavailable; rotation-only fallback");
- }
- unsigned duration=6000;
- if(externalCameraLyricSync.load()&&(!externalDirector.planned||at-externalDirector.begin>=externalDirector.span)){
-  const auto music=std::atomic_load(&snapshot);
-  const auto settingsNow=std::atomic_load(&settings);
-  const auto song=music->at(static_cast<int64_t>(at));
-  if(music->playing&&song>=0)duration=cinematic::duration(music->timeline,song+(settingsNow->demo?0:settingsNow->offset),music->rate);
- }
- const auto p=externalDirector.step(at,duration,cinematicPathClear);
+ const auto p=externalDirector.step(at,actor);
  L4D2VisualCameraPoseV1 target{sizeof(target),{p.eye.x,p.eye.y,p.eye.z},{p.pitch,p.yaw,p.roll}};
  if(!api.setPose(&target)){resetExternalCameraLocked(false,true);return;}
  externalCameraActive=true;
+ // Fixed world panels preplanned for successive lines; update visibility
+ // separately. All trace calls stay on the existing Source game callback.
+ if(cinematicPanels.ready&&at>=cinematicVisibilityAt){
+  cinematicVisibilityAt=at+100;CinematicLyricShot shot;
+  auto prior=std::atomic_load(&cinematicLyricShot);
+  shot.panels=cinematicPanels;shot.panels.tick=at;
+  shot.key=music->key;shot.generation=music->generation;
+  shot.index=prior->panels.serial==shot.panels.serial&&prior->key==shot.key?prior->index:std::max(0,indexAt(music->timeline,lyricSong));
+  shot.firstVisible=trace::visible(shot.panels.first,current.eye,cinematicRay);
+  shot.secondVisible=shot.panels.hasSecond&&trace::visible(shot.panels.second,current.eye,cinematicRay);
+  std::atomic_store(&cinematicLyricShot,std::make_shared<const CinematicLyricShot>(std::move(shot)));
+ }
 }
 void captureSourceFeatures(const GameCameraFrame& frame){
+ source_entities::cinematicRequested=externalCameraTest.load();
  tickExternalCameraTest(frame);
  auto current=std::atomic_load(&settings);source_roster::enabled=!syncResetRequested.load()&&current->sync.enabled&&current->sync.discover&&!current->demo&&current->musicSource<=1;source_roster::capture(frame);
  auto config=std::atomic_load(&settings);bool automatic=config->enabled&&config->autoFollow.enabled&&!config->autoFollow.rules.empty();source_entities::autoRequested=automatic;
