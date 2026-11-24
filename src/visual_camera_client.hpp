@@ -1,5 +1,5 @@
 #pragma once
-// Optional VisualEffects FreeCamera v3 client; no new Source/ClientMode hooks.
+// Optional VisualEffects FreeCamera v4 client; no new Source/ClientMode hooks.
 // GPL-3.0: shared ABI contract from yeyunyyds/L4D2-Visual-Effects.
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
