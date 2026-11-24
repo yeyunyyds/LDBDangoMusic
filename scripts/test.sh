@@ -4,6 +4,8 @@ cd "$(dirname "$0")/.."
 mkdir -p build
 g++ -std=c++17 -Wall -Wextra -Werror -Ivendor tests/visual_camera_api_test.cpp -o build/visual_camera_api_test
 ./build/visual_camera_api_test
+g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc -Ivendor tests/folia_protocol_test.cpp -o build/folia_protocol_test
+./build/folia_protocol_test
 g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc tests/cinematic_camera_test.cpp -o build/cinematic_camera_test
 ./build/cinematic_camera_test
 g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc -Ivendor tests/core_test.cpp -o build/core_test
