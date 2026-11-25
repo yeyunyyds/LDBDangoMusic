@@ -25,7 +25,8 @@ jobs:
     if: github.ref_name != 'main' || github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'Release L4D2DangoMusic v1.0.1')
     runs-on: ubuntu-latest
     env:
-      REUSE_VERIFIED_CANDIDATE: ${{ github.event_name == 'push' && github.ref_name == 'main' && startsWith(github.event.head_commit.message, 'Release L4D2DangoMusic v1.0.1: reuse verified candidate') }}
+      REUSE_VERIFIED_CANDIDATE: >-
+        ${{ github.event_name == 'push' && github.ref_name == 'main' && startsWith(github.event.head_commit.message, 'Release L4D2DangoMusic v1.0.1: reuse verified candidate') }}
     steps:
       - uses: actions/checkout@v4
         with:
