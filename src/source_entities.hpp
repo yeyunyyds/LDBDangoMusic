@@ -86,15 +86,24 @@ inline std::string modelName(int index){
 inline void getterHint(Frame& frame,const char* kind,uint32_t fn){
  if(!fn||frame.getterHints.size()>=16||!source_camera::owns(reinterpret_cast<void*>(uintptr_t(fn)),source_camera::clientModule))return;uint8_t code[12];if(!reader.read(fn,code,sizeof(code)))return;char prefix[96];std::snprintf(prefix,sizeof(prefix),"%s client+0x%x bytes=",kind,fn-uint32_t(reinterpret_cast<uintptr_t>(source_camera::clientModule)));std::string hint=prefix;const char* digits="0123456789abcdef";for(auto c:code){hint+=digits[c>>4];hint+=digits[c&15];}if(std::find(frame.getterHints.begin(),frame.getterHints.end(),hint)==frame.getterHints.end())frame.getterHints.push_back(std::move(hint));
 }
-inline std::optional<Record> readRecord(unsigned i,const wire::Entry& entry,uint32_t net,Frame& frame){
+inline std::optional<Record> readRecord(unsigned i,const wire::Entry& entry,uint32_t net,Frame& frame,bool cinematicOnly=false){
  ++frame.occupied;auto h=wire::handle(i,entry.serial);if(!h)return {};Record r;r.index=i;r.serial=entry.serial;r.handle=*h;
- auto cls=classAddress(net);if(!cls){++frame.unknownClass;uint32_t getter=0;if(method(net,profile::ClassSlot,getter))getterHint(frame,"class",getter);return {};}auto it=classes.find(*cls);if(it==classes.end())it=classes.emplace(*cls,readClass(*cls)).first;const auto& info=it->second;if(info.name.empty()){++frame.unknownClass;return {};}r.className=info.name;r.classId=info.id;
+ auto cls=classAddress(net);if(!cls){++frame.unknownClass;uint32_t getter=0;if(method(net,profile::ClassSlot,getter))getterHint(frame,"class",getter);return {};}auto it=classes.find(*cls);if(it==classes.end())it=classes.emplace(*cls,readClass(*cls)).first;const auto& info=it->second;if(info.name.empty()){++frame.unknownClass;return {};}r.className=info.name;r.classId=info.id;if(cinematicOnly&&!inventory::cinematicClass(r.className))return {};
  uint32_t fn;if(method(net,profile::DormantSlot,fn))r.dormant=wire::byteGetter(reader,fn,net);
  // The cached IsDormant bit is only a diagnostic comparison, not authority.
  uint32_t base=0,dataGetter=0;if(method(net,profile::DataBaseSlot,dataGetter)){auto b=wire::addressGetter(reader,dataGetter,net);if(b&&*b==entry.entity)base=*b;}
  if(!base){++frame.unknownBase;getterHint(frame,"data_base",dataGetter);}else if(!info.schema)++frame.unknownTables;else{
- r.worldModelIndex=field<int>(base,info,"m_iWorldModelIndex",0);auto carry=field<uint8_t>(base,info,"m_isCarryable",0);if(carry&&*carry<=1)r.isCarryable=*carry!=0;r.effects=field<int>(base,info,"m_fEffects",0);
+ if(!cinematicOnly){r.worldModelIndex=field<int>(base,info,"m_iWorldModelIndex",0);auto carry=field<uint8_t>(base,info,"m_isCarryable",0);if(carry&&*carry<=1)r.isCarryable=*carry!=0;r.effects=field<int>(base,info,"m_fEffects",0);}
  r.networkOrigin=vectorField(base,info,"m_vecOrigin");r.networkAngles=vectorField(base,info,"m_angRotation");r.team=field<int>(base,info,"m_iTeamNum",0);r.zombieClass=field<int>(base,info,"m_zombieClass",0);r.character=field<int>(base,info,"m_survivorCharacter",0);r.health=field<int>(base,info,"m_iHealth",0);r.lifeState=field<uint8_t>(base,info,"m_lifeState",0);
+ if(cinematicOnly){
+  auto pitch=field<float>(base,info,"m_angEyeAngles[0]",1),yaw=field<float>(base,info,"m_angEyeAngles[1]",1);
+  if(pitch&&yaw&&std::isfinite(*pitch)&&std::isfinite(*yaw))r.aimAngles=Vec3{*pitch,*yaw,0};
+  auto ghost=field<uint8_t>(base,info,"m_isGhost",0),incap=field<uint8_t>(base,info,"m_isIncapacitated",0);
+  if(ghost&&*ghost<=1)r.ghost=*ghost!=0;
+  if(incap&&*incap<=1)r.incapacitated=*incap!=0;
+  for(const char* name:{"m_pounceAttacker","m_tongueOwner","m_jockeyAttacker","m_pummelAttacker","m_carryAttacker"}){auto h=field<uint32_t>(base,info,name,0);if(h&&*h&&*h!=0xffffffffu){r.controlAttacker=*h;break;}}
+  return r;
+ }
  auto index=field<int16_t>(base,info,"m_nModelIndex",0);if(index){r.modelIndex=int(*index);r.modelName=modelName(*index);}
  r.parent=field<uint32_t>(base,info,"moveparent",0);r.parentAttachment=field<uint8_t>(base,info,"m_iParentAttachment",0);r.owner=field<uint32_t>(base,info,"m_hOwnerEntity",0);r.weaponOwner=field<uint32_t>(base,info,"m_hOwner",0);r.activeWeapon=field<uint32_t>(base,info,"m_hActiveWeapon",0);r.viewModel=field<uint32_t>(base,info,"m_hViewModel[0]",0);r.observerTarget=field<uint32_t>(base,info,"m_hObserverTarget",0);
  }return r;
@@ -129,6 +138,23 @@ inline Frame captureSelected(const GameCameraFrame& camera,const inventory::Foll
  auto append=[&](const std::optional<uint32_t>& h){if(h&&*h!=0xffffffffu&&pending.size()<32)pending.push_back(*h);};append(record->parent);
  if(handle==trackedHandle&&dango::follow::carryable(*record)){append(record->owner);append(record->weaponOwner);}
  f.records.push_back(std::move(*record));
+ }
+ return f;
+}
+// AFK-only class-filtered capture. No diagnostic publication or model lookup.
+inline Frame captureCinematic(const GameCameraFrame& camera){
+ Frame f;if(!prepare(camera,f))return f;
+ auto object=uint32_t(reinterpret_cast<uintptr_t>(list));
+ int highest=-1;if(!wire::load(reader,object+profile::HighestOffset,highest)||highest< -1||highest>=4096)return f;
+ std::array<wire::Entry,profile::MaxNetworked> entries{};
+ struct Cache {uint32_t networkable;uint16_t dormant,padding;};
+ std::array<Cache,profile::MaxNetworked> cache{};
+ auto entryBase=uint32_t(int64_t(object)+profile::EntryBaseDelta);
+ if(!reader.read(entryBase,entries.data(),sizeof(entries))||!reader.read(object+profile::CacheOffset,cache.data(),sizeof(cache)))return f;
+ for(unsigned i=1;i<unsigned(std::min(highest+1,int(profile::MaxNetworked)));++i){
+  if(!entries[i].entity||!cache[i].networkable)continue;
+  auto record=readRecord(i,entries[i],cache[i].networkable,f,true);
+  if(record&&f.records.size()<128)f.records.push_back(std::move(*record));
  }
  return f;
 }

@@ -168,9 +168,13 @@ struct Director {
  void reset(){*this={};}
  bool start(Pose pose){if(!valid(pose))return false;reset();ready=true;last=from=to=pose;return true;}
  bool rebase(Pose pose){const auto n=sequence;if(!start(pose))return false;sequence=n;departureChecked=true;return true;}
+ void beginBird(double now,unsigned milliseconds,const Actor& actor,Style requested,unsigned mask){
+  selected=requested;selectedMask=mask;active=Style::Bird;actorEpoch=actor.epoch;actorHandle=actor.handle;
+  sequence=nextSequence(sequence,active);begin=now;span=std::clamp(milliseconds,4000u,10000u);planned=moving=true;anticipating=fixedSurface=false;
+ }
  bool needsPlan(double now,const Actor& actor,Style requested,unsigned mask=allStyles)const{
   if(!planned||requested!=selected||(requested==Style::Mixed&&mask!=selectedMask)||actor.epoch!=actorEpoch||actor.handle!=actorHandle||now<begin||now-begin>=span)return true;
-  if(!actor.ready)return false;
+  if(!actor.ready||active==Style::Bird)return false;
   // Update world reference at every shot boundary; fast-moving players may
   // force an earlier continuous transition, not an instantaneous teleport.
   const float speed=std::hypot(actor.velocity.x,actor.velocity.y);
@@ -272,7 +276,7 @@ struct Director {
   Vec3 aim=focus;
   if(actor.ready){
    const auto delta=actor.center-anchor;
-   if(!fixedSurface&&!anticipating)eye=eye+(moving?delta:limited(delta,180.f));
+   if(!fixedSurface&&!anticipating&&moving)eye=eye+delta;
    if(!fixedSurface){
     aim=lyricFocus&&active!=Style::Wide&&active!=Style::Mixed?mix(actor.center,freePanel(active,actor,eye).center,.38f):actor.center;
     if(anticipating)aim=mix(aim,intercept,.35f*(1-t));

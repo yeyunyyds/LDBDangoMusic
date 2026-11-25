@@ -1,7 +1,7 @@
 name: Optional Visual FreeCamera ABI client smoke (no release)
 on:
   push:
-    branches: [feature/visual-freecamera-abi-client, work/next-cinematic-recovery]
+    branches: [feature/visual-freecamera-abi-client, work/next-cinematic-recovery, work/bird-scene-aware]
   workflow_dispatch:
 permissions:
   contents: read
@@ -25,6 +25,10 @@ jobs:
           /tmp/folia-protocol
           g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc tests/cinematic_camera_test.cpp -o /tmp/cinematic-camera
           /tmp/cinematic-camera
+          g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc tests/cinematic_bird_test.cpp -o /tmp/cinematic-bird
+          /tmp/cinematic-bird
+          # Compile the same policy test with the Windows SDK macros in scope.
+          i686-w64-mingw32-g++-posix -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -include windows.h -DNOMINMAX -Isrc -c tests/cinematic_bird_test.cpp -o /tmp/cinematic-bird-win32.o
           g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc -Ivendor tests/settings_lifecycle_test.cpp -o /tmp/settings-lifecycle
           /tmp/settings-lifecycle
           g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc -Ivendor tests/menu_navigation_test.cpp -o /tmp/menu-navigation
@@ -33,11 +37,11 @@ jobs:
           g++ -std=c++17 -Wall -Wextra -Werror -Isrc tests/hud_menu_policy_test.cpp -o /tmp/camera-menu
           /tmp/camera-menu
       - uses: actions/setup-dotnet@v4
-        if: github.ref_name == 'work/next-cinematic-recovery'
+        if: github.ref_name == 'work/next-cinematic-recovery' || github.ref_name == 'work/bird-scene-aware'
         with:
           dotnet-version: 8.0.x
       - name: Full release regression
-        if: github.ref_name == 'work/next-cinematic-recovery'
+        if: github.ref_name == 'work/next-cinematic-recovery' || github.ref_name == 'work/bird-scene-aware'
         run: bash scripts/test.sh
       - name: Build optional camera client caller and plugin
         env:
@@ -53,11 +57,11 @@ jobs:
             build/L4D2DangoMusic.dll
           if-no-files-found: error
       - name: Package production installer
-        if: github.ref_name == 'work/next-cinematic-recovery'
+        if: github.ref_name == 'work/next-cinematic-recovery' || github.ref_name == 'work/bird-scene-aware'
         run: python3 scripts/package.py
       - uses: actions/upload-artifact@v4
-        if: github.ref_name == 'work/next-cinematic-recovery'
+        if: github.ref_name == 'work/next-cinematic-recovery' || github.ref_name == 'work/bird-scene-aware'
         with:
-          name: DangoMusic-v1.0.0-Release-Candidate
+          name: DangoMusic-v1.0.1-Release-Candidate
           path: build/packages/*
           if-no-files-found: error
