@@ -132,15 +132,15 @@ struct BirdDirector {
   focus=mix(focus,desiredFocus,1.f-std::exp(-std::clamp(dt,0.f,.1f)*(scene.engagement>0?2.8f:1.4f)));
   const float distance=length(current.eye-actor.center);
   if(distance>1000.f){if(!farSince||distance<farBest-120.f){farSince=now;farBest=distance;}}else{farSince=0;farBest=0;}
-  const bool far=(distance>2200.f||(farSince&&now-farSince>=2500))&&(!lastCut||now-lastCut>=2000)&&(distance>2200.f||now>=nextPlan);
+  const bool distantCutEligible=(distance>2200.f||(farSince&&now-farSince>=2500))&&(!lastCut||now-lastCut>=2000)&&(distance>2200.f||now>=nextPlan);
   if(moving&&length(target-current.eye)<12.f){moving=false;target=current.eye;holdUntil=now+2000;out.event="arrived";}
   if(moving&&now>=nextCheck){
    nextCheck=now+200;
    if(blocked||!clear(current.eye,target)){moving=false;target=current.eye;nextPlan=now+600;holdUntil=now+600;out.event="path-invalid";}
   }
-  if((far&&now>=nextCheck)||(!moving&&now>=nextPlan&&now>=holdUntil)){
+  if((distantCutEligible&&now>=nextCheck)||(!moving&&now>=nextPlan&&now>=holdUntil)){
    const float old=score(current.eye,desiredFocus,current.eye,actor,lens,sight)+space(current.eye)*5.f;
-   float best=far||distance<95.f?-1000.f:old+12.f;
+   float best=distantCutEligible||distance<95.f?-1000.f:old+12.f;
    Vec3 chosen=current.eye;bool found=false;
    auto center=scene.sampled?scene.center:actor.center;
    auto dir=length(scene.direction)>.5f?scene.direction:headingVector(actor.yaw);
@@ -150,7 +150,7 @@ struct BirdDirector {
    struct Candidate {Vec3 eye;float value;};std::vector<Candidate> candidates;
    for(const auto& o:offsets)for(float a:{pi,pi*.66f,-pi*.66f,0.f}){
     Vec3 eye=center+Vec3{std::cos(heading+a)*o.r,std::sin(heading+a)*o.r,o.h};
-    if(!far&&length(eye-current.eye)<80.f)continue;
+    if(!distantCutEligible&&length(eye-current.eye)<80.f)continue;
     if(!sight(eye,actor.center))continue;
     float v=score(eye,desiredFocus,current.eye,actor,lens,sight);
     if(v+5.f>best)candidates.push_back({eye,v});
@@ -161,11 +161,11 @@ struct BirdDirector {
     if(++checked>8)break;
     if(!clear(c.eye,c.eye)||!clear(c.eye,actor.center))continue;
     const float v=c.value+space(c.eye)*5.f;
-    if(v<=best||(!far&&!clear(current.eye,c.eye)))continue;
+    if(v<=best||(!distantCutEligible&&!clear(current.eye,c.eye)))continue;
     chosen=c.eye;best=v;found=true;
    }
    if(found){failures=0;target=chosen;nextCheck=now+200;nextPlan=now+1000;
-    if(far){lastCut=now;farSince=0;moving=false;focus=desiredFocus;holdUntil=now+2000;out.pose=look(chosen,focus,current.yaw);out.cut=true;out.event="distant-cut";return out;}
+    if(distantCutEligible){lastCut=now;farSince=0;moving=false;focus=desiredFocus;holdUntil=now+2000;out.pose=look(chosen,focus,current.yaw);out.cut=true;out.event="distant-cut";return out;}
     moving=true;out.event="reposition";
    }else{failures=std::min(3u,failures+1);nextPlan=nextCheck=now+1000*failures;out.event="hold";if(distance>1000.f&&farSince&&now-farSince>=6500){out.native=true;out.event="distant-recovery-exhausted";}}
   }
