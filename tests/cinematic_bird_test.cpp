@@ -14,6 +14,8 @@ int main(){
  BirdDirector bird;bird.scene.sample(1000,a,f,clear);bird.scene.sample(1200,a,f,clear);bird.scene.sample(1400,a,f,clear);
  assert(bird.scene.team.size()==2&&bird.scene.enemies.size()==1&&bird.scene.combatHandle==3);
  assert(bird.scene.focus(a).x>0);
+ bird.scene.engagement=0;bird.scene.advance=1;bird.scene.direction={1,0,0};auto aim=bird.scene.focus(a);
+ assert(bird.score({-400,0,250},aim,{-400,0,250},a,{},clear)>bird.score({600,0,250},aim,{600,0,250},a,{},clear));
  auto sightBlocked=[](Vec3,Vec3){return false;};
  bird.scene.sample(2500,a,f,sightBlocked);assert(!bird.scene.combatHandle);
  assert(birdFrame({0,0,0},{100,0,0},{50,0,0},{}));

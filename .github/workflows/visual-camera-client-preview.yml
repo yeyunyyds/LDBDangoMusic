@@ -25,6 +25,8 @@ jobs:
           /tmp/folia-protocol
           g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc tests/cinematic_camera_test.cpp -o /tmp/cinematic-camera
           /tmp/cinematic-camera
+          g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc tests/cinematic_bird_test.cpp -o /tmp/cinematic-bird
+          /tmp/cinematic-bird
           g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc -Ivendor tests/settings_lifecycle_test.cpp -o /tmp/settings-lifecycle
           /tmp/settings-lifecycle
           g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation -Isrc -Ivendor tests/menu_navigation_test.cpp -o /tmp/menu-navigation

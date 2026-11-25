@@ -404,7 +404,7 @@ void drawWallContents(IDirect3DDevice9* dev,const wall::Panel& panel,const GameC
 // Rendering owns each lyric lease. A shot change, occlusion or failed projection
 // may hide a spatial lease, but cannot turn it into a subtitle mid-sentence.
 struct CinematicRenderState {
- struct Entry {uint64_t lease=0,shotSerial=0,groundSerial=0;uint32_t actorHandle=0;cinematic::Style style=cinematic::Style::Orbit;cinematic::LyricMode mode=cinematic::LyricMode::Subtitle;bool dynamic=false;wall::Panel panel;std::unique_ptr<WallSentence> text;};
+ struct Entry {uint64_t lease=0,shotSerial=0,groundSerial=0,groundHiddenSince=0;uint32_t actorHandle=0;cinematic::Style style=cinematic::Style::Orbit;cinematic::LyricMode mode=cinematic::LyricMode::Subtitle;bool dynamic=false;wall::Panel panel;std::unique_ptr<WallSentence> text;};
  LyricLifecycle life;std::vector<Entry> entries;cinematic::RenderActor actor;uint64_t generation=0;uint32_t epoch=0;
  void reset(){life.reset();entries.clear();actor.reset();generation=0;epoch=0;}
 } cinematicRender;
@@ -435,7 +435,7 @@ void drawCinematicLyrics(IDirect3DDevice9* dev,const GameCameraFrame& camera,boo
   const auto ground=std::find_if(shot->ground.begin(),shot->ground.end(),[&](const auto& a){return a.index==l.index&&!a.expires;});
   // Source and Present may straddle a lyric boundary. Wait for placement.
   if(bird&&ground==shot->ground.end())continue;
-  const bool first=bird?ground->valid:visibilityFresh&&shot->firstVisible&&wallscene::onScreen(panel(false),camera,width,height);
+  const bool first=bird?(ground->valid&&ground->visible&&wallscene::onScreen(ground->panel,camera,width,height)):visibilityFresh&&shot->firstVisible&&wallscene::onScreen(panel(false),camera,width,height);
   const bool second=!bird&&visibilityFresh&&shot->panels.hasSecond&&shot->secondVisible&&wallscene::onScreen(panel(true),camera,width,height);
   const auto mode=cinematic::chooseLyricMode(!bird&&shot->panels.hasSecond&&((at-shot->index)&1)!=0,first,second);
   CinematicRenderState::Entry entry;entry.lease=l.id;entry.mode=mode;entry.shotSerial=shot->panels.serial;entry.dynamic=shot->dynamic&&!bird;entry.style=shot->style;entry.actorHandle=shot->actor.handle;
@@ -460,7 +460,16 @@ void drawCinematicLyrics(IDirect3DDevice9* dev,const GameCameraFrame& camera,boo
   }
   if(e.groundSerial){
    const auto anchor=std::find_if(shot->ground.begin(),shot->ground.end(),[&](const auto& a){return a.serial==e.groundSerial;});
-   if(!cameraGood||shot->key!=music.key||shot->generation!=music.generation||anchor==shot->ground.end()||!anchor->visible||tick<anchor->visibleTick||tick-anchor->visibleTick>350||!wallscene::onScreen(e.panel,camera,width,height)){if(l->retired<0)drawCinematicSubtitle(dev,music.timeline[l->index],width,height,fade.alpha,0.f);continue;}
+   if(!cameraGood||shot->key!=music.key||shot->generation!=music.generation||anchor==shot->ground.end()||!anchor->visible||tick<anchor->visibleTick||tick-anchor->visibleTick>350||!wallscene::onScreen(e.panel,camera,width,height)){
+    if(l->retired<0){
+     if(!e.groundHiddenSince)e.groundHiddenSince=tick;
+     // Only a sustained loss may downgrade this sentence; never return to
+     // ground placement until the next sentence lease.
+     if(tick>=e.groundHiddenSince+350){e.mode=Mode::Subtitle;e.groundSerial=0;e.text.reset();drawCinematicSubtitle(dev,music.timeline[l->index],width,height,fade.alpha,0.f);note("Bird lyrics: sustained occlusion, subtitle locked");}
+    }
+    continue;
+   }
+   e.groundHiddenSince=0;
    if(l->retired>=0&&current&&current->groundSerial&&length(current->panel.center-e.panel.center)<24.f)continue;
    drawWallContents(dev,e.panel,camera,width,height,*e.text,lyricPosition(display.position,cfg.demo?0:cfg.offset),clock,fade.alpha,false,true);continue;
   }
@@ -1306,7 +1315,7 @@ void tickExternalCameraTest(const GameCameraFrame& frame){
   auto space=[&](Vec3 a){unsigned count=0;for(Vec3 offset:{Vec3{32,0,0},Vec3{-32,0,0},Vec3{0,32,0},Vec3{0,-32,0},Vec3{0,0,32}})if(sight(a,a+offset))++count;return float(count)/5.f;};
   birdDecision=cinematicBird.update(at,dt,current,actor,cinematic::birdLens(frame),cinematicPathBlocked,cinematicPathClear,sight,space);
   if(birdDecision.event)note(std::string("Bird ")+birdDecision.event+" distance="+std::to_string(length(current.eye-actor.center))+" target height="+std::to_string(birdDecision.pose.eye.z-actor.center.z));
-  if(birdDecision.cut)action=cinematic::Recovery::Action::Cut;
+  if(birdDecision.native)action=cinematic::Recovery::Action::Native;else if(birdDecision.cut)action=cinematic::Recovery::Action::Cut;
  }else if(at>=cinematicRecovery.nextProbe){
   const bool visible=cinematicActorVisible(current.eye,actor);
   const bool healthy=recoveryGate.healthy(at,visible,length(current.eye-actor.center),range,cinematicRecovery.active);

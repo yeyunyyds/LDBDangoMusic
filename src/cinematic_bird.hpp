@@ -95,7 +95,7 @@ inline bool birdFrame(Vec3 eye,Vec3 focus,Vec3 point,BirdLens lens,float margin=
  auto up=normalize(wall::cross(right,forward));auto delta=point-eye;float depth=wall::dot(delta,forward);
  return depth>8.f&&std::abs(wall::dot(delta,right))<depth*lens.x*margin&&std::abs(wall::dot(delta,up))<depth*lens.y*margin;
 }
-struct BirdDecision {Pose pose{};bool cut=false;const char* event=nullptr;};
+struct BirdDecision {Pose pose{};bool cut=false,native=false;const char* event=nullptr;};
 struct BirdDirector {
  BirdScene scene;
  Vec3 target{},focus{};
@@ -115,6 +115,11 @@ struct BirdDirector {
   if(scene.engagement>0&&covered(scene.combat))value+=38.f*scene.engagement;
   value+=6.f*std::clamp((eye.z-center.z)/540.f,0.f,1.f);
   value+=8.f*std::max(0.f,-wall::dot(normalize(horizontal(eye-center)),dir));
+  // Coverage alone can reward a camera in front looking backward. Prefer
+  // a view looking along travel, or along the active ally-to-threat axis.
+  auto view=normalize(horizontal(aim-eye));
+  value+=20.f*scene.advance*(1.f-scene.engagement)*wall::dot(view,dir);
+  if(scene.engagement>0)value+=14.f*scene.engagement*wall::dot(view,normalize(horizontal(scene.combat-center)));
   // Avoid parking at extreme distance when the main subjects are tiny.
   value-=std::max(0.f,length(eye-center)-750.f)*.025f;
   value-=std::min(12.f,length(eye-origin)/100.f);
@@ -162,7 +167,7 @@ struct BirdDirector {
    if(found){failures=0;target=chosen;nextCheck=now+200;nextPlan=now+1000;
     if(far){lastCut=now;farSince=0;moving=false;focus=desiredFocus;holdUntil=now+2000;out.pose=look(chosen,focus,current.yaw);out.cut=true;out.event="distant-cut";return out;}
     moving=true;out.event="reposition";
-   }else{failures=std::min(3u,failures+1);nextPlan=nextCheck=now+1000*failures;out.event="hold";}
+   }else{failures=std::min(3u,failures+1);nextPlan=nextCheck=now+1000*failures;out.event="hold";if(distance>1000.f&&farSince&&now-farSince>=6500){out.native=true;out.event="distant-recovery-exhausted";}}
   }
   out.pose=look(current.eye,focus,current.yaw);out.pose.eye=moving?target:current.eye;
   return out;
