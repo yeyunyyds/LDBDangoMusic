@@ -147,7 +147,8 @@ jobs:
           gh release view "$RELEASE_TAG" --json url,isDraft,tagName,assets
 
   update-release-notes:
-    if: github.event_name == 'push' && github.ref_name == 'main' && startsWith(github.event.head_commit.message, 'docs: update v1.0.1 release notes')
+    if: >-
+      github.event_name == 'push' && github.ref_name == 'main' && startsWith(github.event.head_commit.message, 'docs: update v1.0.1 release notes')
     runs-on: ubuntu-latest
     permissions:
       contents: write
