@@ -1314,7 +1314,7 @@ void tickExternalCameraTest(const GameCameraFrame& frame){
   auto sight=[&](Vec3 a,Vec3 b){if(!sightBudget)return false;--sightBudget;trace::Result hit;return cinematicRay(a,b,hit)&&!hit.startSolid&&!hit.allSolid&&hit.fraction>=.999f;};
   auto space=[&](Vec3 a){unsigned count=0;for(Vec3 offset:{Vec3{32,0,0},Vec3{-32,0,0},Vec3{0,32,0},Vec3{0,-32,0},Vec3{0,0,32}})if(sight(a,a+offset))++count;return float(count)/5.f;};
   birdDecision=cinematicBird.update(at,dt,current,actor,cinematic::birdLens(frame),cinematicPathBlocked,cinematicPathClear,sight,space);
-  if(birdDecision.event)note(std::string("Bird ")+birdDecision.event+" distance="+std::to_string(length(current.eye-actor.center))+" target height="+std::to_string(birdDecision.pose.eye.z-actor.center.z));
+  if(birdDecision.event)note(std::string("Bird ")+birdDecision.event+" distance="+std::to_string(length(current.eye-actor.center))+" target height="+std::to_string(birdDecision.pose.eye.z-actor.center.z)+" cap="+std::to_string(birdDecision.speedCap));
   if(birdDecision.native)action=cinematic::Recovery::Action::Native;else if(birdDecision.cut)action=cinematic::Recovery::Action::Cut;
  }else if(at>=cinematicRecovery.nextProbe){
   const bool visible=cinematicActorVisible(current.eye,actor);
@@ -1331,8 +1331,8 @@ void tickExternalCameraTest(const GameCameraFrame& frame){
   note("Cinematic camera cut: distance="+std::to_string(length(current.eye-actor.center)));
  }else{
   auto desired=birdMode?birdDecision.pose:action==cinematic::Recovery::Action::Normal?externalDirector.step(motionAt,actor):cinematicRecovery.desired(current,actor);
-  p=cameraMotion.step(current,desired,dt,action!=cinematic::Recovery::Action::Normal&&length(desired.eye-current.eye)>220.f,action==cinematic::Recovery::Action::Normal&&externalDirector.anticipating,birdMode?birdDecision.speedCap:900.f);
-  if(action==cinematic::Recovery::Action::Hold||(birdMode&&!cinematicBird.moving)){p.eye=current.eye;cameraMotion.blocked();}
+  p=cameraMotion.step(current,desired,dt,action!=cinematic::Recovery::Action::Normal&&length(desired.eye-current.eye)>220.f,action==cinematic::Recovery::Action::Normal&&externalDirector.anticipating,birdMode?birdDecision.speedCap:900.f,birdMode);
+  if(action==cinematic::Recovery::Action::Hold||(birdMode&&!cinematicBird.moving&&cinematicPathBlocked)){p.eye=current.eye;cameraMotion.blocked();}
   cinematicTraceBudget=14;
   // Brake ahead of an obstruction; final short-segment validation is mandatory.
   if(length(p.eye-current.eye)>.001f&&length(cameraMotion.linear)>30.f){

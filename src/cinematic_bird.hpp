@@ -104,12 +104,13 @@ struct BirdCadence {
  void usedFast(){streak=std::min(streak+1,24u);}
  void alternative(){streak=0;}
 };
-struct BirdDecision {Pose pose{};bool cut=false,native=false;const char* event=nullptr;float speedCap=180.f;};
+constexpr float birdDriftSpeed=50.f;
+struct BirdDecision {Pose pose{};bool cut=false,native=false;const char* event=nullptr;float speedCap=birdDriftSpeed;};
 struct BirdDirector {
  BirdScene scene;
  Vec3 target{},focus{},anchorActor{},anchorEye{};
  uint64_t nextPlan=0,nextCheck=0,holdUntil=0,farSince=0,lastCut=0,nextFollow=0,nextSight=0,hiddenSince=0,trackSince=0;
- unsigned failures=0;float farBest=0;bool moving=false,initialized=false,anchored=false,visible=true,recovering=false;
+ unsigned failures=0;float farBest=0,relocationCap=birdDriftSpeed;bool moving=false,initialized=false,anchored=false,visible=true,recovering=false,catchingUp=false;
  BirdMove mode=BirdMove::Hold;BirdCadence cadence;
  void reset(){*this={};}
  template<class Sight> float score(Vec3 eye,Vec3 aim,Vec3 origin,const Actor& actor,BirdLens lens,Sight sight)const{
@@ -161,7 +162,18 @@ struct BirdDirector {
   const bool cutReady=!lastCut||now-lastCut>=2000;
   const bool emergencyCut=cutReady&&(distance>2200.f||(farSince&&now-farSince>=2500)||hidden>=5000);
   const float actorSpeed=length(horizontal(actor.velocity));
-  auto setAnchor=[&](Vec3 eye){anchorEye=eye;anchorActor=actor.center;anchored=true;};
+  // Judge loss of composition relative to the current eye, not actor speed
+  // or combat gaze. A fast runner can stay in a usable slow tracking shot.
+  const float referenceDistance=length(anchorEye-anchorActor);
+  const Vec3 translated=anchorEye+(actor.center-anchorActor);
+  const float driftError=length(translated-current.eye);
+  const auto referenceLook=look(anchorEye,anchorActor,current.yaw);
+  const auto actualLook=look(current.eye,actor.center,current.yaw);
+  const float driftAngle=std::max(std::abs(wrap(actualLook.yaw-referenceLook.yaw)),std::abs(actualLook.pitch-referenceLook.pitch));
+  const bool catchup=anchored&&driftError>=180.f&&(distance>std::max(400.f,referenceDistance+180.f)||distance<std::max(65.f,referenceDistance*.55f)||driftAngle>35.f);
+  if(catchup&&!catchingUp)nextPlan=now;
+  catchingUp=catchup;
+  auto setAnchor=[&](Vec3 eye){anchorEye=eye;anchorActor=actor.center;anchored=true;catchingUp=false;};
   auto hold=[&](){mode=BirdMove::Hold;moving=false;target=current.eye;trackSince=0;};
   auto cutTo=[&](Vec3 eye,const char* event){lastCut=now;farSince=0;hiddenSince=0;nextSight=now;visible=true;recovering=false;setAnchor(eye);mode=BirdMove::Hold;moving=false;target=eye;focus=desiredFocus;nextFollow=now+100;nextPlan=now+750;holdUntil=now+750;cadence.alternative();trackSince=0;out.pose=look(eye,framedFocus(eye,focus,actor,lens),current.yaw);out.cut=true;out.event=event;};
   if(moving&&blocked){hold();anchored=false;nextPlan=now;out.event="path-invalid";}
@@ -197,11 +209,11 @@ struct BirdDirector {
    }
   }
   const bool relocating=mode==BirdMove::Slow||mode==BirdMove::Fast;
-  const bool planDue=(now>=nextPlan||(distance>2200.f&&!failures&&!relocating))&&(emergencyCut||(!relocating&&(recover||!anchored||now>=holdUntil)));
+  const bool planDue=(now>=nextPlan||(distance>2200.f&&!failures&&!relocating))&&(emergencyCut||(!relocating&&(recover||catchup||!anchored||now>=holdUntil)));
 
   if(planDue){
    const float old=score(current.eye,desiredFocus,current.eye,actor,lens,sight)+space(current.eye)*5.f;
-   float best=(emergencyCut||recover||!anchored||distance<95.f)?-1000.f:old+12.f;
+   float best=(emergencyCut||recover||catchup||!anchored||distance<95.f)?-1000.f:old+12.f;
    Vec3 chosen=current.eye,landing=current.eye;bool found=false,landed=false,nearFound=false;
    auto center=scene.sampled?scene.center:actor.center;
    auto dir=length(scene.direction)>.5f?scene.direction:headingVector(actor.yaw);
@@ -235,11 +247,13 @@ struct BirdDirector {
    if(found){
     const float travel=length(chosen-current.eye);
     const bool longMove=travel>320.f;
-    const bool allowFast=longMove&&cadence.fast(cadence.next());
-    if(longMove&&!allowFast&&cutReady&&landed&&hidden==0&&length(landing-current.eye)>320.f){cutTo(landing,"cadence-cut");return out;}
+    const bool needsCatchup=catchup||distance>1000.f;
+    const bool fastEligible=longMove&&needsCatchup;
+    const bool allowFast=fastEligible&&cadence.fast(cadence.next());
+    if(fastEligible&&!allowFast&&cutReady&&landed&&hidden==0&&length(landing-current.eye)>320.f){cutTo(landing,"cadence-cut");return out;}
     target=chosen;nextCheck=now+200;nextPlan=now+1000;failures=0;moving=true;trackSince=0;
-    if(allowFast){mode=BirdMove::Fast;cadence.usedFast();out.event="fast-reposition";}
-    else{mode=BirdMove::Slow;cadence.alternative();out.event="smooth-reposition";}
+    if(allowFast){mode=BirdMove::Fast;relocationCap=650.f;cadence.usedFast();out.event="fast-reposition";}
+    else{mode=BirdMove::Slow;relocationCap=(!anchored||((recover||needsCatchup)&&travel>180.f))?180.f:birdDriftSpeed;cadence.alternative();out.event="smooth-reposition";}
    }else{
     failures=std::min(3u,failures+1);nextPlan=now+(recover?500:1000*failures);
     if(mode==BirdMove::Hold)out.event="hold";
@@ -247,7 +261,7 @@ struct BirdDirector {
    }
   }
   out.pose=look(current.eye,framedFocus(current.eye,focus,actor,lens),current.yaw);out.pose.eye=moving?target:current.eye;
-  out.speedCap=mode==BirdMove::Fast?650.f:mode==BirdMove::Track?std::clamp(actorSpeed+60.f,90.f,330.f):180.f;
+  out.speedCap=(mode==BirdMove::Fast||mode==BirdMove::Slow)?relocationCap:birdDriftSpeed;
   return out;
  }
 };

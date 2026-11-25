@@ -110,11 +110,21 @@ struct MotionController {
  Vec3 linear{},angular{};
  void reset(){*this={};}
  void blocked(){linear={};}
- Pose step(Pose current,Pose target,float dt,bool rapid=false,bool interceptShot=false,float speedCap=900.f){
+ Pose step(Pose current,Pose target,float dt,bool rapid=false,bool interceptShot=false,float speedCap=900.f,bool cinematicTranslation=false){
   dt=std::clamp(dt,0.f,.05f);
   const float distance=length(target.eye-current.eye);
   const float omega=rapid?10.f:interceptShot?9.f:distance>220.f?7.f:5.f;
-  auto eye=spring(current.eye,target.eye,linear,dt,omega,std::min(speedCap,rapid?720.f:900.f));
+  Vec3 eye;
+  if(cinematicTranslation){
+   // Limit the actual velocity change as well as the requested cruising speed.
+   // Decelerate from a fast shot instead of snapping directly to the slow cap.
+   const float accel=speedCap<=50.f?90.f:speedCap<=180.f?240.f:550.f;
+   const float brake=length(linear)>speedCap?350.f:accel;
+   const float desiredSpeed=std::min(speedCap,std::sqrt(2.f*brake*distance));
+   const auto wanted=limited((target.eye-current.eye)*(speedCap<=50.f?2.f:5.f),desiredSpeed);
+   linear=linear+limited(wanted-linear,brake*dt);
+   eye=current.eye+linear*dt;
+  }else eye=spring(current.eye,target.eye,linear,dt,omega,std::min(speedCap,rapid?720.f:900.f));
   Vec3 angles{current.pitch,current.yaw,current.roll};
   Vec3 desired{target.pitch,current.yaw+wrap(target.yaw-current.yaw),current.roll+wrap(target.roll-current.roll)};
   auto out=spring(angles,desired,angular,dt,10.f,180.f);
