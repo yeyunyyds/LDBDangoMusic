@@ -107,9 +107,9 @@ struct BirdCadence {
 struct BirdDecision {Pose pose{};bool cut=false,native=false;const char* event=nullptr;float speedCap=180.f;};
 struct BirdDirector {
  BirdScene scene;
- Vec3 target{},focus{},anchorActor{},anchorEye{},lastActor{};
+ Vec3 target{},focus{},anchorActor{},anchorEye{};
  uint64_t nextPlan=0,nextCheck=0,holdUntil=0,farSince=0,lastCut=0,nextFollow=0,nextSight=0,hiddenSince=0,trackSince=0;
- unsigned failures=0;float farBest=0;bool moving=false,initialized=false,anchored=false,visible=true;
+ unsigned failures=0;float farBest=0;bool moving=false,initialized=false,anchored=false,visible=true,recovering=false;
  BirdMove mode=BirdMove::Hold;BirdCadence cadence;
  void reset(){*this={};}
  template<class Sight> float score(Vec3 eye,Vec3 aim,Vec3 origin,const Actor& actor,BirdLens lens,Sight sight)const{
@@ -143,7 +143,7 @@ struct BirdDirector {
  }
  template<class Clear,class Sight,class Space> BirdDecision update(uint64_t now,float dt,Pose current,const Actor& actor,BirdLens lens,bool blocked,Clear clear,Sight sight,Space space){
   BirdDecision out;out.pose=current;
-  if(!initialized){initialized=true;target=current.eye;focus=scene.focus(actor);nextPlan=now;lastActor=actor.center;cadence.random^=uint32_t(now)^actor.handle;if(!cadence.random)cadence.random=1;}
+  if(!initialized){initialized=true;target=current.eye;focus=scene.focus(actor);nextPlan=now;cadence.random^=uint32_t(now)^actor.handle;if(!cadence.random)cadence.random=1;}
   const auto desiredFocus=scene.focus(actor);
   focus=mix(focus,desiredFocus,1.f-std::exp(-std::clamp(dt,0.f,.1f)*(scene.engagement>0?2.8f:1.4f)));
   const float distance=length(current.eye-actor.center);
@@ -155,17 +155,19 @@ struct BirdDirector {
   }
   const auto hidden=hiddenSince?now-hiddenSince:0;
   const bool recover=hidden>=1500;
+  if(recover&&!recovering)nextPlan=now;
+  recovering=recover;
   if(distance>1000.f){if(!farSince||distance<farBest-120.f){farSince=now;farBest=distance;}}else{farSince=0;farBest=0;}
   const bool cutReady=!lastCut||now-lastCut>=2000;
   const bool emergencyCut=cutReady&&(distance>2200.f||(farSince&&now-farSince>=2500)||hidden>=5000);
   const float actorSpeed=length(horizontal(actor.velocity));
   auto setAnchor=[&](Vec3 eye){anchorEye=eye;anchorActor=actor.center;anchored=true;};
   auto hold=[&](){mode=BirdMove::Hold;moving=false;target=current.eye;trackSince=0;};
-  auto cutTo=[&](Vec3 eye,const char* event){lastCut=now;farSince=0;hiddenSince=0;nextSight=now;visible=true;setAnchor(eye);mode=BirdMove::Hold;moving=false;target=eye;focus=desiredFocus;nextFollow=now+100;nextPlan=now+750;holdUntil=now+750;cadence.alternative();trackSince=0;out.pose=look(eye,framedFocus(eye,focus,actor,lens),current.yaw);out.cut=true;out.event=event;};
+  auto cutTo=[&](Vec3 eye,const char* event){lastCut=now;farSince=0;hiddenSince=0;nextSight=now;visible=true;recovering=false;setAnchor(eye);mode=BirdMove::Hold;moving=false;target=eye;focus=desiredFocus;nextFollow=now+100;nextPlan=now+750;holdUntil=now+750;cadence.alternative();trackSince=0;out.pose=look(eye,framedFocus(eye,focus,actor,lens),current.yaw);out.cut=true;out.event=event;};
   if(moving&&blocked){hold();anchored=false;nextPlan=now;out.event="path-invalid";}
   if(mode==BirdMove::Slow||mode==BirdMove::Fast){
    if(length(target-current.eye)<12.f){setAnchor(target);hold();holdUntil=now+750;out.event="arrived";}
-   else if(now>=nextCheck){nextCheck=now+200;if(!clear(current.eye,target)||length(target-actor.center)>950.f){hold();anchored=false;nextPlan=now;out.event="path-invalid";}}
+   else if(now>=nextCheck){nextCheck=now+200;if(!clear(current.eye,target)||length(target-actor.center)>950.f||(recover&&!sight(target,actor.center))){hold();anchored=false;nextPlan=now;out.event="path-invalid";}}
   }
   // Translate the current relative composition by actor displacement, not by
   // combat gaze. Incremental waypoints preserve velocity through the spring.
@@ -184,7 +186,8 @@ struct BirdDirector {
      bool found=false;
      for(auto offset:{step,step*.5f,step*.25f,step*.5f+side*24.f,step*.5f-side*24.f,step*.5f+Vec3{0,0,24}}){
       auto q=current.eye+offset;
-      if(length(offset)<4.f||wall::dot(offset,step)<=0||!clear(current.eye,q)||!sight(q,actor.center))continue;
+      if(length(offset)<4.f||wall::dot(offset,step)<=0||!clear(current.eye,q))continue;
+      if((visible||recover)&&!sight(q,actor.center))continue;
       target=q;found=true;break;
      }
      if(found){if(mode!=BirdMove::Track){trackSince=now;out.event="continuous-track";}mode=BirdMove::Track;moving=true;
@@ -193,11 +196,13 @@ struct BirdDirector {
     }else if(actorSpeed<8.f){setAnchor(current.eye);hold();}
    }
   }
-  const bool planDue=now>=nextPlan&&(emergencyCut||recover||(!anchored)||((mode==BirdMove::Hold||mode==BirdMove::Track)&&now>=holdUntil));
+  const bool relocating=mode==BirdMove::Slow||mode==BirdMove::Fast;
+  const bool planDue=(now>=nextPlan||(distance>2200.f&&!failures&&!relocating))&&(emergencyCut||(!relocating&&(recover||!anchored||now>=holdUntil)));
+
   if(planDue){
    const float old=score(current.eye,desiredFocus,current.eye,actor,lens,sight)+space(current.eye)*5.f;
    float best=(emergencyCut||recover||!anchored||distance<95.f)?-1000.f:old+12.f;
-   Vec3 chosen=current.eye,landing=current.eye;bool found=false,landed=false;
+   Vec3 chosen=current.eye,landing=current.eye;bool found=false,landed=false,nearFound=false;
    auto center=scene.sampled?scene.center:actor.center;
    auto dir=length(scene.direction)>.5f?scene.direction:headingVector(actor.yaw);
    float heading=std::atan2(dir.y,dir.x);
@@ -213,14 +218,18 @@ struct BirdDirector {
    // A nearby clear route is preferable to an unnecessary cut.
    if(recover)for(float d:{48.f,96.f,160.f})for(Vec3 axis:{Vec3{1,0,0},Vec3{-1,0,0},Vec3{0,1,0},Vec3{0,-1,0},Vec3{0,0,1}})add(current.eye+axis*d);
    for(const auto& o:offsets)for(float a:{pi,pi*.66f,-pi*.66f,0.f})add(center+Vec3{std::cos(heading+a)*o.r,std::sin(heading+a)*o.r,o.h});
-   std::sort(candidates.begin(),candidates.end(),[](const auto& a,const auto& b){return a.value>b.value;});
-   unsigned checked=0;float landingScore=-1000.f;
+   std::sort(candidates.begin(),candidates.end(),[&](const auto& a,const auto& b){
+    if(recover){const bool an=length(a.eye-current.eye)<=180.f,bn=length(b.eye-current.eye)<=180.f;if(an!=bn)return an;}
+    return a.value>b.value;
+   });
+   unsigned nearChecked=0,otherChecked=0;float landingScore=-1000.f;
    for(const auto& candidate:candidates){
-    if(++checked>12)break;
+    const bool nearCandidate=recover&&length(candidate.eye-current.eye)<=180.f;
+    if(nearCandidate?(++nearChecked>6):(++otherChecked>8))continue;
     if(!clear(candidate.eye,candidate.eye)||!clear(candidate.eye,actor.center))continue;
     const float v=candidate.value+space(candidate.eye)*5.f;
     if(v>landingScore){landing=candidate.eye;landingScore=v;landed=true;}
-    if(v>best&&clear(current.eye,candidate.eye)){chosen=candidate.eye;best=v;found=true;}
+    if(((!nearFound&&nearCandidate)||((nearCandidate||!nearFound)&&v>best))&&clear(current.eye,candidate.eye)){chosen=candidate.eye;best=v;found=true;nearFound=nearCandidate;}
    }
    if(emergencyCut&&landed&&(!found||length(chosen-current.eye)>320.f)){cutTo(landing,"recovery-cut");return out;}
    if(found){
@@ -239,7 +248,7 @@ struct BirdDirector {
   }
   out.pose=look(current.eye,framedFocus(current.eye,focus,actor,lens),current.yaw);out.pose.eye=moving?target:current.eye;
   out.speedCap=mode==BirdMove::Fast?650.f:mode==BirdMove::Track?std::clamp(actorSpeed+60.f,90.f,330.f):180.f;
-  lastActor=actor.center;return out;
+  return out;
  }
 };
 }

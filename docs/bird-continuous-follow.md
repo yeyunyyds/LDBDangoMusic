@@ -5,3 +5,5 @@
 - Fast relocation selection probability halves for each consecutive fast relocation: 1, 1/2, 1/4, ...; safe cut or slow move resets streak. Sustained continuous tracking also resets after 1.5s. Draw only on long relocation decisions. No unsafe cut.
 - Tank engagement weighting, actor-aware framing, heights 480/320 replacing 540/350.
 - Bounded short segment tests rather than navmesh routing. Runtime tuning remains experimental. No public release.
+
+Recovery onset ignores ordinary reframe cooldown; active collision-clear relocations are not replaced by ordinary shot timers. During the initial occlusion grace only bounded clear tracking segments may continue without subject sight. Recovery tries nearby routes before remote repositioning.
