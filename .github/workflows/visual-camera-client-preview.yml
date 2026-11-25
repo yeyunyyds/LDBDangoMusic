@@ -62,6 +62,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: github.ref_name == 'work/next-cinematic-recovery' || github.ref_name == 'work/bird-scene-aware'
         with:
-          name: DangoMusic-v1.0.0-Release-Candidate
+          name: DangoMusic-v1.0.1-Release-Candidate
           path: build/packages/*
           if-no-files-found: error

@@ -2,11 +2,11 @@
 
 > **本实验分支：原生 Folia Stage API**，直接由 x86 DLL 读取本机 Stage 与歌词 API；不需要额外 EXE。见 [安装说明](packaging/README-folia-stage.md)。
 >
-> 正式版：[v1.0.0](https://github.com/yeyunyyds/LDBDangoMusic/releases/tag/v1.0.0)。新增 AFK 自动运镜、场景化歌词与 Folia 原生支持，适配 2026 年 11 月游戏更新。[菜单使用说明](docs/menu-navigation-preview.md)
+> 正式版：[v1.0.1](https://github.com/yeyunyyds/LDBDangoMusic/releases/tag/v1.0.1)。新增 AFK 自动运镜、场景化歌词与 Folia 原生支持，适配 2026 年 11 月游戏更新。[菜单使用说明](docs/menu-navigation-preview.md)
 
 为《求生之路 2》（Left 4 Dead 2）提供音乐歌词显示的 L4N 插件。通过兼容 LX / BLF 的本地音乐 API 获取播放进度和歌词，在游戏中呈现带逐字动画的歌词，并支持世界空间定位、歌名与作者显示以及游戏内调节。
 
-支持 LX 本地 API 与网易云原生歌词；一起听仅支持 LX。默认安装包为单 DLL，无需 .NET。[一起听使用指南](docs/sync/README.md) · [网易云通道说明](docs/multi-platform-lyrics.md)
+支持 LX / BLF 本地 API、网易云原生歌词与 Folia Stage API；一起听仅支持 LX。默认安装包为单 DLL，无需 .NET。[一起听使用指南](docs/sync/README.md) · [网易云通道说明](docs/multi-platform-lyrics.md)
 
 插件由 L4N 加载，在 **32 位游戏进程**中直接读取 Source Engine 相机信息并使用 D3D9 绘制。运行依赖为 L4N 和受支持的音乐播放器，不需要 LDB 或 DXVK。
 
@@ -18,7 +18,7 @@
 
 本软件按“现状”提供，不对适用性、稳定性、数据安全或反作弊兼容性作出保证。使用者应自行了解并遵守平台和服务器规则，评估并承担使用风险。在适用法律允许的范围内，项目开发者与贡献者不对使用本软件导致的账号处罚、数据丢失或其他损失承担责任；本声明不排除法律规定不得排除的责任。
 
-## v0.9.7 联机隔离修正
+## 联机开关与隔离
 
 一起听、同局自动发现、自动搜索和进度应用均默认关闭。关闭一起听总开关时，本插件不绑定 Steam 网络接口、不读取玩家名单、不探测、不收发或轮询 P2P，也不执行自动选曲及控制；已开启后再关闭，仅清理一次本插件通道，随后停止。游戏自身联网和普通歌词所需的相机/绘制功能不受此开关控制。
 
@@ -37,7 +37,7 @@
 - 实体平滑默认开启，可选全局换句移动与多种曲线，实体字幕和普通歌词的退场规则相互独立。
 - 通过 L4N 菜单实时设置，支持固定内容预览、动画预览、位置重置与配置保存。
 - 支持暂停、恢复播放、换歌及播放器断开后的重新同步。
-- 原生获取网易云当前歌曲及歌词；来源菜单仅显示自动、LX 和网易云。
+- 原生获取网易云当前歌曲及歌词，支持 Folia Stage API；来源菜单提供自动、LX、网易云及 Folia。
 - 可选 LX 一起听：同局最多三名玩家自动发现、自动选主、手动声明房主、Scheme 搜索切歌及进度同步。联机功能未实测，默认关闭。
 
 本插件显示歌词；可选一起听通过本机 LX 控制播放、暂停、跳转与搜索选曲。音乐由用户自己的播放器获取和播放，插件不提供或转发音频资源。
@@ -46,7 +46,7 @@
 
 - Windows 版《求生之路 2》。
 - 已安装并正常工作的 L4N，支持插件接口 v2 的 HUD 菜单功能。
-- LX / BLF 本地 API，或网易云音乐原生歌词通道。菜单仅显示已实现的自动、LX 和网易云来源。
+- LX / BLF 本地 API、网易云音乐原生歌词通道或 Folia Stage API。
 
 默认连接 `127.0.0.1:23330`。不同播放器版本提供的 API 可能不同，请先确认所用版本支持上述接口。
 
@@ -54,13 +54,13 @@
 
 ## 安装
 
-[下载 L4D2DangoMusic v1.0.0](https://github.com/yeyunyyds/LDBDangoMusic/releases/download/v1.0.0/L4D2DangoMusic-1.0.0-l4n.zip) · [Release 说明](https://github.com/yeyunyyds/LDBDangoMusic/releases/tag/v1.0.0)
+[下载 L4D2DangoMusic v1.0.1](https://github.com/yeyunyyds/LDBDangoMusic/releases/download/v1.0.1/L4D2DangoMusic-1.0.1-l4n.zip) · [Release 说明](https://github.com/yeyunyyds/LDBDangoMusic/releases/tag/v1.0.1)
 
 安装压缩包内仅包含 **bin 文件夹和 README.md**，不附带源码、构建工具、测试程序或额外依赖。
 
 1. 退出游戏，确认 L4N 已安装并正常工作。
 2. 将压缩包内的 `bin` 文件夹合并到游戏根目录。
-3. 首次安装复制全部文件，升级保留已有 `config.json`，只替换 DLL。选择“音乐来源 → LX 本地 API”或“网易云音乐”。
+3. 首次安装复制全部文件，升级保留已有 `config.json`，只替换 DLL。在“音乐来源”中选择 LX、网易云或 Folia。
 4. 完整重启游戏，在 L4N 菜单进入 L4D2DangoMusic。
 
 安装路径：
@@ -210,7 +210,7 @@ python scripts/package.py
 
 本项目采用 [GPL-3.0](LICENSE) 许可。第三方代码与 SDK 头文件遵循各自的许可及声明，详见 [NOTICE.md](NOTICE.md)。
 
-本版新增：原文与翻译按演唱进度显字（无逐字时间轴默认整句，可选择估算渐显）、单行长度倍率，以及世界歌词换句时沿用视野内原位置。墙面挂画也接入歌词和翻译动画。设置路径和说明见 [歌词设置说明](docs/0.8.1-lyrics-controls.md)。
+歌词设置路径和详细说明见 [歌词设置说明](docs/0.8.1-lyrics-controls.md)。
 
 ## AFK 自动运镜
 
@@ -218,8 +218,9 @@ python scripts/package.py
 
 AFK 运镜需要兼容 FreeCamera ABI v4 的 [L4D2Visual](https://github.com/yeyunyyds/L4D2-Visual-Effects) 并主动授权外部接口。配套版本为 [Visual v1.1.0](https://github.com/yeyunyyds/L4D2-Visual-Effects/releases/tag/v1.1.0)。未安装或未授权时不会接管原生相机，普通歌词功能仍可独立使用。
 
-- 连续平滑追踪人物和估算移动方向，验证路径与世界遮挡；空间不足时调整构图，远离人物或失去视线时进行受限恢复。
-- 鸟瞰歌词在每句开始时从八个方向寻找经过地面支撑、视线和屏幕检查的位置。选定后世界坐标和朝向固定，人物和相机运动均不会拖动歌词；找不到位置则整句使用屏幕字幕。遮挡只隐藏，不在句中改换显示模式。
+- **鸟瞰追踪**：根据附近求生者的实际移动方向与特感交战迹象选择观察方向；优先展示前路及交战区域，不要求所有队友始终入镜。使用视锥、世界遮挡、连续性与空间余量评估候选机位，狭窄室内允许降低高度和俯视角度。
+- 镜头优先原地平滑旋转，必要时锁定目标并平滑位移；抵达后驻留，远距失联时仅在确认落点安全后切换镜头。普通运镜共享恢复目标锁定和短程路径预检。
+- 鸟瞰歌词在每句开始时从八个方向寻找经过地面支撑、视线和屏幕检查的位置。选定后世界坐标和朝向固定，人物和相机运动均不会拖动歌词；找不到位置则整句使用屏幕字幕。持续遮挡或移出视野时，当前句可单向降级为屏幕字幕；下一句重新选择，避免同句来回切换。
 - 建筑及墙面歌词使用场景表面，其余镜头使用动态歌词。关闭 AFK 不运行其路径规划、追踪或地面搜索。
 
 ## Folia 音乐来源

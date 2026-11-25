@@ -16,12 +16,12 @@ permissions:
   contents: write
 
 concurrency:
-  group: release-${{ inputs.tag || (github.ref_name == 'main' && 'v1.0.0') || github.ref_name }}
+  group: release-${{ inputs.tag || (github.ref_name == 'main' && 'v1.0.1') || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
   release:
-    if: github.ref_name != 'main' || github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'Release L4D2DangoMusic v1.0.0')
+    if: github.ref_name != 'main' || github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'Release L4D2DangoMusic v1.0.1')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -30,7 +30,7 @@ jobs:
           fetch-depth: 0
       - name: Verify version tag
         env:
-          RELEASE_TAG: ${{ inputs.tag || (github.ref_name == 'main' && 'v1.0.0') || github.ref_name }}
+          RELEASE_TAG: ${{ inputs.tag || (github.ref_name == 'main' && 'v1.0.1') || github.ref_name }}
         run: |
           python3 - <<'PY'
           import os, runpy, subprocess
@@ -61,7 +61,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ inputs.tag || (github.ref_name == 'main' && 'v1.0.0') || github.ref_name }}
+          RELEASE_TAG: ${{ inputs.tag || (github.ref_name == 'main' && 'v1.0.1') || github.ref_name }}
         run: |
           (cd build/packages && sha256sum -c *.sha256)
           if [ "$GITHUB_REF" = "refs/heads/main" ] && [ "$GITHUB_EVENT_NAME" = "push" ]; then
@@ -81,7 +81,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ inputs.tag || (github.ref_name == 'main' && 'v1.0.0') || github.ref_name }}
+          RELEASE_TAG: ${{ inputs.tag || (github.ref_name == 'main' && 'v1.0.1') || github.ref_name }}
         run: |
           if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             gh release create "$RELEASE_TAG" --verify-tag --title "L4D2DangoMusic $RELEASE_TAG" --notes-file docs/releases/"$RELEASE_TAG".md --draft
