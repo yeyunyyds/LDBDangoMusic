@@ -13,7 +13,7 @@ struct Recovery {
   nextProbe=now+120;
   const float distance=length(current.eye-actor.center);
   if(healthy&&!active)return Action::Normal;
-  if(healthy&&active&&distance<330.f){
+  if(healthy&&active&&(!hasTarget||length(target-current.eye)<=12.f)){
    hasTarget=false;if(!settledSince)settledSince=now;
    if(now-settledSince>=600){active=false;badSince=settledSince=0;return Action::Normal;}
    return Action::Hold;
@@ -38,7 +38,7 @@ struct Recovery {
    if(!cutAllowed&&clear(current.eye,eye)){target=eye;hasTarget=true;return Action::Follow;}
   }
   if(cutAllowed&&landingReady){target=landing;lastCut=now;active=hasTarget=false;badSince=0;return Action::Cut;}
-  if(elapsed>=6500)return Action::Native;
+  if(elapsed>=6500&&distance>1000.f)return Action::Native;
   return Action::Hold;
  }
  Pose desired(Pose current,const Actor& actor) const {

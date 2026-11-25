@@ -38,5 +38,7 @@ int main(){
  auto visible=[](Vec3,const Actor&){return true;};
  assert(recovery.probe(1000,p,a,false,clear,visible)==Recovery::Action::Follow);auto first=recovery.target;a.center.y+=12;
  assert(recovery.probe(1120,p,a,false,clear,visible)==Recovery::Action::Follow);assert(length(first-recovery.target)<.001f);
+ recovery.reset();a.center={300,0,38};assert(recovery.probe(1000,p,a,false,sightBlocked,visible)==Recovery::Action::Hold);
+ assert(recovery.probe(8000,p,a,false,sightBlocked,visible)==Recovery::Action::Hold);
  std::cout<<"PASS: co-op subjects, ghost filtering, combat hysteresis, frustum, low ceiling, locked movement, arrival hold, safe distant cut and common recovery lock\n";
 }

@@ -14,7 +14,7 @@ inline bool sceneSpecial(const inventory::Record& r){
  if(r.className=="CTerrorPlayer")return r.team&&*r.team==3&&r.zombieClass&&*r.zombieClass>=1&&*r.zombieClass<=8&&*r.zombieClass!=7;
  return r.className=="Hunter"||r.className=="Smoker"||r.className=="Boomer"||r.className=="Spitter"||r.className=="Jockey"||r.className=="Charger"||r.className=="Tank"||r.className=="Witch";
 }
-struct ScenePoint {uint32_t handle=0;Vec3 center{},aim{},velocity{};int health=0;bool hurt=false,incap=false,aimVerified=false;};
+struct ScenePoint {uint32_t handle=0;Vec3 center{},aim{},velocity{};int health=0;uint32_t attacker=0;bool hurt=false,incap=false,aimVerified=false;};
 struct BirdScene {
  uint32_t epoch=0,subject=0,combatHandle=0,pendingHandle=0;
  uint64_t sampled=0,combatAt=0,pendingAt=0;
@@ -28,7 +28,7 @@ struct BirdScene {
   const float dt=sampled&&now>sampled&&now-sampled<1000?float(now-sampled)*.001f:0;
   sampled=now;
   auto make=[&](const inventory::Record& r,const std::vector<ScenePoint>& prior){
-   ScenePoint p;p.handle=r.handle;p.center=*r.networkOrigin+Vec3{0,0,38};p.health=*r.health;p.incap=r.incapacitated.value_or(false);
+   ScenePoint p;p.handle=r.handle;p.center=*r.networkOrigin+Vec3{0,0,38};p.health=*r.health;p.incap=r.incapacitated.value_or(false);p.attacker=r.controlAttacker.value_or(0);
    if(r.aimAngles){auto a=*r.aimAngles;float pitch=a.x*pi/180.f;p.aim=headingVector(a.y)*std::cos(pitch)+Vec3{0,0,-std::sin(pitch)};p.aimVerified=true;}
    else if(r.networkAngles&&wall::finite(*r.networkAngles))p.aim=headingVector(r.networkAngles->y);
    for(const auto& old:prior)if(old.handle==p.handle&&dt>0){p.velocity=limited((p.center-old.center)*(1/dt),450.f);p.hurt=p.health<old.health;break;}
@@ -54,11 +54,11 @@ struct BirdScene {
    for(const auto& p:team){
     auto delta=e.center-p.center;float d=length(delta);if(d>950.f||d<1.f)continue;
     auto dir=normalize(delta);float aim=wall::dot(p.aim,dir),approach=wall::dot(horizontal(e.velocity),horizontal(dir)*-1.f);
-    bool aimed=aim>(p.aimVerified?.82f:.94f);
-    if(!(aimed||(d<230.f&&(approach>45.f||e.hurt||p.hurt||p.incap))||(e.hurt&&d<650.f)))continue;
+    bool aimed=aim>(p.aimVerified?.82f:.94f);const bool pinned=p.attacker==e.handle&&p.attacker!=0;
+    if(!(pinned||(aimed&&(p.aimVerified||d<450.f||e.hurt||p.hurt))||(d<230.f&&(approach>45.f||e.hurt||p.hurt||p.incap))||(e.hurt&&d<650.f)))continue;
     if(rays>=32)continue;
-    ++rays;if(!sight(p.center,e.center))continue;
-    float s=15.f+35.f*(1-d/950.f)+(aimed?(p.aimVerified?35.f:16.f):0.f)+(e.hurt?22.f:0.f)+(p.hurt?14.f:0.f)+(p.incap?12.f:0.f)+(approach>45.f?10.f:0.f);
+    ++rays;if(!sight(p.center,e.center)&&!pinned)continue;
+    float s=15.f+35.f*(1-d/950.f)+(aimed?(p.aimVerified?35.f:16.f):0.f)+(e.hurt?22.f:0.f)+(p.hurt?14.f:0.f)+(p.incap?12.f:0.f)+(approach>45.f?10.f:0.f)+(pinned?70.f:0.f);
     score=std::max(score,s);
    }
    if(e.handle==combatHandle){incumbent=score;incumbentCenter=e.center;}
@@ -100,7 +100,7 @@ struct BirdDirector {
  BirdScene scene;
  Vec3 target{},focus{};
  uint64_t nextPlan=0,nextCheck=0,holdUntil=0,farSince=0,lastCut=0;
- unsigned failures=0;bool moving=false,initialized=false;
+ unsigned failures=0;float farBest=0;bool moving=false,initialized=false;
  void reset(){*this={};}
  template<class Sight> float score(Vec3 eye,Vec3 aim,Vec3 origin,const Actor& actor,BirdLens lens,Sight sight)const{
   auto center=scene.sampled?scene.center:actor.center;
@@ -126,7 +126,7 @@ struct BirdDirector {
   Vec3 desiredFocus=scene.focus(actor);
   focus=mix(focus,desiredFocus,1.f-std::exp(-std::clamp(dt,0.f,.1f)*(scene.engagement>0?2.8f:1.4f)));
   const float distance=length(current.eye-actor.center);
-  if(distance>1000.f){if(!farSince)farSince=now;}else farSince=0;
+  if(distance>1000.f){if(!farSince||distance<farBest-120.f){farSince=now;farBest=distance;}}else{farSince=0;farBest=0;}
   const bool far=(distance>2200.f||(farSince&&now-farSince>=2500))&&(!lastCut||now-lastCut>=2000)&&(distance>2200.f||now>=nextPlan);
   if(moving&&length(target-current.eye)<12.f){moving=false;target=current.eye;holdUntil=now+2000;out.event="arrived";}
   if(moving&&now>=nextCheck){

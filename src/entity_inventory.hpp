@@ -9,7 +9,7 @@ struct Record {
  std::optional<bool> dormant,isCarryable;std::optional<Vec3> networkOrigin,networkAngles;
  std::optional<int> team,modelIndex,worldModelIndex,effects,character,health,zombieClass;std::optional<uint8_t> lifeState;std::optional<uint32_t> owner,weaponOwner,activeWeapon,viewModel,parent,observerTarget;
  std::optional<uint8_t> parentAttachment;
- std::optional<Vec3> aimAngles;std::optional<bool> ghost,incapacitated;
+ std::optional<Vec3> aimAngles;std::optional<bool> ghost,incapacitated;std::optional<uint32_t> controlAttacker;
 };
 inline bool cinematicClass(const std::string& name){
  return name=="CTerrorPlayer"||name=="SurvivorBot"||name=="Hunter"||name=="Smoker"||name=="Boomer"||name=="Spitter"||name=="Jockey"||name=="Charger"||name=="Tank"||name=="Witch";

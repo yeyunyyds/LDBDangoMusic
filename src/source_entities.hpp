@@ -96,11 +96,12 @@ inline std::optional<Record> readRecord(unsigned i,const wire::Entry& entry,uint
  if(!cinematicOnly){r.worldModelIndex=field<int>(base,info,"m_iWorldModelIndex",0);auto carry=field<uint8_t>(base,info,"m_isCarryable",0);if(carry&&*carry<=1)r.isCarryable=*carry!=0;r.effects=field<int>(base,info,"m_fEffects",0);}
  r.networkOrigin=vectorField(base,info,"m_vecOrigin");r.networkAngles=vectorField(base,info,"m_angRotation");r.team=field<int>(base,info,"m_iTeamNum",0);r.zombieClass=field<int>(base,info,"m_zombieClass",0);r.character=field<int>(base,info,"m_survivorCharacter",0);r.health=field<int>(base,info,"m_iHealth",0);r.lifeState=field<uint8_t>(base,info,"m_lifeState",0);
  if(cinematicOnly){
-  auto pitch=field<float>(base,info,"m_angEyeAngles[0]",0),yaw=field<float>(base,info,"m_angEyeAngles[1]",0);
+  auto pitch=field<float>(base,info,"m_angEyeAngles[0]",1),yaw=field<float>(base,info,"m_angEyeAngles[1]",1);
   if(pitch&&yaw&&std::isfinite(*pitch)&&std::isfinite(*yaw))r.aimAngles=Vec3{*pitch,*yaw,0};
   auto ghost=field<uint8_t>(base,info,"m_isGhost",0),incap=field<uint8_t>(base,info,"m_isIncapacitated",0);
   if(ghost&&*ghost<=1)r.ghost=*ghost!=0;
   if(incap&&*incap<=1)r.incapacitated=*incap!=0;
+  for(const char* name:{"m_pounceAttacker","m_tongueOwner","m_jockeyAttacker","m_pummelAttacker","m_carryAttacker"}){auto h=field<uint32_t>(base,info,name,0);if(h&&*h&&*h!=0xffffffffu){r.controlAttacker=*h;break;}}
   return r;
  }
  auto index=field<int16_t>(base,info,"m_nModelIndex",0);if(index){r.modelIndex=int(*index);r.modelName=modelName(*index);}
