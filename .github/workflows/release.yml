@@ -145,3 +145,26 @@ jobs:
           gh release upload "$RELEASE_TAG" build/packages/*.zip build/packages/*.sha256 --clobber
           gh release edit "$RELEASE_TAG" --draft=false --latest
           gh release view "$RELEASE_TAG" --json url,isDraft,tagName,assets
+
+  update-release-notes:
+    if: github.event_name == 'push' && github.ref_name == 'main' && startsWith(github.event.head_commit.message, 'docs: update v1.0.1 release notes')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Update published v1.0.1 description only
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          test "$(gh release view v1.0.1 --json isDraft --jq .isDraft)" = "false"
+          gh release edit v1.0.1 --notes-file docs/releases/v1.0.1.md
+          gh release view v1.0.1 --json body --jq .body > /tmp/published-notes.md
+          python3 - <<'PY'
+          from pathlib import Path
+          assert Path('/tmp/published-notes.md').read_text().strip() == Path('docs/releases/v1.0.1.md').read_text().strip()
+          PY
