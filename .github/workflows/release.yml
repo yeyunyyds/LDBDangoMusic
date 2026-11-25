@@ -17,16 +17,13 @@ permissions:
   actions: read
 
 concurrency:
-  group: release-${{ inputs.tag || (github.ref_name == 'main' && 'v1.0.1') || github.ref_name }}
+  group: release-${{ inputs.tag || (github.ref_name == 'main' && 'v1.0.2') || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
   release:
-    if: github.ref_name != 'main' || github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'Release L4D2DangoMusic v1.0.1')
+    if: github.ref_name != 'main' || github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'Release L4D2DangoMusic v1.0.2')
     runs-on: ubuntu-latest
-    env:
-      REUSE_VERIFIED_CANDIDATE: >-
-        ${{ github.event_name == 'push' && github.ref_name == 'main' && startsWith(github.event.head_commit.message, 'Release L4D2DangoMusic v1.0.1: reuse verified candidate') }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -34,7 +31,7 @@ jobs:
           fetch-depth: 0
       - name: Verify version tag
         env:
-          RELEASE_TAG: ${{ inputs.tag || (github.ref_name == 'main' && 'v1.0.1') || github.ref_name }}
+          RELEASE_TAG: ${{ inputs.tag || (github.ref_name == 'main' && 'v1.0.2') || github.ref_name }}
         run: |
           python3 - <<'PY'
           import os, runpy, subprocess
@@ -46,48 +43,27 @@ jobs:
               subprocess.run(['git', 'rev-parse', '--verify', 'refs/tags/' + tag], check=True)
           PY
       - name: Install Windows x86 compiler
-        if: env.REUSE_VERIFIED_CANDIDATE != 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y g++-mingw-w64-i686-posix
       - uses: actions/setup-dotnet@v4
-        if: env.REUSE_VERIFIED_CANDIDATE != 'true'
         with:
           dotnet-version: 8.0.x
       - name: Run regression tests
-        if: env.REUSE_VERIFIED_CANDIDATE != 'true'
         run: bash scripts/test.sh
       - name: Build Windows x86 plugin
-        if: env.REUSE_VERIFIED_CANDIDATE != 'true'
         env:
           DANGO_CXX: i686-w64-mingw32-g++-posix
         run: bash scripts/build-mingw.sh
       - name: Package minimal installer
-        if: env.REUSE_VERIFIED_CANDIDATE != 'true'
         run: |
           python3 scripts/package.py
-      - name: Download previously verified 1.0.1 installer
-        if: env.REUSE_VERIFIED_CANDIDATE == 'true'
-        uses: actions/download-artifact@v4
-        with:
-          name: DangoMusic-v1.0.1-Release-Candidate
-          run-id: 45528090047
-          github-token: ${{ github.token }}
-          path: build/packages
       - name: Verify installer and resolve exact release source
         env:
-          RELEASE_TAG: ${{ inputs.tag || (github.ref_name == 'main' && 'v1.0.1') || github.ref_name }}
+          RELEASE_TAG: ${{ inputs.tag || (github.ref_name == 'main' && 'v1.0.2') || github.ref_name }}
         run: |
           set -euo pipefail
           target="$(git rev-parse HEAD)"
-          if [ "$REUSE_VERIFIED_CANDIDATE" = "true" ]; then
-            target="4a509d628b1df588a88d0a92422c974b84b8c7d1"
-            previous_main="a24ec2c81ab053f99514886f80075e64ef8b39be"
-            git merge-base --is-ancestor "$target" "$previous_main"
-            git merge-base --is-ancestor "$previous_main" HEAD
-            git diff --exit-code "$target" "$previous_main"
-            git diff --exit-code "$previous_main" HEAD -- . ':!.github/workflows/release.yml'
-          fi
           echo "Release source: $target"
           echo "RELEASE_SOURCE=$target" >> "$GITHUB_ENV"
           (cd build/packages && sha256sum -c *.sha256)
@@ -114,7 +90,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ inputs.tag || (github.ref_name == 'main' && 'v1.0.1') || github.ref_name }}
+          RELEASE_TAG: ${{ inputs.tag || (github.ref_name == 'main' && 'v1.0.2') || github.ref_name }}
         run: |
           set -euo pipefail
           echo "Publishing $RELEASE_TAG from $RELEASE_SOURCE"

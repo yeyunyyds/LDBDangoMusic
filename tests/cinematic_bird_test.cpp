@@ -27,9 +27,49 @@ int main(){
  auto target=bird.target;a.center.x+=10;
  d=bird.update(3120,.016f,p,a,{},false,indoor,indoor,space);
  assert(length(target-bird.target)<.001f);
- // Actual arrival: hold position despite further scene samples.
+ // Actual arrival: short reframing hold, continuous tracking remains available.
  p.eye=target;d=bird.update(3200,.016f,p,a,{},false,indoor,indoor,space);assert(!bird.moving);
  d=bird.update(3300,.016f,p,a,{},false,indoor,indoor,space);assert(length(d.pose.eye-p.eye)<.001f);
+ // An anchored shot follows small displacement even inside reframe cooldown.
+ bird.reset();a.center={0,0,38};a.velocity={60,0,0};p.eye={-400,0,358};
+ bird.initialized=true;bird.anchored=true;bird.anchorActor=a.center;bird.anchorEye=p.eye;bird.target=p.eye;bird.focus=a.center;bird.holdUntil=9000;bird.nextPlan=9000;
+ a.center.x=30;d=bird.update(4000,.016f,p,a,{},false,clear,clear,space);
+ assert(!d.cut&&bird.mode==BirdMove::Track&&d.pose.eye.x>p.eye.x&&d.speedCap==50.f);
+ auto before=d.pose.eye;p.eye.x+=8;a.center.x+=8;d=bird.update(4100,.016f,p,a,{},false,clear,clear,space);
+ assert(bird.mode==BirdMove::Track&&d.pose.eye.x>before.x);
+ // Running does not immediately accelerate a usable composition.
+ a.velocity={260,0,0};a.center.x+=40;
+ d=bird.update(4200,.016f,p,a,{},false,clear,clear,space);
+ assert(!d.cut&&bird.mode==BirdMove::Track&&d.speedCap==50.f);
+ // When the relative shot is genuinely lost, fast catch-up becomes eligible.
+ a.center={500,0,38};
+ d=bird.update(4300,.016f,p,a,{},false,clear,clear,space);
+ assert(!d.cut&&bird.mode==BirdMove::Fast&&d.speedCap==650.f&&bird.cadence.streak==1);
+ // Brief occlusion does not trigger emergency replan; persistent occlusion permits safe cut.
+ bird.reset();a.center={0,0,38};a.velocity={};p.eye={-400,0,358};
+ bird.initialized=true;bird.anchored=true;bird.anchorActor=a.center;bird.anchorEye=p.eye;bird.focus=a.center;bird.nextPlan=20000;
+ auto onlyLanding=[](Vec3 x,Vec3 y){return x.x>-390&&y.x>-390;};
+ d=bird.update(5000,.016f,p,a,{},false,onlyLanding,onlyLanding,space);assert(!d.cut);
+ d=bird.update(6400,.016f,p,a,{},false,onlyLanding,onlyLanding,space);assert(!d.cut&&bird.hiddenSince==5000);
+ d=bird.update(6500,.016f,p,a,{},false,onlyLanding,onlyLanding,space);assert(!d.cut&&bird.recovering);
+ d=bird.update(10100,.016f,p,a,{},false,onlyLanding,onlyLanding,space);assert(d.cut);
+ // Brief occlusion permits collision-checked normal follow and clears on visibility.
+ bird.reset();a.center={0,0,38};a.velocity={60,0,0};p.eye={-400,0,358};
+ bird.initialized=true;bird.anchored=true;bird.anchorActor=a.center;bird.anchorEye=p.eye;bird.target=p.eye;bird.focus=a.center;bird.nextPlan=20000;
+ a.center.x=30;d=bird.update(11000,.016f,p,a,{},false,clear,sightBlocked,space);
+ assert(!d.cut&&bird.mode==BirdMove::Track&&bird.hiddenSince==11000);
+ d=bird.update(12100,.016f,p,a,{},false,clear,clear,space);assert(!bird.hiddenSince&&!bird.recovering);
+ // A valid relocation must not be interrupted by ordinary reframe timers.
+ bird.reset();bird.initialized=true;bird.mode=BirdMove::Slow;bird.moving=true;bird.target={-200,0,358};bird.nextPlan=0;bird.nextCheck=0;
+ d=bird.update(13000,.016f,p,a,{},false,clear,clear,space);assert(bird.mode==BirdMove::Slow&&length(bird.target-Vec3{-200,0,358})<.001f);
+ // Slow tracking respects 50 units/s and 90 units/s^2, even with a far waypoint.
+ MotionController motor;Pose dest=p;dest.eye.x+=1000;
+ for(int i=0;i<100;++i){auto old=p.eye;auto v=motor.linear;p=motor.step(p,dest,.016f,false,false,50.f,true);assert(length(p.eye-old)<=50.f*.016f+.001f&&length(motor.linear-v)<=90.f*.016f+.001f);}
+ assert(length(motor.linear)>49.f);
+ motor.linear={300,0,0};auto oldSpeed=length(motor.linear);p=motor.step(p,dest,.016f,false,false,50.f,true);assert(length(motor.linear)<oldSpeed&&length(motor.linear)>50.f);
+ for(int i=0;i<60;++i)p=motor.step(p,dest,.016f,false,false,50.f,true);
+ assert(length(motor.linear)<=50.001f);
+ BirdCadence cadence;assert(cadence.fast(.999f));cadence.usedFast();assert(cadence.fast(.49f)&&!cadence.fast(.5f));cadence.usedFast();assert(cadence.fast(.249f)&&!cadence.fast(.25f));cadence.alternative();assert(cadence.fast(.999f));
  // Far subject: a safe landing can be selected without an old-to-new path.
  bird.reset();a.center={3000,0,38};a.velocity={0,0,0};p.eye={0,0,64};
  auto remote=[](Vec3 x,Vec3 y){return x.x>2000&&y.x>2000;};
@@ -42,5 +82,5 @@ int main(){
  assert(recovery.probe(1120,p,a,false,clear,visible)==Recovery::Action::Follow);assert(length(first-recovery.target)<.001f);
  recovery.reset();a.center={300,0,38};assert(recovery.probe(1000,p,a,false,sightBlocked,visible)==Recovery::Action::Hold);
  assert(recovery.probe(8000,p,a,false,sightBlocked,visible)==Recovery::Action::Hold);
- std::cout<<"PASS: co-op subjects, ghost filtering, combat hysteresis, frustum, low ceiling, locked movement, arrival hold, safe distant cut and common recovery lock\n";
+ std::cout<<"PASS: co-op subjects, ghost filtering, combat hysteresis, frustum, low ceiling, locked relocation, continuous follow, occlusion grace, fast cadence, motion cap and safe cut\n";
 }
