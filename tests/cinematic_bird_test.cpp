@@ -27,9 +27,25 @@ int main(){
  auto target=bird.target;a.center.x+=10;
  d=bird.update(3120,.016f,p,a,{},false,indoor,indoor,space);
  assert(length(target-bird.target)<.001f);
- // Actual arrival: hold position despite further scene samples.
+ // Actual arrival: short reframing hold, continuous tracking remains available.
  p.eye=target;d=bird.update(3200,.016f,p,a,{},false,indoor,indoor,space);assert(!bird.moving);
  d=bird.update(3300,.016f,p,a,{},false,indoor,indoor,space);assert(length(d.pose.eye-p.eye)<.001f);
+ // An anchored shot follows small displacement even inside reframe cooldown.
+ bird.reset();a.center={0,0,38};a.velocity={60,0,0};p.eye={-400,0,358};
+ bird.initialized=true;bird.anchored=true;bird.anchorActor=a.center;bird.anchorEye=p.eye;bird.target=p.eye;bird.focus=a.center;bird.holdUntil=9000;bird.nextPlan=9000;
+ a.center.x=30;d=bird.update(4000,.016f,p,a,{},false,clear,clear,space);
+ assert(!d.cut&&bird.mode==BirdMove::Track&&d.pose.eye.x>p.eye.x&&d.speedCap==120.f);
+ auto before=d.pose.eye;p.eye.x+=8;a.center.x+=8;d=bird.update(4100,.016f,p,a,{},false,clear,clear,space);
+ assert(bird.mode==BirdMove::Track&&d.pose.eye.x>before.x);
+ // Brief occlusion does not trigger emergency replan; persistent occlusion permits safe cut.
+ bird.reset();a.center={0,0,38};a.velocity={};p.eye={-400,0,358};
+ bird.initialized=true;bird.anchored=true;bird.anchorActor=a.center;bird.anchorEye=p.eye;bird.focus=a.center;bird.nextPlan=20000;
+ auto onlyLanding=[](Vec3 x,Vec3 y){return x.x>-390&&y.x>-390;};
+ d=bird.update(5000,.016f,p,a,{},false,onlyLanding,onlyLanding,space);assert(!d.cut);
+ d=bird.update(6400,.016f,p,a,{},false,onlyLanding,onlyLanding,space);assert(!d.cut&&bird.hiddenSince==5000);
+ bird.nextPlan=6500;d=bird.update(6500,.016f,p,a,{},false,onlyLanding,onlyLanding,space);assert(!d.cut);
+ d=bird.update(10100,.016f,p,a,{},false,onlyLanding,onlyLanding,space);assert(d.cut);
+ BirdCadence cadence;assert(cadence.fast(.999f));cadence.usedFast();assert(cadence.fast(.49f)&&!cadence.fast(.5f));cadence.usedFast();assert(cadence.fast(.249f)&&!cadence.fast(.25f));cadence.alternative();assert(cadence.fast(.999f));
  // Far subject: a safe landing can be selected without an old-to-new path.
  bird.reset();a.center={3000,0,38};a.velocity={0,0,0};p.eye={0,0,64};
  auto remote=[](Vec3 x,Vec3 y){return x.x>2000&&y.x>2000;};

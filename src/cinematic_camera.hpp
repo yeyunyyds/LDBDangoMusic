@@ -110,11 +110,11 @@ struct MotionController {
  Vec3 linear{},angular{};
  void reset(){*this={};}
  void blocked(){linear={};}
- Pose step(Pose current,Pose target,float dt,bool rapid=false,bool interceptShot=false){
+ Pose step(Pose current,Pose target,float dt,bool rapid=false,bool interceptShot=false,float speedCap=900.f){
   dt=std::clamp(dt,0.f,.05f);
   const float distance=length(target.eye-current.eye);
   const float omega=rapid?10.f:interceptShot?9.f:distance>220.f?7.f:5.f;
-  auto eye=spring(current.eye,target.eye,linear,dt,omega,rapid?720.f:900.f);
+  auto eye=spring(current.eye,target.eye,linear,dt,omega,std::min(speedCap,rapid?720.f:900.f));
   Vec3 angles{current.pitch,current.yaw,current.roll};
   Vec3 desired{target.pitch,current.yaw+wrap(target.yaw-current.yaw),current.roll+wrap(target.roll-current.roll)};
   auto out=spring(angles,desired,angular,dt,10.f,180.f);
@@ -201,7 +201,7 @@ struct Director {
   focus=predicted;
   if(surfaceStyle(active)&&comp.ready)focus=mix(actor.center,comp.hasSecond?mix(comp.first.center,comp.second.center,.5f):comp.first.center,active==Style::Architecture?.52f:.40f);
   const float radius=active==Style::Orbit?325.f:active==Style::Wide?620.f:active==Style::Bird?400.f:active==Style::Wall?275.f:620.f;
-  const float height=active==Style::Orbit?100.f:active==Style::Wide?260.f:active==Style::Bird?540.f:active==Style::Wall?45.f:340.f;
+  const float height=active==Style::Orbit?100.f:active==Style::Wide?260.f:active==Style::Bird?480.f:active==Style::Wall?45.f:340.f;
   float initial=std::atan2(from.eye.y-anchor.y,from.eye.x-anchor.x);
   if(length(Vec3{from.eye.x-anchor.x,from.eye.y-anchor.y,0})<70)initial=heading+pi;
   if(active==Style::Bird)initial=heading+pi;

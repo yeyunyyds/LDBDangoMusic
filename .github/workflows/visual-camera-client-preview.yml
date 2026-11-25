@@ -1,7 +1,7 @@
 name: Optional Visual FreeCamera ABI client smoke (no release)
 on:
   push:
-    branches: [feature/visual-freecamera-abi-client, work/next-cinematic-recovery, work/bird-scene-aware]
+    branches: [feature/visual-freecamera-abi-client, work/next-cinematic-recovery, work/bird-scene-aware, work/bird-continuous-follow]
   workflow_dispatch:
 permissions:
   contents: read
@@ -37,11 +37,11 @@ jobs:
           g++ -std=c++17 -Wall -Wextra -Werror -Isrc tests/hud_menu_policy_test.cpp -o /tmp/camera-menu
           /tmp/camera-menu
       - uses: actions/setup-dotnet@v4
-        if: github.ref_name == 'work/next-cinematic-recovery' || github.ref_name == 'work/bird-scene-aware'
+        if: github.ref_name == 'work/next-cinematic-recovery' || github.ref_name == 'work/bird-scene-aware' || github.ref_name == 'work/bird-continuous-follow'
         with:
           dotnet-version: 8.0.x
       - name: Full release regression
-        if: github.ref_name == 'work/next-cinematic-recovery' || github.ref_name == 'work/bird-scene-aware'
+        if: github.ref_name == 'work/next-cinematic-recovery' || github.ref_name == 'work/bird-scene-aware' || github.ref_name == 'work/bird-continuous-follow'
         run: bash scripts/test.sh
       - name: Build optional camera client caller and plugin
         env:
@@ -57,11 +57,11 @@ jobs:
             build/L4D2DangoMusic.dll
           if-no-files-found: error
       - name: Package production installer
-        if: github.ref_name == 'work/next-cinematic-recovery' || github.ref_name == 'work/bird-scene-aware'
+        if: github.ref_name == 'work/next-cinematic-recovery' || github.ref_name == 'work/bird-scene-aware' || github.ref_name == 'work/bird-continuous-follow'
         run: python3 scripts/package.py
       - uses: actions/upload-artifact@v4
-        if: github.ref_name == 'work/next-cinematic-recovery' || github.ref_name == 'work/bird-scene-aware'
+        if: github.ref_name == 'work/next-cinematic-recovery' || github.ref_name == 'work/bird-scene-aware' || github.ref_name == 'work/bird-continuous-follow'
         with:
-          name: DangoMusic-v1.0.1-Release-Candidate
+          name: DangoMusic-Bird-Follow-Test
           path: build/packages/*
           if-no-files-found: error

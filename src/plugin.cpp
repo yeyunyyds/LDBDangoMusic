@@ -1331,7 +1331,7 @@ void tickExternalCameraTest(const GameCameraFrame& frame){
   note("Cinematic camera cut: distance="+std::to_string(length(current.eye-actor.center)));
  }else{
   auto desired=birdMode?birdDecision.pose:action==cinematic::Recovery::Action::Normal?externalDirector.step(motionAt,actor):cinematicRecovery.desired(current,actor);
-  p=cameraMotion.step(current,desired,dt,action!=cinematic::Recovery::Action::Normal&&length(desired.eye-current.eye)>220.f,action==cinematic::Recovery::Action::Normal&&externalDirector.anticipating);
+  p=cameraMotion.step(current,desired,dt,action!=cinematic::Recovery::Action::Normal&&length(desired.eye-current.eye)>220.f,action==cinematic::Recovery::Action::Normal&&externalDirector.anticipating,birdMode?birdDecision.speedCap:900.f);
   if(action==cinematic::Recovery::Action::Hold||(birdMode&&!cinematicBird.moving)){p.eye=current.eye;cameraMotion.blocked();}
   cinematicTraceBudget=14;
   // Brake ahead of an obstruction; final short-segment validation is mandatory.
