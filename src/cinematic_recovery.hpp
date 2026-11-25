@@ -3,7 +3,7 @@
 namespace dango::cinematic {
 struct Recovery {
  bool active=false,hasTarget=false;
- uint64_t badSince=0,nextProbe=0,lastCut=0,settledSince=0;
+ uint64_t badSince=0,nextProbe=0,lastCut=0,settledSince=0,nextSearch=0;
  Vec3 target{};
  void reset(){*this={};}
  enum class Action { Normal, Follow, Hold, Cut, Native };
@@ -20,9 +20,13 @@ struct Recovery {
   }
   settledSince=0;
   if(!active){active=true;badSince=now;}
-  hasTarget=false;
   const auto elapsed=now>=badSince?now-badSince:0;
-  const bool cutAllowed=(!lastCut||now-lastCut>=2000)&&((elapsed>=2500&&distance>1000)||elapsed>=5000||distance>2200);
+  const bool cutAllowed=(!lastCut||now-lastCut>=2000)&&((elapsed>=2500&&distance>1000)||distance>2200);
+  // Keep a reachable target through high-frequency probes. A distant cut may override it.
+  if(hasTarget&&!cutAllowed&&length(target-current.eye)>12.f&&length(target-actor.center)<440.f&&clear(current.eye,target)&&visible(target,actor))return Action::Follow;
+  if(hasTarget){hasTarget=false;nextSearch=now+600;}
+  if(now<nextSearch&&!cutAllowed)return Action::Hold;
+  nextSearch=now+600;
   Vec3 landing{};bool landingReady=false;
   const float heading=actor.yaw*pi/180.f;
   for(float radius:{180.f,112.f,76.f})for(float offset:{pi,pi*.5f,-pi*.5f,0.f,pi*.75f,-pi*.75f}){
@@ -31,7 +35,7 @@ struct Recovery {
    if(!clear(eye,actor.center)||!visible(eye,actor))continue;
    if(!landingReady){landing=eye;landingReady=true;}
    if(distance>2200&&cutAllowed)break;
-   if(clear(current.eye,eye)){target=eye;hasTarget=true;return Action::Follow;}
+   if(!cutAllowed&&clear(current.eye,eye)){target=eye;hasTarget=true;return Action::Follow;}
   }
   if(cutAllowed&&landingReady){target=landing;lastCut=now;active=hasTarget=false;badSince=0;return Action::Cut;}
   if(elapsed>=6500)return Action::Native;
