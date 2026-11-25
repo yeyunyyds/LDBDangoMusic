@@ -14,6 +14,7 @@ on:
 
 permissions:
   contents: write
+  actions: read
 
 concurrency:
   group: release-${{ inputs.tag || (github.ref_name == 'main' && 'v1.0.1') || github.ref_name }}
@@ -23,10 +24,12 @@ jobs:
   release:
     if: github.ref_name != 'main' || github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'Release L4D2DangoMusic v1.0.1')
     runs-on: ubuntu-latest
+    env:
+      REUSE_VERIFIED_CANDIDATE: ${{ github.event_name == 'push' && github.ref_name == 'main' && startsWith(github.event.head_commit.message, 'Release L4D2DangoMusic v1.0.1: reuse verified candidate') }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag || github.ref }}
+          ref: ${{ inputs.tag || github.sha }}
           fetch-depth: 0
       - name: Verify version tag
         env:
@@ -42,49 +45,102 @@ jobs:
               subprocess.run(['git', 'rev-parse', '--verify', 'refs/tags/' + tag], check=True)
           PY
       - name: Install Windows x86 compiler
+        if: env.REUSE_VERIFIED_CANDIDATE != 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y g++-mingw-w64-i686-posix
       - uses: actions/setup-dotnet@v4
+        if: env.REUSE_VERIFIED_CANDIDATE != 'true'
         with:
           dotnet-version: 8.0.x
       - name: Run regression tests
+        if: env.REUSE_VERIFIED_CANDIDATE != 'true'
         run: bash scripts/test.sh
       - name: Build Windows x86 plugin
+        if: env.REUSE_VERIFIED_CANDIDATE != 'true'
         env:
           DANGO_CXX: i686-w64-mingw32-g++-posix
         run: bash scripts/build-mingw.sh
       - name: Package minimal installer
+        if: env.REUSE_VERIFIED_CANDIDATE != 'true'
         run: |
           python3 scripts/package.py
-      - name: Verify installer checksums and prepare tag
+      - name: Download previously verified 1.0.1 installer
+        if: env.REUSE_VERIFIED_CANDIDATE == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: DangoMusic-v1.0.1-Release-Candidate
+          run-id: 45528090047
+          github-token: ${{ github.token }}
+          path: build/packages
+      - name: Verify installer and resolve exact release source
         env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ inputs.tag || (github.ref_name == 'main' && 'v1.0.1') || github.ref_name }}
         run: |
-          (cd build/packages && sha256sum -c *.sha256)
-          if [ "$GITHUB_REF" = "refs/heads/main" ] && [ "$GITHUB_EVENT_NAME" = "push" ]; then
-            test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-            if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-              echo 'Release already exists; refusing to overwrite'
-              exit 1
-            fi
-            tag_sha="$(gh api "repos/$GH_REPO/git/ref/tags/$RELEASE_TAG" --jq '.object.sha' 2>/dev/null || true)"
-            if [ -z "$tag_sha" ]; then
-              gh api "repos/$GH_REPO/git/refs" -f ref="refs/tags/$RELEASE_TAG" -f sha="$GITHUB_SHA" >/dev/null
-            else
-              test "$tag_sha" = "$GITHUB_SHA"
-            fi
+          set -euo pipefail
+          target="$(git rev-parse HEAD)"
+          if [ "$REUSE_VERIFIED_CANDIDATE" = "true" ]; then
+            target="4a509d628b1df588a88d0a92422c974b84b8c7d1"
+            previous_main="a24ec2c81ab053f99514886f80075e64ef8b39be"
+            git merge-base --is-ancestor "$target" "$previous_main"
+            git merge-base --is-ancestor "$previous_main" HEAD
+            git diff --exit-code "$target" "$previous_main"
+            git diff --exit-code "$previous_main" HEAD -- . ':!.github/workflows/release.yml'
           fi
+          echo "Release source: $target"
+          echo "RELEASE_SOURCE=$target" >> "$GITHUB_ENV"
+          (cd build/packages && sha256sum -c *.sha256)
+          export RELEASE_SOURCE="$target"
+          python3 - <<'PY'
+          import os, pathlib, zipfile, json, struct
+          tag=os.environ['RELEASE_TAG']
+          name=f'L4D2DangoMusic-{tag[1:]}-l4n.zip'
+          root=pathlib.Path('build/packages')
+          if {p.name for p in root.iterdir()}!={name,name+'.sha256'}: raise SystemExit('Unexpected installer files')
+          with zipfile.ZipFile(root/name) as z:
+              if set(z.namelist())!={'README.md','bin/neko/plugins/L4D2DangoMusic.dll','bin/neko/plugins/L4D2DangoMusic/config.json'}: raise SystemExit('Unexpected archive contents')
+              readme=z.read('README.md').decode()
+              if '/tree/'+os.environ['RELEASE_SOURCE'] not in readme: raise SystemExit('Installer source commit mismatch')
+              cfg=json.loads(z.read('bin/neko/plugins/L4D2DangoMusic/config.json'))
+              if any(cfg['steamSync'][k] for k in ('enabled','discover','autoSearch','apply')): raise SystemExit('Unsafe experimental defaults')
+              dll=z.read('bin/neko/plugins/L4D2DangoMusic.dll')
+              pe=struct.unpack_from('<I',dll,0x3c)[0]
+              if dll[:2]!=b'MZ' or dll[pe:pe+4]!=b'PE\x00\x00' or struct.unpack_from('<H',dll,pe+4)[0]!=0x14c: raise SystemExit('Not a Windows x86 DLL')
+              if b'DANGO_PRODUCTION_NO_DIAGNOSTICS' not in dll or b'DANGO_DIAGNOSTICS_ENABLED' in dll: raise SystemExit('Incorrect build flavor')
+          print('Installer provenance and payload verified')
+          PY
       - name: Publish release and installer
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ inputs.tag || (github.ref_name == 'main' && 'v1.0.1') || github.ref_name }}
         run: |
-          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release create "$RELEASE_TAG" --verify-tag --title "L4D2DangoMusic $RELEASE_TAG" --notes-file docs/releases/"$RELEASE_TAG".md --draft
+          set -euo pipefail
+          echo "Publishing $RELEASE_TAG from $RELEASE_SOURCE"
+          remote_tags="$(git ls-remote --tags origin "refs/tags/$RELEASE_TAG" "refs/tags/$RELEASE_TAG^{}")"
+          tag_sha="$(printf '%s\n' "$remote_tags" | awk -v ref="refs/tags/$RELEASE_TAG" '$2 == ref {base=$1} $2 == ref "^{}" {peeled=$1} END {print (peeled ? peeled : base)}')"
+          if [ -n "$tag_sha" ] && [ "$tag_sha" != "$RELEASE_SOURCE" ]; then
+            echo "::error::Existing tag points to $tag_sha, expected $RELEASE_SOURCE"
+            exit 1
+          fi
+          if gh release view "$RELEASE_TAG" --json isDraft,targetCommitish > /tmp/dango-release.json 2>/tmp/dango-release-view.err; then
+            draft="$(jq -r .isDraft /tmp/dango-release.json)"
+            if [ "$draft" != "true" ]; then
+              echo "::error::Published release already exists; refusing overwrite"
+              exit 1
+            fi
+            if [ -z "$tag_sha" ] && [ "$(jq -r .targetCommitish /tmp/dango-release.json)" != "$RELEASE_SOURCE" ]; then
+              echo "::error::Existing draft targets different source"
+              exit 1
+            fi
+          else
+            cat /tmp/dango-release-view.err
+            if [ -n "$tag_sha" ]; then
+              gh release create "$RELEASE_TAG" --verify-tag --title "L4D2DangoMusic $RELEASE_TAG" --notes-file "docs/releases/$RELEASE_TAG.md" --draft
+            else
+              gh release create "$RELEASE_TAG" --target "$RELEASE_SOURCE" --title "L4D2DangoMusic $RELEASE_TAG" --notes-file "docs/releases/$RELEASE_TAG.md" --draft
+            fi
           fi
           gh release upload "$RELEASE_TAG" build/packages/*.zip build/packages/*.sha256 --clobber
           gh release edit "$RELEASE_TAG" --draft=false --latest
+          gh release view "$RELEASE_TAG" --json url,isDraft,tagName,assets
