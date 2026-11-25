@@ -44,6 +44,7 @@ extern "C" __declspec(dllexport) const char DangoBuildFlavor[]="DANGO_PRODUCTION
 #include "visual_camera_client.hpp"
 #include "cinematic_camera.hpp"
 #include "cinematic_recovery.hpp"
+#include "cinematic_bird.hpp"
 #include "cinematic_architecture.hpp"
 #include "cinematic_ground.hpp"
 #include "cinematic_subject.hpp"
@@ -102,6 +103,7 @@ std::uint32_t externalCameraEpoch=0;
 void* externalCameraTrace=nullptr;
 cinematic::Director externalDirector;
 cinematic::Recovery cinematicRecovery;
+cinematic::BirdDirector cinematicBird;uint64_t cinematicBirdSample=0;uint32_t cinematicBirdCombat=0;
 double cinematicTrackAt=0;uint64_t cinematicMissingSince=0,cinematicBlockedSince=0;bool cinematicPathBlocked=false,cinematicDynamicPanel=false;
  cinematic::RenderActor cameraActor;
  cinematic::MotionController cameraMotion;
@@ -457,7 +459,7 @@ void drawCinematicLyrics(IDirect3DDevice9* dev,const GameCameraFrame& camera,boo
   }
   if(e.groundSerial){
    const auto anchor=std::find_if(shot->ground.begin(),shot->ground.end(),[&](const auto& a){return a.serial==e.groundSerial;});
-   if(!cameraGood||shot->key!=music.key||shot->generation!=music.generation||anchor==shot->ground.end()||!anchor->visible||tick<anchor->visibleTick||tick-anchor->visibleTick>350||!wallscene::onScreen(e.panel,camera,width,height))continue;
+   if(!cameraGood||shot->key!=music.key||shot->generation!=music.generation||anchor==shot->ground.end()||!anchor->visible||tick<anchor->visibleTick||tick-anchor->visibleTick>350||!wallscene::onScreen(e.panel,camera,width,height)){if(l->retired<0)drawCinematicSubtitle(dev,music.timeline[l->index],width,height,fade.alpha,0.f);continue;}
    if(l->retired>=0&&current&&current->groundSerial&&length(current->panel.center-e.panel.center)<24.f)continue;
    drawWallContents(dev,e.panel,camera,width,height,*e.text,lyricPosition(display.position,cfg.demo?0:cfg.offset),clock,fade.alpha,false,true);continue;
   }
@@ -1048,7 +1050,7 @@ void resetExternalCameraLocked(bool release,bool disarm){
  externalCameraInitialized=false;externalCameraActive=false;
  externalCameraLastFrame=0;externalCameraEpoch=0;
  externalCameraTrace=nullptr;externalCameraTraceProbed=false;
- externalDirector.reset();cinematicRecovery.reset();recoveryGate.reset();cinematicTrackAt=0;cinematicMissingSince=0;cinematicBlockedSince=0;cameraActor.reset();cameraMotion.reset();cinematicPathBlocked=false;cinematicDynamicPanel=false;cinematicActor.reset();cinematicCharacter.reset();cinematicActorFresh=false;cinematicSampleAt=0;cinematicLastMissingLog=cinematicLastViewMismatchLog=0;cinematicPanels={};cinematicVisibilityAt=0;cinematicGround.reset();cinematicGroundKey.clear();
+ externalDirector.reset();cinematicRecovery.reset();cinematicBird.reset();cinematicBirdSample=0;cinematicBirdCombat=0;recoveryGate.reset();cinematicTrackAt=0;cinematicMissingSince=0;cinematicBlockedSince=0;cameraActor.reset();cameraMotion.reset();cinematicPathBlocked=false;cinematicDynamicPanel=false;cinematicActor.reset();cinematicCharacter.reset();cinematicActorFresh=false;cinematicSampleAt=0;cinematicLastMissingLog=cinematicLastViewMismatchLog=0;cinematicPanels={};cinematicVisibilityAt=0;cinematicGround.reset();cinematicGroundKey.clear();
  std::atomic_store(&cinematicLyricShot,std::make_shared<const CinematicLyricShot>());
 }
 void stopExternalCameraTest(){
@@ -1162,7 +1164,7 @@ void tickExternalCameraTest(const GameCameraFrame& frame){
    // renew the live external view rather than issuing Request(0).
    auto api=visualcamera::resolve();L4D2VisualCameraPoseV1 hold{};hold.size=sizeof(hold);
    if(api&&api.getPose(&hold))(void)api.setPose(&hold);
-   externalDirector.reset();cinematicRecovery.reset();recoveryGate.reset();cinematicTrackAt=0;cinematicBlockedSince=0;cameraActor.reset();cameraMotion.reset();cinematicPathBlocked=false;externalCameraLastFrame=0;clearCinematicComposition();return;
+   externalDirector.reset();cinematicRecovery.reset();cinematicBird.reset();cinematicBirdSample=0;cinematicBirdCombat=0;recoveryGate.reset();cinematicTrackAt=0;cinematicBlockedSince=0;cameraActor.reset();cameraMotion.reset();cinematicPathBlocked=false;externalCameraLastFrame=0;clearCinematicComposition();return;
   }
   if(externalCameraInitialized){note("AFK map inactive state="+std::to_string(state));resetExternalCameraLocked(true,false);}return;
  }
@@ -1192,7 +1194,7 @@ void tickExternalCameraTest(const GameCameraFrame& frame){
  }
  L4D2VisualCameraPoseV1 actual{};actual.size=sizeof(actual);
  if(!api.getPose(&actual)){
-  externalCameraActive=false;externalDirector.reset();cinematicRecovery.reset();recoveryGate.reset();cinematicTrackAt=0;cinematicBlockedSince=0;cameraActor.reset();cameraMotion.reset();cinematicPathBlocked=false;clearCinematicComposition();
+  externalCameraActive=false;externalDirector.reset();cinematicRecovery.reset();cinematicBird.reset();cinematicBirdSample=0;cinematicBirdCombat=0;recoveryGate.reset();cinematicTrackAt=0;cinematicBlockedSince=0;cameraActor.reset();cameraMotion.reset();cinematicPathBlocked=false;clearCinematicComposition();
   CameraPose view{};
   if(cameraPose(frame,view)){
    actual.origin[0]=view.eye.x;actual.origin[1]=view.eye.y;actual.origin[2]=view.eye.z;
@@ -1203,11 +1205,11 @@ void tickExternalCameraTest(const GameCameraFrame& frame){
   return; // pending native poses are heartbeat only; Visual does not apply them
  }
  if(status.owner!=L4D2VISUAL_CAMERA_OWNER_EXTERNAL||!status.camera_active||nativeHud.isOpen()){
-  externalCameraActive=false;externalDirector.reset();cinematicRecovery.reset();recoveryGate.reset();cinematicTrackAt=0;cinematicBlockedSince=0;cameraActor.reset();cameraMotion.reset();cinematicPathBlocked=false;externalCameraLastFrame=0;clearCinematicComposition();
+  externalCameraActive=false;externalDirector.reset();cinematicRecovery.reset();cinematicBird.reset();cinematicBirdSample=0;cinematicBirdCombat=0;recoveryGate.reset();cinematicTrackAt=0;cinematicBlockedSince=0;cameraActor.reset();cameraMotion.reset();cinematicPathBlocked=false;externalCameraLastFrame=0;clearCinematicComposition();
   if(!api.setPose(&actual))resetExternalCameraLocked(false,false);
   return;
  }
- if(externalCameraLastFrame&&at-externalCameraLastFrame>500){externalDirector.reset();cinematicRecovery.reset();recoveryGate.reset();cinematicTrackAt=0;cinematicBlockedSince=0;cameraActor.reset();cameraMotion.reset();cinematicPathBlocked=false;}
+ if(externalCameraLastFrame&&at-externalCameraLastFrame>500){externalDirector.reset();cinematicRecovery.reset();cinematicBird.reset();cinematicBirdSample=0;cinematicBirdCombat=0;recoveryGate.reset();cinematicTrackAt=0;cinematicBlockedSince=0;cameraActor.reset();cameraMotion.reset();cinematicPathBlocked=false;}
  externalCameraLastFrame=at;
  const cinematic::Pose current{{actual.origin[0],actual.origin[1],actual.origin[2]},actual.angles[0],actual.angles[1],actual.angles[2]};
  if(!sample.ready){
@@ -1215,7 +1217,7 @@ void tickExternalCameraTest(const GameCameraFrame& frame){
   if(at-cinematicMissingSince>=3000){note("Cinematic subject lost for 3s; native fallback");resetExternalCameraLocked(true,false);return;}
   // Observer target may be transiently absent during a bot takeover. The
   // actual detached pose remains owned by us; no stale coordinates or flight.
-  externalDirector.reset();cinematicRecovery.reset();recoveryGate.reset();cinematicTrackAt=0;cinematicBlockedSince=0;cameraActor.reset();cameraMotion.reset();cinematicPathBlocked=false;clearCinematicComposition();
+  externalDirector.reset();cinematicRecovery.reset();cinematicBird.reset();cinematicBirdSample=0;cinematicBirdCombat=0;recoveryGate.reset();cinematicTrackAt=0;cinematicBlockedSince=0;cameraActor.reset();cameraMotion.reset();cinematicPathBlocked=false;clearCinematicComposition();
   if(!api.setPose(&actual)){resetExternalCameraLocked(false,false);return;}
   externalCameraActive=true;
   if(!cinematicLastMissingLog||at-cinematicLastMissingLog>=2000){cinematicLastMissingLog=at;note("AFK subject unavailable; holding external view");}
@@ -1223,7 +1225,7 @@ void tickExternalCameraTest(const GameCameraFrame& frame){
  }
  cinematicMissingSince=0;
  auto actor=cameraActor.update(sample,motionAt);
- if(externalDirector.planned&&(externalDirector.actorEpoch!=actor.epoch||externalDirector.actorHandle!=actor.handle)){externalDirector.reset();cinematicRecovery.reset();recoveryGate.reset();cameraMotion.reset();cinematicTrackAt=0;cinematicBlockedSince=0;cinematicPathBlocked=false;clearCinematicComposition(true);}
+ if(externalDirector.planned&&(externalDirector.actorEpoch!=actor.epoch||externalDirector.actorHandle!=actor.handle)){externalDirector.reset();cinematicRecovery.reset();cinematicBird.reset();cinematicBirdSample=0;cinematicBirdCombat=0;recoveryGate.reset();cameraMotion.reset();cinematicTrackAt=0;cinematicBlockedSince=0;cinematicPathBlocked=false;clearCinematicComposition(true);}
  // Compare final rendered view to the ABI view, independently of ownership.
  // If the engine overwrites later, report that rather than guessing new offsets.
  CameraPose rendered{};
@@ -1258,7 +1260,7 @@ void tickExternalCameraTest(const GameCameraFrame& frame){
  const auto lyricSong=song<0?song:song+(config->demo?0:config->offset);
  const unsigned mask=unsigned(config->cinematicMixedMask);
  const bool blockedReplan=cinematicBlockedSince&&at-cinematicBlockedSince>=700&&motionAt-externalDirector.begin>=1200;
- if(!cinematicRecovery.active&&(externalDirector.needsPlan(motionAt,actor,requested,mask)||blockedReplan)){
+ if(!cinematicRecovery.active&&(externalDirector.needsPlan(motionAt,actor,requested,mask)||(blockedReplan&&externalDirector.active!=cinematic::Style::Bird))){
   // Replan from the exact last rendered pose rather than an old target.
   externalDirector.last=current;
   clearCinematicComposition(true);
@@ -1267,7 +1269,14 @@ void tickExternalCameraTest(const GameCameraFrame& frame){
   if(config->cinematicLyrics&&cinematic::surfaceStyle(shotStyle))cinematicPanels=findCinematicPanels(actor,current,shotStyle,at);
   unsigned span=config->cinematicLyrics&&music->playing?cinematic::duration(music->timeline,lyricSong,music->rate):6000;
   cinematicTraceBudget=336; // bounded per-shot world traces
-  bool planned=externalDirector.plan(motionAt,span,actor,requested,cinematicPanels,cinematicPathClear,config->cinematicLyrics,mask);
+  bool planned=false;
+  if(shotStyle==cinematic::Style::Bird){
+   if(externalDirector.active!=cinematic::Style::Bird||!externalDirector.planned){cinematicBird.reset();cinematicBirdSample=0;cinematicBirdCombat=0;}
+   externalDirector.beginBird(motionAt,span,actor,requested,mask);planned=true;
+  }else{
+   cinematicBird.reset();cinematicBirdSample=0;cinematicBirdCombat=0;
+   planned=externalDirector.plan(motionAt,span,actor,requested,cinematicPanels,cinematicPathClear,config->cinematicLyrics,mask);
+  }
   if(!planned&&cinematicPanels.hasSecond){cinematicPanels.hasSecond=false;externalDirector.last=current;externalDirector.sequence=shotSequence;cinematicTraceBudget=112;planned=externalDirector.plan(motionAt,span,actor,requested,cinematicPanels,cinematicPathClear,config->cinematicLyrics,mask);}
   if(!planned&&cinematicPanels.ready){clearCinematicComposition(true);externalDirector.last=current;externalDirector.sequence=shotSequence;cinematicTraceBudget=112;planned=externalDirector.plan(motionAt,span,actor,requested,cinematicPanels,cinematicPathClear,config->cinematicLyrics,mask);}
   if(!planned||!cinematic::surfaceStyle(externalDirector.active))clearCinematicComposition(true);
@@ -1280,7 +1289,24 @@ void tickExternalCameraTest(const GameCameraFrame& frame){
  cinematicTraceBudget=280;
  const float range=externalDirector.active==cinematic::Style::Wide?1150.f:externalDirector.active==cinematic::Style::Bird?1000.f:850.f;
  auto action=cinematic::Recovery::Action::Normal;
- if(at>=cinematicRecovery.nextProbe){
+ const bool birdMode=externalDirector.active==cinematic::Style::Bird;
+ cinematic::BirdDecision birdDecision{};
+ if(birdMode){
+  if(!cinematicBirdSample||at-cinematicBirdSample>=200){
+   cinematicBirdSample=at;
+   auto sampleFrame=source_entities::captureCinematic(frame);
+   auto sight=[](Vec3 a,Vec3 b){trace::Result hit;return cinematicRay(a,b,hit)&&!hit.startSolid&&!hit.allSolid&&hit.fraction>=.999f;};
+   cinematicBird.scene.sample(at,actor,sampleFrame,sight);
+   if(cinematicBirdCombat!=cinematicBird.scene.combatHandle){cinematicBirdCombat=cinematicBird.scene.combatHandle;note(cinematicBirdCombat?"Bird combat focus selected":"Bird advance focus resumed");}
+  }
+  cinematicTraceBudget=280;
+  unsigned sightBudget=384;
+  auto sight=[&](Vec3 a,Vec3 b){if(!sightBudget)return false;--sightBudget;trace::Result hit;return cinematicRay(a,b,hit)&&!hit.startSolid&&!hit.allSolid&&hit.fraction>=.999f;};
+  auto space=[&](Vec3 a){unsigned count=0;for(Vec3 offset:{Vec3{32,0,0},Vec3{-32,0,0},Vec3{0,32,0},Vec3{0,-32,0},Vec3{0,0,32}})if(sight(a,a+offset))++count;return float(count)/5.f;};
+  birdDecision=cinematicBird.update(at,dt,current,actor,cinematic::birdLens(frame),cinematicPathBlocked,cinematicPathClear,sight,space);
+  if(birdDecision.event)note(std::string("Bird ")+birdDecision.event+" distance="+std::to_string(length(current.eye-actor.center))+" target height="+std::to_string(birdDecision.pose.eye.z-actor.center.z));
+  if(birdDecision.cut)action=cinematic::Recovery::Action::Cut;
+ }else if(at>=cinematicRecovery.nextProbe){
   const bool visible=cinematicActorVisible(current.eye,actor);
   const bool healthy=recoveryGate.healthy(at,visible,length(current.eye-actor.center),range,cinematicRecovery.active);
   const bool wasRecovering=cinematicRecovery.active;
@@ -1290,14 +1316,19 @@ void tickExternalCameraTest(const GameCameraFrame& frame){
  }else if(cinematicRecovery.active)action=cinematicRecovery.hasTarget?cinematic::Recovery::Action::Follow:cinematic::Recovery::Action::Hold;
  if(action==cinematic::Recovery::Action::Native){note("Cinematic recovery exhausted; return to native and rearm");resetExternalCameraLocked(true,false);return;}
  if(action==cinematic::Recovery::Action::Cut){
-  p=cinematic::look(cinematicRecovery.target,actor.center,current.yaw);
-  externalDirector.rebase(p);cameraMotion.reset();clearCinematicComposition(true);cinematicPathBlocked=false;cinematicBlockedSince=0;
+  p=birdMode?birdDecision.pose:cinematic::look(cinematicRecovery.target,actor.center,current.yaw);
+  if(birdMode)externalDirector.last=p;else externalDirector.rebase(p);cameraMotion.reset();clearCinematicComposition(true);cinematicPathBlocked=false;cinematicBlockedSince=0;
   note("Cinematic camera cut: distance="+std::to_string(length(current.eye-actor.center)));
  }else{
-  auto desired=action==cinematic::Recovery::Action::Normal?externalDirector.step(motionAt,actor):cinematicRecovery.desired(current,actor);
+  auto desired=birdMode?birdDecision.pose:action==cinematic::Recovery::Action::Normal?externalDirector.step(motionAt,actor):cinematicRecovery.desired(current,actor);
   p=cameraMotion.step(current,desired,dt,action!=cinematic::Recovery::Action::Normal&&length(desired.eye-current.eye)>220.f,action==cinematic::Recovery::Action::Normal&&externalDirector.anticipating);
   if(action==cinematic::Recovery::Action::Hold){p.eye=current.eye;cameraMotion.blocked();}
-  cinematicTraceBudget=7;
+  cinematicTraceBudget=14;
+  // Brake ahead of an obstruction; final short-segment validation is mandatory.
+  if(length(p.eye-current.eye)>.001f&&length(cameraMotion.linear)>30.f){
+   auto ahead=p.eye+cinematic::limited(cameraMotion.linear*.12f,64.f);
+   if(!cinematicPathClear(current.eye,ahead)){p.eye=cinematic::mix(current.eye,p.eye,.35f);cameraMotion.linear=cameraMotion.linear*.7f;}
+  }
   cinematicPathBlocked=length(p.eye-current.eye)>.001f&&!cinematicPathClear(current.eye,p.eye);
   if(cinematicPathBlocked){p.eye=current.eye;cameraMotion.blocked();if(!cinematicBlockedSince)cinematicBlockedSince=at;}
   else cinematicBlockedSince=0;

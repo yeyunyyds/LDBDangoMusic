@@ -44,7 +44,7 @@ struct BirdScene {
   center=actor.center*1.5f;float weights=1.5f;Vec3 movement=horizontal(actor.velocity)*1.5f;
   for(const auto& p:team){if(p.handle==actor.handle)continue;float w=std::max(.15f,1.f-length(p.center-actor.center)/650.f);center=center+p.center*w;weights+=w;movement=movement+horizontal(p.velocity)*w;}
   center=center*(1/weights);advance=mix(advance,std::clamp(length(movement)/weights/120.f,0.f,1.f),.2f);
-  if(length(movement)>45.f){auto wanted=normalize(movement);direction=normalize(mix(direction,wanted,.20f));if(length(direction)<.5f)direction=wanted;}
+  if(length(movement)>45.f){auto wanted=normalize(movement);if(length(direction)<.5f)direction=wanted;else direction=headingVector(mixAngle(std::atan2(direction.y,direction.x)*180.f/pi,std::atan2(wanted.y,wanted.x)*180.f/pi,.20f));}
   else if(length(direction)<.5f)direction=headingVector(actor.yaw);
   float best=0,incumbent=0;uint32_t selected=0;Vec3 selectedCenter{},incumbentCenter{};
   std::sort(enemies.begin(),enemies.end(),[&](const auto& a,const auto& b){return length(a.center-center)<length(b.center-center);});
@@ -127,15 +127,15 @@ struct BirdDirector {
   focus=mix(focus,desiredFocus,1.f-std::exp(-std::clamp(dt,0.f,.1f)*(scene.engagement>0?2.8f:1.4f)));
   const float distance=length(current.eye-actor.center);
   if(distance>1000.f){if(!farSince)farSince=now;}else farSince=0;
-  const bool far=(distance>2200.f||(farSince&&now-farSince>=2500))&&(!lastCut||now-lastCut>=2000)&&now>=nextPlan;
+  const bool far=(distance>2200.f||(farSince&&now-farSince>=2500))&&(!lastCut||now-lastCut>=2000)&&(distance>2200.f||now>=nextPlan);
   if(moving&&length(target-current.eye)<12.f){moving=false;target=current.eye;holdUntil=now+2000;out.event="arrived";}
   if(moving&&now>=nextCheck){
    nextCheck=now+200;
    if(blocked||!clear(current.eye,target)){moving=false;target=current.eye;nextPlan=now+600;holdUntil=now+600;out.event="path-invalid";}
   }
-  if(far||(!moving&&now>=nextPlan&&now>=holdUntil)){
+  if((far&&now>=nextCheck)||(!moving&&now>=nextPlan&&now>=holdUntil)){
    const float old=score(current.eye,desiredFocus,current.eye,actor,lens,sight)+space(current.eye)*5.f;
-   float best=far?-1000.f:old+12.f;
+   float best=far||distance<95.f?-1000.f:old+12.f;
    Vec3 chosen=current.eye;bool found=false;
    auto center=scene.sampled?scene.center:actor.center;
    auto dir=length(scene.direction)>.5f?scene.direction:headingVector(actor.yaw);
@@ -162,7 +162,7 @@ struct BirdDirector {
    if(found){failures=0;target=chosen;nextCheck=now+200;nextPlan=now+1000;
     if(far){lastCut=now;farSince=0;moving=false;focus=desiredFocus;holdUntil=now+2000;out.pose=look(chosen,focus,current.yaw);out.cut=true;out.event="distant-cut";return out;}
     moving=true;out.event="reposition";
-   }else{failures=std::min(3u,failures+1);nextPlan=now+1000*failures;out.event="hold";}
+   }else{failures=std::min(3u,failures+1);nextPlan=nextCheck=now+1000*failures;out.event="hold";}
   }
   out.pose=look(current.eye,focus,current.yaw);out.pose.eye=moving?target:current.eye;
   return out;
