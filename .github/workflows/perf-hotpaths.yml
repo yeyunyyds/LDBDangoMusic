@@ -1,0 +1,35 @@
+name: Performance hot-path verification
+on:
+  push:
+    branches: [perf/idle-hotpaths]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: perf-hotpaths-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install MinGW x86
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++-mingw-w64-i686-posix
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Regression tests
+        env:
+          ASAN_OPTIONS: detect_leaks=0
+        run: bash scripts/test.sh
+      - name: Build x86 plugin
+        env:
+          DANGO_CXX: i686-w64-mingw32-g++-posix
+        run: bash scripts/build-mingw.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DangoMusic-perf-x86
+          path: build/L4D2DangoMusic.dll
+          if-no-files-found: error
