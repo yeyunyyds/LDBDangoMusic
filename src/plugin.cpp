@@ -97,6 +97,8 @@ constexpr int LDB_HOST_LOG_INFO=0,LDB_HOST_LOG_WARNING=1,LDB_HOST_LOG_ERROR=2;
 // User opt-in is saved; session/ownership remain runtime-only.
 std::atomic<bool> externalCameraTest{false},externalCameraActive{false};
 std::mutex externalCameraMutex;
+std::atomic<uint64_t> nextAfkIdlePoll{0};
+int appliedAfkIdle=-1,appliedNativeOnInput=-1; // protected by externalCameraMutex
 bool externalCameraInitialized=false,externalCameraTraceProbed=false;
 std::uint64_t externalCameraLastFrame=0;
 std::uint32_t externalCameraEpoch=0;
@@ -516,18 +518,24 @@ bool drawWallExperiment(IDirect3DDevice9* dev,const GameCameraFrame& camera,floa
  for(auto it=wallTextState.texts.begin();it!=wallTextState.texts.end();){bool used=it->first==wallTextState.current||std::any_of(state->panels.begin(),state->panels.end(),[&](const auto& item){return item.session==wallTextState.session&&item.token==it->first;});if(!used)it=wallTextState.texts.erase(it);else ++it;}
  return currentVisible;
 }
+struct RenderResources {
+ IDirect3DDevice9* owner=nullptr;IDirect3DStateBlock9* block=nullptr;D3DCAPS9 caps{};bool capsReady=false;
+ void release(){if(block)block->Release();block=nullptr;owner=nullptr;capsReady=false;}
+ bool prepare(IDirect3DDevice9* device){if(owner!=device){release();owner=device;}if(!capsReady){if(!checked(device->GetDeviceCaps(&caps),8,"GetDeviceCaps"))return false;capsReady=true;}if(!block&&!checked(device->CreateStateBlock(D3DSBT_ALL,&block),0,"CreateStateBlock"))return false;return true;}
+};
+RenderResources renderResources;
 struct DrawGuard {
  IDirect3DDevice9* dev; IDirect3DStateBlock9* block=nullptr;
  IDirect3DSurface9 *target=nullptr,*depth=nullptr,*back=nullptr;
  IDirect3DSurface9* extra[3]={nullptr,nullptr,nullptr};unsigned extraCount=0;bool captured=false;bool scene=false;
  explicit DrawGuard(IDirect3DDevice9* d):dev(d){}
- ~DrawGuard(){if(scene)dev->EndScene();if(block){if(captured){dev->SetDepthStencilSurface(nullptr);if(target)dev->SetRenderTarget(0,target);for(unsigned i=0;i<extraCount;++i)dev->SetRenderTarget(i+1,extra[i]);dev->SetDepthStencilSurface(depth);}block->Apply();block->Release();}for(auto* surface:extra)if(surface)surface->Release();if(back)back->Release();if(target)target->Release();if(depth)depth->Release();}
+ ~DrawGuard(){if(scene)dev->EndScene();if(block){if(captured){dev->SetDepthStencilSurface(nullptr);if(target)dev->SetRenderTarget(0,target);for(unsigned i=0;i<extraCount;++i)dev->SetRenderTarget(i+1,extra[i]);dev->SetDepthStencilSurface(depth);}block->Apply();}for(auto* surface:extra)if(surface)surface->Release();if(back)back->Release();if(target)target->Release();if(depth)depth->Release();}
 };
-void WINAPI render(IDirect3DDevice9* dev,const PresentInfo* present){
+template<class Capture> void render(IDirect3DDevice9* dev,const PresentInfo* present,Capture&& capture){
  if(!dev||!present)return;
  bool preview=positionPreview.load()||wallPositionPreview.load();bool escapeDown=(GetAsyncKeyState(VK_ESCAPE)&0x8000)!=0;if(preview&&!nativeHud.isOpen()&&escapeDown&&!escapeHeld){positionPreview=false;wallPositionPreview=false;preview=false;}escapeHeld=escapeDown;
  if(displayResetRequested.exchange(false)){cinematicRender.reset();worldPeakEntries.clear();entityPeakEntries.clear();worldLyricLifecycle.reset();entityLyricLifecycle.reset();wallTextState.reset();anchors.reset();entityTracker.reset();playbackCursor={};playbackDisplay={};peakIndex=-1;visibleLyricIndex=-1;++layoutGeneration;}
- auto currentSettings=std::atomic_load(&settings);cfg=*currentSettings;bool wallMode=source_walls::enabled.load();auto notice=std::atomic_load(&menuNotice);bool showNotice=!notice->text.empty()&&uint64_t(now())>=notice->tick&&uint64_t(now())-notice->tick<2000;if(!cfg.enabled&&!preview&&!showNotice&&!nativeHud.isOpen())return;
+ auto currentSettings=std::atomic_load(&settings);if(renderedSettings!=currentSettings)cfg=*currentSettings;bool wallMode=source_walls::enabled.load();auto notice=std::atomic_load(&menuNotice);bool showNotice=!notice->text.empty()&&uint64_t(now())>=notice->tick&&uint64_t(now())-notice->tick<2000;if(!cfg.enabled&&!preview&&!showNotice&&!nativeHud.isOpen()&&!followPositionPreview.load())return;
  if(lastWallMode!=wallMode){if(!wallMode)wallTextState.reset();lastWallMode=wallMode;++layoutGeneration;}
  if(lastPositionPreview!=preview){wallTextState.reset();++layoutGeneration;worldPeakEntries.clear();worldLyricLifecycle.reset();anchors.reset();playbackCursor={};lastPositionPreview=preview;}
  auto followState=std::atomic_load(&followSettings);if(lastFollowRevision!=followState->revision){entityPeakEntries.clear();entityLyricLifecycle.reset();lastFollowRevision=followState->revision;}
@@ -538,12 +546,17 @@ void WINAPI render(IDirect3DDevice9* dev,const PresentInfo* present){
  try {if(cache.size()>256)clear();auto state=resetDisplayRevision.load()?std::make_shared<const State>():std::atomic_load(&snapshot);auto display=playbackDisplay.select(*state,now());
  if(display.reset){cinematicRender.reset();entityPeakEntries.clear();entityLyricLifecycle.reset();entityTracker.reset();wallTextState.reset();visibleLyricIndex=-1;++layoutGeneration;worldPeakEntries.clear();worldLyricLifecycle.reset();anchors.reset();playbackCursor={};}
  auto cursor=preview?ClockSelection{}:playbackCursor.select(state->key,display.position,state->playing);auto position=cursor.position;if(cursor.seek){cinematicRender.reset();entityPeakEntries.clear();entityLyricLifecycle.reset();entityTracker.reset();wallTextState.reset();worldPeakEntries.clear();worldLyricLifecycle.reset();anchors.reset();}auto at=position<0?-1:indexAt(state->timeline,lyricPosition(position,cfg.demo?0:cfg.offset));
+ // Keep wall mode conservative: it may draw fixed panels or maintain outgoing state.
+ const bool overlayNeeded=preview||followPositionPreview.load()||showNotice||nativeHud.isOpen()||
+   (cfg.enabled&&(cfg.demo||wallMode||display.metadata||display.lyrics||followState->sample||
+    (build::diagnostics&&(cfg.debugOverlay||cfg.worldTestAnchor||cfg.wallDebug))));
+ if(!overlayNeeded||!capture())return;
  std::string text=at<0?state->message:state->timeline[at].text;
  DrawGuard guard(dev);auto& target=guard.target;auto& depth=guard.depth;auto& back=guard.back;auto& block=guard.block;
- if(!checked(dev->CreateStateBlock(D3DSBT_ALL,&block),0,"CreateStateBlock"))return;
+ if(!renderResources.prepare(dev)||!checked(renderResources.block->Capture(),0,"CaptureStateBlock"))return;
+ block=renderResources.block;
  if(!checked(dev->GetRenderTarget(0,&target),1,"GetRenderTarget"))return;dev->GetDepthStencilSurface(&depth);
- D3DCAPS9 caps{};if(!checked(dev->GetDeviceCaps(&caps),8,"GetDeviceCaps"))return;
- guard.extraCount=std::max(1u,std::min<unsigned>(caps.NumSimultaneousRTs,4))-1;
+ guard.extraCount=std::max(1u,std::min<unsigned>(renderResources.caps.NumSimultaneousRTs,4))-1;
  for(unsigned i=0;i<guard.extraCount;++i)dev->GetRenderTarget(i+1,&guard.extra[i]);guard.captured=true;
  // The supplied chain is borrowed. Only GetBackBuffer's returned reference is released.
  HRESULT backResult=currentBackBuffer(dev,present->swap_chain,path!=0,D3DBACKBUFFER_TYPE_MONO,&back,D3DERR_INVALIDCALL);
@@ -604,10 +617,10 @@ bool load(const std::filesystem::path& pluginDirectory){try{directory=pluginDire
  note("Steam sync fix1: in-game SteamClient user/pipe lifecycle probes disabled");
  if(stopping.load())return FALSE;worker=reinterpret_cast<HANDLE>(_beginthreadex(nullptr,0,&musicWorkerMain,nullptr,0,nullptr));if(!worker){note("Music worker start failed");return FALSE;}return TRUE;}catch(const std::exception& e){if(logger)logger(LDB_HOST_LOG_ERROR,e.what());return FALSE;}catch(...){return FALSE;}}
 void releasePresentationBackup();
-void WINAPI created(IDirect3DDevice9*){nativeHud.release();wallTextState.reset();++deviceGeneration;releasePresentationBackup();anchors.reset();worldPeakEntries.clear();peakIndex=-1;worldLyricLifecycle.reset();clear();reportedErrors=0;drewPixels=false;note("L4D2DangoMusic device lifecycle: created/destroyed; textures cleared");}
-void WINAPI beforeReset(IDirect3DDevice9*,const D3DPRESENT_PARAMETERS*,BOOL){nativeHud.beforeReset();wallTextState.reset();releasePresentationBackup();anchors.reset();worldPeakEntries.clear();peakIndex=-1;worldLyricLifecycle.reset();clear();}
+void WINAPI created(IDirect3DDevice9*){renderResources.release();nativeHud.release();wallTextState.reset();++deviceGeneration;releasePresentationBackup();anchors.reset();worldPeakEntries.clear();peakIndex=-1;worldLyricLifecycle.reset();clear();reportedErrors=0;drewPixels=false;note("L4D2DangoMusic device lifecycle: created/destroyed; textures cleared");}
+void WINAPI beforeReset(IDirect3DDevice9*,const D3DPRESENT_PARAMETERS*,BOOL){renderResources.release();nativeHud.beforeReset();wallTextState.reset();releasePresentationBackup();anchors.reset();worldPeakEntries.clear();peakIndex=-1;worldLyricLifecycle.reset();clear();}
 void WINAPI afterReset(IDirect3DDevice9*,HRESULT hr,BOOL){nativeHud.afterReset(hr);++deviceGeneration;reportedErrors=0;checked(hr,5,"Reset");note("L4D2DangoMusic Reset completed; textures will rebuild");}
-void WINAPI shutdown(){nativeHud.shutdown();source_camera::frameListener=nullptr;source_walls::stop();source_entities::enabled=false;source_entities::browseRequested=false;source_entities::autoRequested=false;std::atomic_store(&source_entities::automaticRequest,std::make_shared<const inventory::FollowRequest>());std::atomic_store(&source_entities::followRequest,std::make_shared<const inventory::FollowRequest>());releasePresentationBackup();clear();}
+void WINAPI shutdown(){renderResources.release();nativeHud.shutdown();source_camera::frameListener=nullptr;source_walls::stop();source_entities::enabled=false;source_entities::browseRequested=false;source_entities::autoRequested=false;std::atomic_store(&source_entities::automaticRequest,std::make_shared<const inventory::FollowRequest>());std::atomic_store(&source_entities::followRequest,std::make_shared<const inventory::FollowRequest>());releasePresentationBackup();clear();}
 }
 namespace {
 struct PresentationBackup {
@@ -624,13 +637,14 @@ template<class Present> HRESULT paintAndPresent(IDirect3DDevice9* device,IDirect
  lifetime::Guard guard;if(!guard)return present();
  nativeHud.pollHotkey(device);
  IDirect3DSurface9* back=nullptr;D3DSURFACE_DESC desc{};PresentInfo info{chain!=nullptr,chain};
- auto capture=[&](){auto config=std::atomic_load(&settings);if(!config->enabled&&!positionPreview.load()&&!wallPositionPreview.load()&&!nativeHud.isOpen())return false;
+ bool captured=false;
+ auto capture=[&](){
  HRESULT result=chain?chain->GetBackBuffer(0,D3DBACKBUFFER_TYPE_MONO,&back):device->GetBackBuffer(0,0,D3DBACKBUFFER_TYPE_MONO,&back);
  if(!checked(result,12,"Acquire presented backbuffer"))return false;
  if(!checked(back->GetDesc(&desc),13,"Describe presented backbuffer")||!presentationBackup.prepare(device,desc))return false;
- return checked(device->StretchRect(back,nullptr,presentationBackup.clean,nullptr,D3DTEXF_NONE),14,"Capture pristine backbuffer");};
+ captured=checked(device->StretchRect(back,nullptr,presentationBackup.clean,nullptr,D3DTEXF_NONE),14,"Capture pristine backbuffer");return captured;};
  auto restore=[&](){if(!checked(device->StretchRect(presentationBackup.clean,nullptr,back,nullptr,D3DTEXF_NONE),15,"Restore pristine backbuffer"))++restoreErrors;};
- HRESULT result=E_FAIL;try{result=overlayTransaction(capture,[&](){render(device,&info);++presentationCount;},present,restore);}catch(...){note("Presentation transaction failed");if(back)back->Release();throw;}
+ HRESULT result=E_FAIL;try{result=overlayTransaction([&](){render(device,&info,capture);return captured;},[&](){++presentationCount;},present,restore);}catch(...){note("Presentation transaction failed");if(back)back->Release();throw;}
  if(back)back->Release();return result;
 }
 struct Patch {void** slot;void* original;void* replacement;};
@@ -1057,7 +1071,7 @@ const char* rootMenu(bool title){if(title)return "L4D2DangoMusic 1.0.2";position
 void resetExternalCameraLocked(bool release,bool disarm){
  if(release&&externalCameraInitialized)(void)visualcamera::request(false);
  if(disarm)externalCameraTest=false;
- externalCameraInitialized=false;externalCameraActive=false;
+ externalCameraInitialized=false;externalCameraActive=false;appliedAfkIdle=appliedNativeOnInput=-1;
  externalCameraLastFrame=0;externalCameraEpoch=0;
  externalCameraTrace=nullptr;externalCameraTraceProbed=false;
  externalDirector.reset();cinematicRecovery.reset();cinematicBird.reset();cinematicBirdSample=0;cinematicBirdCombat=0;recoveryGate.reset();cinematicTrackAt=0;cinematicMissingSince=0;cinematicBlockedSince=0;cameraActor.reset();cameraMotion.reset();cinematicLookaheadAt=0;cinematicLookaheadBlocked=false;cinematicPathBlocked=false;cinematicDynamicPanel=false;cinematicActor.reset();cinematicCharacter.reset();cinematicActorFresh=false;cinematicSampleAt=0;cinematicLastMissingLog=cinematicLastViewMismatchLog=0;cinematicPanels={};cinematicVisibilityAt=0;cinematicGround.reset();cinematicGroundKey.clear();
@@ -1070,7 +1084,7 @@ void stopExternalCameraTest(){
 void startExternalCameraTest(){
  std::lock_guard<std::mutex> lock(externalCameraMutex);
  resetExternalCameraLocked(true,false);
- externalCameraTest=true;
+ nextAfkIdlePoll=0;externalCameraTest=true;
 }
 unsigned cinematicTraceBudget=0;
 bool cinematicPathClear(Vec3 from,Vec3 to){
@@ -1165,8 +1179,12 @@ void clearCinematicComposition(bool preserveGround=false){
 }
 void tickExternalCameraTest(const GameCameraFrame& frame){
  if(!externalCameraTest.load(std::memory_order_acquire))return;
+ const auto pollAt=uint64_t(now());
+ if(!externalCameraActive.load(std::memory_order_acquire)&&pollAt<nextAfkIdlePoll.load(std::memory_order_relaxed))return;
  std::lock_guard<std::mutex> lock(externalCameraMutex);
  if(!externalCameraTest.load())return;
+ const bool wasActive=externalCameraActive.load();
+ if(!wasActive){if(pollAt<nextAfkIdlePoll.load())return;nextAfkIdlePoll=pollAt+1000;}
  if(!frame.active){
   const auto state=source_camera::captureState.load();
   if(externalCameraInitialized&&externalCameraEpoch==frame.epoch&&(state==3||state==4)){
@@ -1185,26 +1203,26 @@ void tickExternalCameraTest(const GameCameraFrame& frame){
  const auto api=visualcamera::resolve();
  L4D2VisualCameraStatusV1 status{};status.size=sizeof(status);
  if(!api||!api.getStatus(&status)||!status.external_allowed){
-  if(externalCameraInitialized)note("AFK camera waiting for Visual authorization");
-  resetExternalCameraLocked(false,false);return;
+  if(externalCameraInitialized||wasActive){note("AFK camera waiting for Visual authorization");resetExternalCameraLocked(false,false);}
+  return;
  }
- if(!api.setNativeOnInput(config->cinematicKeepFreeCamera?0:1)){resetExternalCameraLocked(true,false);return;}
- if(externalCameraInitialized&&status.owner==L4D2VISUAL_CAMERA_OWNER_NATIVE)(void)api.setInitialIdle(unsigned(config->cinematicIdleSeconds));
+ const int nativeOnInput=config->cinematicKeepFreeCamera?0:1;
+ if(appliedNativeOnInput!=nativeOnInput){if(!api.setNativeOnInput(nativeOnInput)){resetExternalCameraLocked(true,false);return;}appliedNativeOnInput=nativeOnInput;}
+ if(externalCameraInitialized&&appliedAfkIdle!=config->cinematicIdleSeconds){if(api.setInitialIdle(unsigned(config->cinematicIdleSeconds)))appliedAfkIdle=config->cinematicIdleSeconds;}
  if(externalCameraInitialized&&!status.external_requested){note("AFK runtime lease lost; feature remains armed");resetExternalCameraLocked(false,false);return;}
- auto sample=readCinematicActor(frame,at);
  if(nativeHud.isOpen()&&!status.camera_active){
   if(externalCameraInitialized)resetExternalCameraLocked(true,false);
   return; // first idle countdown starts AFTER closing DangoMusic menu
  }
  if(!externalCameraInitialized){
   if(!api.setInitialIdle(unsigned(config->cinematicIdleSeconds))||!api.setActive(1))return;
-  externalCameraInitialized=true;externalCameraEpoch=frame.epoch;
+  externalCameraInitialized=true;externalCameraEpoch=frame.epoch;appliedAfkIdle=config->cinematicIdleSeconds;
   note("AFK camera armed; native gameplay stays active until idle");
   status.owner=L4D2VISUAL_CAMERA_OWNER_NATIVE;
  }
  L4D2VisualCameraPoseV1 actual{};actual.size=sizeof(actual);
  if(!api.getPose(&actual)){
-  externalCameraActive=false;externalDirector.reset();cinematicRecovery.reset();cinematicBird.reset();cinematicBirdSample=0;cinematicBirdCombat=0;recoveryGate.reset();cinematicTrackAt=0;cinematicBlockedSince=0;cameraActor.reset();cameraMotion.reset();cinematicLookaheadAt=0;cinematicLookaheadBlocked=false;cinematicPathBlocked=false;clearCinematicComposition();
+  externalCameraActive=false;if(wasActive){externalDirector.reset();cinematicRecovery.reset();cinematicBird.reset();cinematicBirdSample=0;cinematicBirdCombat=0;recoveryGate.reset();cinematicTrackAt=0;cinematicBlockedSince=0;cameraActor.reset();cameraMotion.reset();cinematicLookaheadAt=0;cinematicLookaheadBlocked=false;cinematicPathBlocked=false;clearCinematicComposition();cinematicSampleAt=0;cinematicActorFresh=false;externalCameraLastFrame=0;nextAfkIdlePoll=pollAt+1000;}
   CameraPose view{};
   if(cameraPose(frame,view)){
    actual.origin[0]=view.eye.x;actual.origin[1]=view.eye.y;actual.origin[2]=view.eye.z;
@@ -1215,10 +1233,12 @@ void tickExternalCameraTest(const GameCameraFrame& frame){
   return; // pending native poses are heartbeat only; Visual does not apply them
  }
  if(status.owner!=L4D2VISUAL_CAMERA_OWNER_EXTERNAL||!status.camera_active||nativeHud.isOpen()){
-  externalCameraActive=false;externalDirector.reset();cinematicRecovery.reset();cinematicBird.reset();cinematicBirdSample=0;cinematicBirdCombat=0;recoveryGate.reset();cinematicTrackAt=0;cinematicBlockedSince=0;cameraActor.reset();cameraMotion.reset();cinematicLookaheadAt=0;cinematicLookaheadBlocked=false;cinematicPathBlocked=false;externalCameraLastFrame=0;clearCinematicComposition();
+  externalCameraActive=false;if(wasActive){externalDirector.reset();cinematicRecovery.reset();cinematicBird.reset();cinematicBirdSample=0;cinematicBirdCombat=0;recoveryGate.reset();cinematicTrackAt=0;cinematicBlockedSince=0;cameraActor.reset();cameraMotion.reset();cinematicLookaheadAt=0;cinematicLookaheadBlocked=false;cinematicPathBlocked=false;externalCameraLastFrame=0;clearCinematicComposition();cinematicSampleAt=0;cinematicActorFresh=false;nextAfkIdlePoll=pollAt+1000;}
   if(!api.setPose(&actual))resetExternalCameraLocked(false,false);
   return;
  }
+ nextAfkIdlePoll=0;
+ auto sample=readCinematicActor(frame,at);
  if(externalCameraLastFrame&&at-externalCameraLastFrame>500){externalDirector.reset();cinematicRecovery.reset();cinematicBird.reset();cinematicBirdSample=0;cinematicBirdCombat=0;recoveryGate.reset();cinematicTrackAt=0;cinematicBlockedSince=0;cameraActor.reset();cameraMotion.reset();cinematicLookaheadAt=0;cinematicLookaheadBlocked=false;cinematicPathBlocked=false;}
  externalCameraLastFrame=at;
  const cinematic::Pose current{{actual.origin[0],actual.origin[1],actual.origin[2]},actual.angles[0],actual.angles[1],actual.angles[2]};
