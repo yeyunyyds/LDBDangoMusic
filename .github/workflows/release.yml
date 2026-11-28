@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - 'v*'
+      - '!v1.0.3'
     branches: [main]
   workflow_dispatch:
     inputs:

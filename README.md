@@ -1,6 +1,6 @@
 # L4D2DangoMusic
 
-> 正式版：[v1.0.2](https://github.com/yeyunyyds/LDBDangoMusic/releases/tag/v1.0.2)。优化 AFK 鸟瞰连续跟拍、遮挡恢复及战斗构图；支持场景化歌词与 Folia 原生接口。[菜单使用说明](docs/menu-navigation-preview.md)
+> 正式版以 [GitHub Releases](https://github.com/yeyunyyds/LDBDangoMusic/releases/latest) 为准。主线 v1.0.3 优化 AFK 待机及歌词渲染，详见 [更新日志](docs/releases/v1.0.3.md)。正式发布前可从 Actions 下载候选包。[菜单使用说明](docs/menu-navigation-preview.md)
 
 为《求生之路 2》（Left 4 Dead 2）提供音乐歌词显示的 L4N 插件。通过兼容 LX / BLF 的本地音乐 API 获取播放进度和歌词，在游戏中呈现带逐字动画的歌词，并支持世界空间定位、歌名与作者显示以及游戏内调节。
 

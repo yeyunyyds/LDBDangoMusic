@@ -1,0 +1,89 @@
+name: L4D2DangoMusic v1.0.3 candidate build
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: dango-v1.0.3-candidate-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Windows x86 compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++-mingw-w64-i686-posix
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Run regression tests
+        run: bash scripts/test.sh
+      - name: Build Windows x86 plugin
+        env:
+          DANGO_CXX: i686-w64-mingw32-g++-posix
+        run: bash scripts/build-mingw.sh
+      - name: Package and verify candidate
+        run: |
+          python3 scripts/package.py
+          (cd build/packages && sha256sum -c *.sha256)
+          python3 - <<'PY'
+          import json, os, struct, zipfile
+          from pathlib import Path
+          name='L4D2DangoMusic-1.0.3-l4n.zip'
+          root=Path('build/packages')
+          assert {p.name for p in root.iterdir()}=={name,name+'.sha256'}
+          with zipfile.ZipFile(root/name) as z:
+              assert z.testzip() is None
+              assert set(z.namelist())=={'README.md','bin/neko/plugins/L4D2DangoMusic.dll','bin/neko/plugins/L4D2DangoMusic/config.json'}
+              assert '/tree/'+os.environ['GITHUB_SHA'] in z.read('README.md').decode()
+              cfg=json.loads(z.read('bin/neko/plugins/L4D2DangoMusic/config.json'))
+              assert not any(cfg['steamSync'][k] for k in ('enabled','discover','autoSearch','apply'))
+              dll=z.read('bin/neko/plugins/L4D2DangoMusic.dll')
+              pe=struct.unpack_from('<I',dll,0x3c)[0]
+              assert dll[:2]==b'MZ' and dll[pe:pe+4]==b'PE\x00\x00' and struct.unpack_from('<H',dll,pe+4)[0]==0x14c
+              assert b'DANGO_PRODUCTION_NO_DIAGNOSTICS' in dll and b'DANGO_DIAGNOSTICS_ENABLED' not in dll
+              assert b'L4D2DangoMusic 1.0.3' in dll
+              z.extractall('build/candidate-install')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: L4D2DangoMusic-1.0.3-candidate-x86
+          path: build/candidate-install/
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: L4D2DangoMusic-1.0.3-release-assets
+          path: build/packages/
+          if-no-files-found: error
+  prepare-draft:
+    if: github.ref == 'refs/heads/main'
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: L4D2DangoMusic-1.0.3-release-assets
+          path: release-assets
+      - name: Prepare unpublished release draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          (cd release-assets && sha256sum -c *.sha256)
+          tag=v1.0.3
+          if gh release view "$tag" --json isDraft,targetCommitish > /tmp/release.json 2>/dev/null; then
+            test "$(jq -r .isDraft /tmp/release.json)" = true
+            test "$(jq -r .targetCommitish /tmp/release.json)" = "$GITHUB_SHA"
+          else
+            gh release create "$tag" --target "$GITHUB_SHA" --draft --title "L4D2DangoMusic $tag" --notes-file docs/releases/v1.0.3.md
+          fi
+          gh release upload "$tag" release-assets/* --clobber
+          gh release view "$tag" --json isDraft,url,assets
