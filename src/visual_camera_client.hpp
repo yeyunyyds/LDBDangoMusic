@@ -5,6 +5,7 @@
 #include <windows.h>
 #include "../vendor/l4d2visual_camera_api.h"
 #include <cstdint>
+#include <mutex>
 
 namespace dango::visualcamera {
 
@@ -19,11 +20,16 @@ struct Api {
  explicit operator bool() const noexcept {return setActive&&setPose&&getStatus&&getPose&&setInitialIdle&&setNativeOnInput;}
 };
 
-// Resolve each time; do not retain unowned pointers across plugin reloads.
-// Do not call LoadLibrary here: L4N must own L4D2Visual's module lifecycle.
+// Visual pins its DLL for its hook lifetime. Take a reference while checking
+// the ABI, then pin the verified module before retaining its exports.
+// Never load a missing plugin; L4N remains responsible for initial loading.
 inline Api resolve() noexcept {
- HMODULE module=GetModuleHandleW(L"L4D2Visual.dll");
- if(!module)return {};
+ static std::mutex mutex;static Api cached;
+ std::lock_guard<std::mutex> lock(mutex);
+ if(cached)return cached;
+ HMODULE module=nullptr;
+ if(!GetModuleHandleExW(0,L"L4D2Visual.dll",&module))return {};
+ struct Release { HMODULE module; ~Release(){FreeLibrary(module);} } release{module};
  const auto version=reinterpret_cast<L4D2VisualCameraGetVersionFn>(
   GetProcAddress(module,"L4D2VisualCameraGetVersion"));
  if(!version||version()!=L4D2VISUAL_CAMERA_ABI_VERSION)return {};
@@ -38,7 +44,9 @@ inline Api resolve() noexcept {
   GetProcAddress(module,"L4D2VisualCameraGetPose"));
  api.setInitialIdle=reinterpret_cast<L4D2VisualCameraSetInitialIdleFn>(GetProcAddress(module,"L4D2VisualCameraSetInitialIdle"));
  api.setNativeOnInput=reinterpret_cast<L4D2VisualCameraSetNativeOnInputFn>(GetProcAddress(module,"L4D2VisualCameraSetNativeOnInput"));
- return api;
+ HMODULE pinned=nullptr;
+ if(!api||!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_PIN|GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,reinterpret_cast<LPCWSTR>(api.getStatus),&pinned))return {};
+ cached=api;return cached;
 }
 inline bool status(L4D2VisualCameraStatusV1& result) noexcept {
  const auto api=resolve();
