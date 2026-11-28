@@ -531,27 +531,48 @@ struct DrawGuard {
  explicit DrawGuard(IDirect3DDevice9* d):dev(d){}
  ~DrawGuard(){if(scene)dev->EndScene();if(block){if(captured){dev->SetDepthStencilSurface(nullptr);if(target)dev->SetRenderTarget(0,target);for(unsigned i=0;i<extraCount;++i)dev->SetRenderTarget(i+1,extra[i]);dev->SetDepthStencilSurface(depth);}block->Apply();}for(auto* surface:extra)if(surface)surface->Release();if(back)back->Release();if(target)target->Release();if(depth)depth->Release();}
 };
-template<class Capture> void render(IDirect3DDevice9* dev,const PresentInfo* present,Capture&& capture){
- if(!dev||!present)return;
- bool preview=positionPreview.load()||wallPositionPreview.load();bool escapeDown=(GetAsyncKeyState(VK_ESCAPE)&0x8000)!=0;if(preview&&!nativeHud.isOpen()&&escapeDown&&!escapeHeld){positionPreview=false;wallPositionPreview=false;preview=false;}escapeHeld=escapeDown;
+struct RenderPlan {
+ bool preview=false,wallMode=false,showNotice=false;
+ unsigned path=0;
+ int at=-1;int64_t position=-1;
+ std::shared_ptr<const MenuNotice> notice;
+ std::shared_ptr<const follow::Settings> followState;
+ std::shared_ptr<const State> state;
+ PlaybackDisplayFrame display;
+};
+bool prepareRender(IDirect3DDevice9* dev,const PresentInfo* present,RenderPlan& plan){
+ if(!dev||!present)return false;
+ auto& preview=plan.preview;preview=positionPreview.load()||wallPositionPreview.load();bool escapeDown=(GetAsyncKeyState(VK_ESCAPE)&0x8000)!=0;if(preview&&!nativeHud.isOpen()&&escapeDown&&!escapeHeld){positionPreview=false;wallPositionPreview=false;preview=false;}escapeHeld=escapeDown;
  if(displayResetRequested.exchange(false)){cinematicRender.reset();worldPeakEntries.clear();entityPeakEntries.clear();worldLyricLifecycle.reset();entityLyricLifecycle.reset();wallTextState.reset();anchors.reset();entityTracker.reset();playbackCursor={};playbackDisplay={};peakIndex=-1;visibleLyricIndex=-1;++layoutGeneration;}
- auto currentSettings=std::atomic_load(&settings);if(renderedSettings!=currentSettings)cfg=*currentSettings;bool wallMode=source_walls::enabled.load();auto notice=std::atomic_load(&menuNotice);bool showNotice=!notice->text.empty()&&uint64_t(now())>=notice->tick&&uint64_t(now())-notice->tick<2000;if(!cfg.enabled&&!preview&&!showNotice&&!nativeHud.isOpen()&&!followPositionPreview.load())return;
+ auto currentSettings=std::atomic_load(&settings);
+ if(renderedSettings!=currentSettings){cfg=*currentSettings;clear();++layoutGeneration;renderedSettings=currentSettings;}
+ auto& wallMode=plan.wallMode;wallMode=source_walls::enabled.load();
+ auto& notice=plan.notice;notice=std::atomic_load(&menuNotice);
+ auto& showNotice=plan.showNotice;const auto tick=uint64_t(now());showNotice=!notice->text.empty()&&tick>=notice->tick&&tick-notice->tick<2000;
+ if(!cfg.enabled&&!preview&&!showNotice&&!nativeHud.isOpen()&&!followPositionPreview.load())return false;
  if(lastWallMode!=wallMode){if(!wallMode)wallTextState.reset();lastWallMode=wallMode;++layoutGeneration;}
  if(lastPositionPreview!=preview){wallTextState.reset();++layoutGeneration;worldPeakEntries.clear();worldLyricLifecycle.reset();anchors.reset();playbackCursor={};lastPositionPreview=preview;}
- auto followState=std::atomic_load(&followSettings);if(lastFollowRevision!=followState->revision){entityPeakEntries.clear();entityLyricLifecycle.reset();lastFollowRevision=followState->revision;}
- if(renderedSettings!=currentSettings){clear();++layoutGeneration;renderedSettings=currentSettings;}
+ auto& followState=plan.followState;followState=std::atomic_load(&followSettings);if(lastFollowRevision!=followState->revision){entityPeakEntries.clear();entityLyricLifecycle.reset();lastFollowRevision=followState->revision;}
  captureCamera(dev,present);
- const unsigned path=present->is_swapchain_present?1:0;
+ const unsigned path=plan.path=present->is_swapchain_present?1:0;
  if(!presentLogged[path]){presentLogged[path]=true;note(std::string("L4D2DangoMusic first Present path=")+(path?"SwapChain":"Device")+(present->swap_chain?" current-chain=yes":" current-chain=no"));}
- try {if(cache.size()>256)clear();auto state=resetDisplayRevision.load()?std::make_shared<const State>():std::atomic_load(&snapshot);auto display=playbackDisplay.select(*state,now());
+ try {if(cache.size()>256)clear();static const auto emptyState=std::make_shared<const State>();auto& state=plan.state;state=resetDisplayRevision.load()?emptyState:std::atomic_load(&snapshot);auto& display=plan.display;display=playbackDisplay.select(*state,now());
  if(display.reset){cinematicRender.reset();entityPeakEntries.clear();entityLyricLifecycle.reset();entityTracker.reset();wallTextState.reset();visibleLyricIndex=-1;++layoutGeneration;worldPeakEntries.clear();worldLyricLifecycle.reset();anchors.reset();playbackCursor={};}
- auto cursor=preview?ClockSelection{}:playbackCursor.select(state->key,display.position,state->playing);auto position=cursor.position;if(cursor.seek){cinematicRender.reset();entityPeakEntries.clear();entityLyricLifecycle.reset();entityTracker.reset();wallTextState.reset();worldPeakEntries.clear();worldLyricLifecycle.reset();anchors.reset();}auto at=position<0?-1:indexAt(state->timeline,lyricPosition(position,cfg.demo?0:cfg.offset));
- // Keep wall mode conservative: it may draw fixed panels or maintain outgoing state.
- const bool overlayNeeded=preview||followPositionPreview.load()||showNotice||nativeHud.isOpen()||
-   (cfg.enabled&&(cfg.demo||wallMode||display.metadata||display.lyrics||followState->sample||
+ auto cursor=preview?ClockSelection{}:playbackCursor.select(state->key,display.position,state->playing);auto& position=plan.position;position=cursor.position;if(cursor.seek){cinematicRender.reset();entityPeakEntries.clear();entityLyricLifecycle.reset();entityTracker.reset();wallTextState.reset();worldPeakEntries.clear();worldLyricLifecycle.reset();anchors.reset();}plan.at=position<0?-1:indexAt(state->timeline,lyricPosition(position,cfg.demo?0:cfg.offset));
+ // Fixed wall panels and diagnostics can draw without playback. Keep the
+ // original wall path while live lyrics are present; no D3D work otherwise.
+ const bool wallPixels=wallMode&&(!cfg.wallLiveLyrics||display.lyrics||(build::diagnostics&&cfg.wallDebug));
+ if(wallMode&&!wallPixels&&wallTextState.index>=0)wallTextState.reset();
+ return preview||followPositionPreview.load()||showNotice||nativeHud.isOpen()||
+   (cfg.enabled&&(cfg.demo||wallPixels||display.metadata||display.lyrics||followState->sample||
     (build::diagnostics&&(cfg.debugOverlay||cfg.worldTestAnchor||cfg.wallDebug))));
- if(!overlayNeeded||!capture())return;
- std::string text=at<0?state->message:state->timeline[at].text;
+ }catch(...){if(logger)logger(LDB_HOST_LOG_ERROR,"Lyric render preparation failed");return false;}
+}
+void render(IDirect3DDevice9* dev,const PresentInfo* present,const RenderPlan& plan){
+ const auto& state=plan.state;const auto& display=plan.display;const auto& notice=plan.notice;const auto& followState=plan.followState;
+ const bool preview=plan.preview,wallMode=plan.wallMode,showNotice=plan.showNotice;
+ const auto path=plan.path;const auto at=plan.at;const auto position=plan.position;
+ try {std::string text=at<0?state->message:state->timeline[at].text;
  DrawGuard guard(dev);auto& target=guard.target;auto& depth=guard.depth;auto& back=guard.back;auto& block=guard.block;
  if(!renderResources.prepare(dev)||!checked(renderResources.block->Capture(),0,"CaptureStateBlock"))return;
  block=renderResources.block;
@@ -637,14 +658,14 @@ template<class Present> HRESULT paintAndPresent(IDirect3DDevice9* device,IDirect
  lifetime::Guard guard;if(!guard)return present();
  nativeHud.pollHotkey(device);
  IDirect3DSurface9* back=nullptr;D3DSURFACE_DESC desc{};PresentInfo info{chain!=nullptr,chain};
- bool captured=false;
- auto capture=[&](){
+ RenderPlan plan;
+ auto capture=[&](){if(!prepareRender(device,&info,plan)){presentationBackup.release();renderResources.release();return false;}
  HRESULT result=chain?chain->GetBackBuffer(0,D3DBACKBUFFER_TYPE_MONO,&back):device->GetBackBuffer(0,0,D3DBACKBUFFER_TYPE_MONO,&back);
  if(!checked(result,12,"Acquire presented backbuffer"))return false;
  if(!checked(back->GetDesc(&desc),13,"Describe presented backbuffer")||!presentationBackup.prepare(device,desc))return false;
- captured=checked(device->StretchRect(back,nullptr,presentationBackup.clean,nullptr,D3DTEXF_NONE),14,"Capture pristine backbuffer");return captured;};
+ return checked(device->StretchRect(back,nullptr,presentationBackup.clean,nullptr,D3DTEXF_NONE),14,"Capture pristine backbuffer");};
  auto restore=[&](){if(!checked(device->StretchRect(presentationBackup.clean,nullptr,back,nullptr,D3DTEXF_NONE),15,"Restore pristine backbuffer"))++restoreErrors;};
- HRESULT result=E_FAIL;try{result=overlayTransaction([&](){render(device,&info,capture);return captured;},[&](){++presentationCount;},present,restore);}catch(...){note("Presentation transaction failed");if(back)back->Release();throw;}
+ HRESULT result=E_FAIL;try{result=overlayTransaction(capture,[&](){render(device,&info,plan);++presentationCount;},present,restore);}catch(...){note("Presentation transaction failed");if(back)back->Release();throw;}
  if(back)back->Release();return result;
 }
 struct Patch {void** slot;void* original;void* replacement;};
