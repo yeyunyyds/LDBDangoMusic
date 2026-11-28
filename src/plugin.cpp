@@ -240,8 +240,18 @@ void run() noexcept {
 unsigned __stdcall musicWorkerMain(void*){run();return 0;}
 std::wstring wide(const std::string& s){int n=MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,s.data(),static_cast<int>(s.size()),nullptr,0);if(n<=0)return L"";std::wstring w(n,0);MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,s.data(),static_cast<int>(s.size()),w.data(),n);return w;}
 struct Image {IDirect3DTexture9* texture=nullptr;int width=0,height=0;IDirect3DTexture9* halo=nullptr;float advance=0;};
-std::map<std::string,Image> cache;
-void clear(){for(auto& pair:cache){if(pair.second.texture)pair.second.texture->Release();if(pair.second.halo)pair.second.halo->Release();}cache.clear();}
+struct CachedImage {Image image;uint64_t used=0;size_t bytes=0;};
+std::map<std::string,CachedImage> cache;
+uint64_t glyphUse=0;size_t glyphBytes=0;
+void releaseImage(const Image& im){if(im.texture)im.texture->Release();if(im.halo)im.halo->Release();}
+void clear(){for(auto& pair:cache)releaseImage(pair.second.image);cache.clear();glyphBytes=0;}
+// Only evict between frames, when no draw holds a borrowed Image.
+void trimGlyphCache(){constexpr size_t maxBytes=64u*1024u*1024u;constexpr size_t maxEntries=2048;
+ if(cache.size()<=maxEntries&&glyphBytes<=maxBytes)return;
+ std::vector<decltype(cache)::iterator> ordered;ordered.reserve(cache.size());for(auto it=cache.begin();it!=cache.end();++it)ordered.push_back(it);
+ std::sort(ordered.begin(),ordered.end(),[](auto a,auto b){return a->second.used<b->second.used;});
+ for(auto it:ordered){if(cache.size()<=maxEntries&&glyphBytes<=maxBytes)break;glyphBytes-=it->second.bytes;releaseImage(it->second.image);cache.erase(it);}
+}
 Image raster(IDirect3DDevice9* dev,const std::string& text){
  auto w=wide(text);if(w.empty()||w.size()>1024)return {};
  HDC dc=CreateCompatibleDC(nullptr);if(!dc)return {};HFONT font=CreateFontW(-cfg.size,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,ANTIALIASED_QUALITY,DEFAULT_PITCH,L"Microsoft YaHei");auto oldFont=SelectObject(dc,font);
@@ -256,15 +266,22 @@ Image raster(IDirect3DDevice9* dev,const std::string& text){
  SelectObject(dc,old);DeleteObject(bmp);}
  SelectObject(dc,oldFont);DeleteObject(font);DeleteDC(dc);return result;
 }
-Image image(IDirect3DDevice9* dev,const std::string& text){auto it=cache.find(text);if(it!=cache.end())return it->second;auto im=raster(dev,text);if(im.texture)cache.emplace(text,im);else checked(E_FAIL,7,"Create glyph texture (GDI/CreateTexture/LockRect)");return im;}
+Image image(IDirect3DDevice9* dev,const std::string& text){auto it=cache.find(text);if(it!=cache.end()){it->second.used=++glyphUse;return it->second.image;}auto im=raster(dev,text);if(im.texture){const size_t bytes=size_t(im.width)*im.height*4*(im.halo?2:1);cache.emplace(text,CachedImage{im,++glyphUse,bytes});glyphBytes+=bytes;}else checked(E_FAIL,7,"Create glyph texture (GDI/CreateTexture/LockRect)");return im;}
 struct Vertex{float x,y,z,rhw;DWORD color;float u,v;};
-void draw(IDirect3DDevice9* dev,Image im,float x,float y,float scale,float alpha,DWORD tint=0xffffff,float rotation=0){if(!im.texture||alpha<=0)return;float r=x+im.width*scale,b=y+im.height*scale;DWORD color=(DWORD(std::clamp(alpha,0.f,1.f)*255)<<24)|(tint&0xffffff);Vertex v[]={{x-.5f,y-.5f,0,1,color,0,0},{r-.5f,y-.5f,0,1,color,1,0},{x-.5f,b-.5f,0,1,color,0,1},{r-.5f,b-.5f,0,1,color,1,1}};if(rotation!=0){float cx=(x+r)*.5f,cy=(y+b)*.5f;for(auto& point:v){float dx=point.x-cx,dy=point.y-cy;point.x=cx+dx*std::cos(rotation)-dy*std::sin(rotation);point.y=cy+dx*std::sin(rotation)+dy*std::cos(rotation);}}dev->SetTexture(0,im.texture);if(checked(dev->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP,2,v,sizeof(Vertex)),6,"DrawPrimitiveUP")&&!drewPixels){drewPixels=true;note("L4D2DangoMusic first textured draw submitted");}}
+void appendQuad(Vertex* out,const Vertex* v){constexpr unsigned order[]={0,1,2,2,1,3};for(unsigned i=0;i<6;++i)out[i]=v[order[i]];}
+void screenQuad(Vertex* out,Image im,float x,float y,float scale,float alpha,DWORD tint,float rotation){float r=x+im.width*scale,b=y+im.height*scale;DWORD color=(DWORD(std::clamp(alpha,0.f,1.f)*255)<<24)|(tint&0xffffff);Vertex v[4]={{x-.5f,y-.5f,0,1,color,0,0},{r-.5f,y-.5f,0,1,color,1,0},{x-.5f,b-.5f,0,1,color,0,1},{r-.5f,b-.5f,0,1,color,1,1}};if(rotation!=0){float cx=(x+r)*.5f,cy=(y+b)*.5f;for(auto& point:v){float dx=point.x-cx,dy=point.y-cy;point.x=cx+dx*std::cos(rotation)-dy*std::sin(rotation);point.y=cy+dx*std::sin(rotation)+dy*std::cos(rotation);}}appendQuad(out,v);}
+void submitQuads(IDirect3DDevice9* dev,IDirect3DTexture9* texture,const Vertex* vertices,unsigned count){
+ if(!count)return;dev->SetTexture(0,texture);
+ if(checked(dev->DrawPrimitiveUP(D3DPT_TRIANGLELIST,count*2,vertices,sizeof(Vertex)),6,"DrawPrimitiveUP")&&!drewPixels){drewPixels=true;note("L4D2DangoMusic first textured draw submitted");}
+}
+void draw(IDirect3DDevice9* dev,Image im,float x,float y,float scale,float alpha,DWORD tint=0xffffff,float rotation=0){if(!im.texture||alpha<=0)return;Vertex vertices[6];screenQuad(vertices,im,x,y,scale,alpha,tint,rotation);submitQuads(dev,im.texture,vertices,1);}
 uint32_t lyricTint(size_t index,size_t count,double clock){return chroma::sample(cfg.textColor,cfg.accent,cfg.colorEffect,count>1?float(index)/float(count-1):.5f,clock,cfg.colorSpeed,cfg.colorAmount);}
 void styled(IDirect3DDevice9* dev,Image im,float x,float y,float scale,float alpha,DWORD color,float rotation=0,float glowAmount=1,DWORD haloColor=0xffffffff){
  if(alpha<=.002f||!im.texture)return;
  if(cfg.glow&&cfg.glowStrength>0&&im.halo){auto glow=im;glow.texture=im.halo;draw(dev,glow,x,y,scale,alpha*std::min(1.f,cfg.glowStrength*2)*glowAmount,haloColor==0xffffffff?cfg.accent:haloColor,rotation);}
- if(cfg.outline){for(auto dx:{-1.f,1.f})for(auto dy:{-1.f,1.f})draw(dev,im,x+dx*scale,y+dy*scale,scale,alpha*.8f,0x101018,rotation);}
- draw(dev,im,x,y,scale,alpha,color,rotation);
+ Vertex vertices[30];unsigned count=0;
+ if(cfg.outline){for(auto dx:{-1.f,1.f})for(auto dy:{-1.f,1.f})screenQuad(vertices+6*count++,im,x+dx*scale,y+dy*scale,scale,alpha*.8f,0x101018,rotation);}
+ screenQuad(vertices+6*count++,im,x,y,scale,alpha,color,rotation);submitQuads(dev,im.texture,vertices,count);
 }
 struct PeakEntry {
  uint64_t leaseId=0;Line line;peak::Animation animation,translated;peak::VisibleAnimation motion,translationMotion;peak::Layout layout,translationLayout;int index,slot=0,exitLinger=0,exitFade=1;double born,retired=-1,lastPlaced;movement::Travel travel;visual::Smooth sizeMotion;bool world=true;uint64_t measureRevision=0;Vec3 anchor;uint32_t epoch;
@@ -346,10 +363,13 @@ void drawSongInfo(IDirect3DDevice9* dev,const State& state,const GameCameraFrame
  if(cfg.showArtist)drawPositionedText(dev,limited(state.artist),cfg.layout.artist,camera,valid,pose,width,height,cfg.accent,.7f,&artistAnchor,&artistSize);
  if(!valid){song.clear();placed=0;}
 }
+bool wallVertices(Vertex* out,const wall::Panel& panel,const GameCameraFrame& camera,float width,float height,DWORD color){
+ std::array<wall::Vertex,4> corners;if(!wall::projectPanel(panel,camera,width,height,corners))return false;Vertex v[4];for(unsigned i=0;i<4;++i){auto& p=corners[i];v[i]={p.x-.5f,p.y-.5f,p.z,p.rhw,color,p.u,p.v};}appendQuad(out,v);return true;
+}
 void wallQuad(IDirect3DDevice9* dev,const wall::Panel& panel,const GameCameraFrame& camera,float width,float height,Image im,DWORD color){
- std::array<wall::Vertex,4> corners;if(!wall::projectPanel(panel,camera,width,height,corners))return;Vertex vertices[4];for(unsigned i=0;i<4;++i){auto& p=corners[i];vertices[i]={p.x-.5f,p.y-.5f,p.z,p.rhw,color,p.u,p.v};}
+ Vertex vertices[6];if(!wallVertices(vertices,panel,camera,width,height,color))return;
  dev->SetTexture(0,im.texture);if(!im.texture){dev->SetTextureStageState(0,D3DTSS_COLOROP,D3DTOP_SELECTARG2);dev->SetTextureStageState(0,D3DTSS_ALPHAOP,D3DTOP_SELECTARG2);}
- checked(dev->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP,2,vertices,sizeof(Vertex)),16,"Wall perspective quad");
+ checked(dev->DrawPrimitiveUP(D3DPT_TRIANGLELIST,2,vertices,sizeof(Vertex)),16,"Wall perspective quad");
  if(!im.texture){dev->SetTextureStageState(0,D3DTSS_COLOROP,D3DTOP_MODULATE);dev->SetTextureStageState(0,D3DTSS_ALPHAOP,D3DTOP_MODULATE);}
 }
 void wallText(IDirect3DDevice9* dev,const wall::Panel& panel,const GameCameraFrame& camera,float width,float height,const std::string& text,float vertical,float maxHeight,DWORD color){
@@ -357,6 +377,7 @@ void wallText(IDirect3DDevice9* dev,const wall::Panel& panel,const GameCameraFra
 }
 struct WallSentence {
  peak::Animation original,translated;peak::VisibleAnimation originalMotion,translatedMotion;std::string title,artist;
+ peak::Layout originalLayout,translationLayout;uint64_t layoutRevision=0;bool layoutReady=false;
  WallSentence(const Line& line,int64_t next,const State& state):original(line,next),translated(peak::translationAnimation(original,line.translation,next)),title(state.title),artist(state.artist){}
 };
 struct WallTextState {
@@ -382,8 +403,10 @@ void wallGlyphs(IDirect3DDevice9* dev,const wall::Panel& panel,const GameCameraF
  face.width=im.width*unit*frame.scale*exit.scale;face.height=im.height*unit*frame.scale*exit.scale;
  float angle=frame.rotation;face.right=panel.right*std::cos(angle)+panel.up*std::sin(angle);face.up=panel.up*std::cos(angle)-panel.right*std::sin(angle);
  float alpha=std::clamp(cfg.opacity*frame.alpha*exit.alpha*tone.alpha,0.f,1.f);if(cfg.visual.wallEffects&&cfg.glow&&im.halo){auto halo=im;halo.texture=im.halo;wallQuad(dev,face,camera,width,height,halo,(DWORD(std::clamp(alpha*std::min(1.f,cfg.glowStrength*2)*tone.glow,0.f,1.f)*255)<<24)|(translated&&!cfg.visual.translationFollow?cfg.visual.translationColor:cfg.accent));}
- if(cfg.visual.wallEffects&&cfg.outline)for(float x:{-1.f,1.f})for(float y:{-1.f,1.f}){auto border=face;border.center=face.center+panel.right*(x*unit)+panel.up*(y*unit);wallQuad(dev,border,camera,width,height,im,(DWORD(alpha*.8f*255)<<24)|0x101018);}
- wallQuad(dev,face,camera,width,height,im,(DWORD(alpha*255)<<24)|tone.color);
+ Vertex vertices[30];unsigned count=0;
+ if(cfg.visual.wallEffects&&cfg.outline)for(float x:{-1.f,1.f})for(float y:{-1.f,1.f}){auto border=face;border.center=face.center+panel.right*(x*unit)+panel.up*(y*unit);if(wallVertices(vertices+6*count,border,camera,width,height,(DWORD(alpha*.8f*255)<<24)|0x101018))++count;}
+ if(wallVertices(vertices+6*count,face,camera,width,height,(DWORD(alpha*255)<<24)|tone.color))++count;
+ submitQuads(dev,im.texture,vertices,count);
  }
 }
 void wallPositionedText(IDirect3DDevice9* dev,const wall::Panel& panel,const GameCameraFrame& camera,float width,float height,const std::string& text,const WallTextPosition& position,float maxHeight,DWORD color){
@@ -396,7 +419,8 @@ void drawWallContents(IDirect3DDevice9* dev,const wall::Panel& panel,const GameC
  if(preview||cfg.showTitle)wallPositionedText(dev,panel,camera,width,height,limited(sentence.title),layout.title,.12f,(DWORD(255*opacity)<<24)|(cfg.textColor&0xffffff));
  if(preview||cfg.showArtist)wallPositionedText(dev,panel,camera,width,height,limited(sentence.artist),layout.artist,.09f,(DWORD(255*opacity)<<24)|(cfg.accent&0xffffff));
  auto measure=[&](const std::string& text){return image(dev,text).advance;};float maxPixels=cfg.size*18.f*cfg.lineWidthScale;
- auto original=peak::layout(sentence.original.glyphs,measure,maxPixels/cfg.visual.originalSize,cfg.size*1.35f);auto translation=peak::layout(sentence.translated.glyphs,measure,maxPixels/cfg.visual.translationSize,cfg.size*1.35f);
+ if(!sentence.layoutReady||sentence.layoutRevision!=layoutGeneration){sentence.originalLayout=peak::layout(sentence.original.glyphs,measure,maxPixels/cfg.visual.originalSize,cfg.size*1.35f);sentence.translationLayout=peak::layout(sentence.translated.glyphs,measure,maxPixels/cfg.visual.translationSize,cfg.size*1.35f);sentence.layoutRevision=layoutGeneration;sentence.layoutReady=true;}
+ const auto& original=sentence.originalLayout;const auto& translation=sentence.translationLayout;
  bool showTranslation=(preview||cfg.translation)&&!translation.glyphs.empty();float widest=1;for(auto row:original.rows)widest=std::max(widest,row*cfg.visual.originalSize);if(showTranslation)for(auto row:translation.rows)widest=std::max(widest,row*cfg.visual.translationSize);
  float contentHeight=original.height*cfg.visual.originalSize+(showTranslation?cfg.visual.translationGap+translation.height*cfg.visual.translationSize:0);float unit=std::min(panel.width*.9f/widest,panel.height*.62f/std::max(contentHeight,1.f));unit=std::min(unit,panel.height*.27f/std::max(cfg.size,1))*layout.lyrics.size;
  auto face=wallTextPanel(panel,layout.lyrics);float top=contentHeight*unit*.5f;
@@ -526,10 +550,10 @@ struct RenderResources {
 RenderResources renderResources;
 struct DrawGuard {
  IDirect3DDevice9* dev; IDirect3DStateBlock9* block=nullptr;
- IDirect3DSurface9 *target=nullptr,*depth=nullptr,*back=nullptr;
+ IDirect3DSurface9 *target=nullptr,*depth=nullptr;
  IDirect3DSurface9* extra[3]={nullptr,nullptr,nullptr};unsigned extraCount=0;bool captured=false;bool scene=false;
  explicit DrawGuard(IDirect3DDevice9* d):dev(d){}
- ~DrawGuard(){if(scene)dev->EndScene();if(block){if(captured){dev->SetDepthStencilSurface(nullptr);if(target)dev->SetRenderTarget(0,target);for(unsigned i=0;i<extraCount;++i)dev->SetRenderTarget(i+1,extra[i]);dev->SetDepthStencilSurface(depth);}block->Apply();}for(auto* surface:extra)if(surface)surface->Release();if(back)back->Release();if(target)target->Release();if(depth)depth->Release();}
+ ~DrawGuard(){if(scene)dev->EndScene();if(block){if(captured){dev->SetDepthStencilSurface(nullptr);if(target)dev->SetRenderTarget(0,target);for(unsigned i=0;i<extraCount;++i)dev->SetRenderTarget(i+1,extra[i]);dev->SetDepthStencilSurface(depth);}block->Apply();}for(auto* surface:extra)if(surface)surface->Release();if(target)target->Release();if(depth)depth->Release();}
 };
 struct RenderPlan {
  bool preview=false,wallMode=false,showNotice=false;
@@ -545,7 +569,7 @@ bool prepareRender(IDirect3DDevice9* dev,const PresentInfo* present,RenderPlan& 
  auto& preview=plan.preview;preview=positionPreview.load()||wallPositionPreview.load();bool escapeDown=(GetAsyncKeyState(VK_ESCAPE)&0x8000)!=0;if(preview&&!nativeHud.isOpen()&&escapeDown&&!escapeHeld){positionPreview=false;wallPositionPreview=false;preview=false;}escapeHeld=escapeDown;
  if(displayResetRequested.exchange(false)){cinematicRender.reset();worldPeakEntries.clear();entityPeakEntries.clear();worldLyricLifecycle.reset();entityLyricLifecycle.reset();wallTextState.reset();anchors.reset();entityTracker.reset();playbackCursor={};playbackDisplay={};peakIndex=-1;visibleLyricIndex=-1;++layoutGeneration;}
  auto currentSettings=std::atomic_load(&settings);
- if(renderedSettings!=currentSettings){cfg=*currentSettings;clear();++layoutGeneration;renderedSettings=currentSettings;}
+ if(renderedSettings!=currentSettings){const bool rasterChanged=!renderedSettings||cfg.size!=currentSettings->size||cfg.glow!=currentSettings->glow||(cfg.glow&&cfg.glowRadius!=currentSettings->glowRadius);cfg=*currentSettings;if(rasterChanged)clear();++layoutGeneration;renderedSettings=currentSettings;}
  auto& wallMode=plan.wallMode;wallMode=source_walls::enabled.load();
  auto& notice=plan.notice;notice=std::atomic_load(&menuNotice);
  auto& showNotice=plan.showNotice;const auto tick=uint64_t(now());showNotice=!notice->text.empty()&&tick>=notice->tick&&tick-notice->tick<2000;
@@ -556,7 +580,7 @@ bool prepareRender(IDirect3DDevice9* dev,const PresentInfo* present,RenderPlan& 
  captureCamera(dev,present);
  const unsigned path=plan.path=present->is_swapchain_present?1:0;
  if(!presentLogged[path]){presentLogged[path]=true;note(std::string("L4D2DangoMusic first Present path=")+(path?"SwapChain":"Device")+(present->swap_chain?" current-chain=yes":" current-chain=no"));}
- try {if(cache.size()>256)clear();static const auto emptyState=std::make_shared<const State>();auto& state=plan.state;state=resetDisplayRevision.load()?emptyState:std::atomic_load(&snapshot);auto& display=plan.display;display=playbackDisplay.select(*state,now());
+ try {trimGlyphCache();static const auto emptyState=std::make_shared<const State>();auto& state=plan.state;state=resetDisplayRevision.load()?emptyState:std::atomic_load(&snapshot);auto& display=plan.display;display=playbackDisplay.select(*state,now());
  if(display.reset){cinematicRender.reset();entityPeakEntries.clear();entityLyricLifecycle.reset();entityTracker.reset();wallTextState.reset();visibleLyricIndex=-1;++layoutGeneration;worldPeakEntries.clear();worldLyricLifecycle.reset();anchors.reset();playbackCursor={};}
  auto cursor=preview?ClockSelection{}:playbackCursor.select(state->key,display.position,state->playing);auto& position=plan.position;position=cursor.position;if(cursor.seek){cinematicRender.reset();entityPeakEntries.clear();entityLyricLifecycle.reset();entityTracker.reset();wallTextState.reset();worldPeakEntries.clear();worldLyricLifecycle.reset();anchors.reset();}plan.at=position<0?-1:indexAt(state->timeline,lyricPosition(position,cfg.demo?0:cfg.offset));
  // Fixed wall panels and diagnostics can draw without playback. Keep the
@@ -568,20 +592,19 @@ bool prepareRender(IDirect3DDevice9* dev,const PresentInfo* present,RenderPlan& 
     (build::diagnostics&&(cfg.debugOverlay||cfg.worldTestAnchor||cfg.wallDebug))));
  }catch(...){if(logger)logger(LDB_HOST_LOG_ERROR,"Lyric render preparation failed");return false;}
 }
-void render(IDirect3DDevice9* dev,const PresentInfo* present,const RenderPlan& plan){
+void render(IDirect3DDevice9* dev,const RenderPlan& plan,IDirect3DSurface9* back,const D3DSURFACE_DESC& desc){
  const auto& state=plan.state;const auto& display=plan.display;const auto& notice=plan.notice;const auto& followState=plan.followState;
  const bool preview=plan.preview,wallMode=plan.wallMode,showNotice=plan.showNotice;
  const auto path=plan.path;const auto at=plan.at;const auto position=plan.position;
  try {std::string text=at<0?state->message:state->timeline[at].text;
- DrawGuard guard(dev);auto& target=guard.target;auto& depth=guard.depth;auto& back=guard.back;auto& block=guard.block;
+ DrawGuard guard(dev);auto& target=guard.target;auto& depth=guard.depth;auto& block=guard.block;
  if(!renderResources.prepare(dev)||!checked(renderResources.block->Capture(),0,"CaptureStateBlock"))return;
  block=renderResources.block;
  if(!checked(dev->GetRenderTarget(0,&target),1,"GetRenderTarget"))return;dev->GetDepthStencilSurface(&depth);
  guard.extraCount=std::max(1u,std::min<unsigned>(renderResources.caps.NumSimultaneousRTs,4))-1;
  for(unsigned i=0;i<guard.extraCount;++i)dev->GetRenderTarget(i+1,&guard.extra[i]);guard.captured=true;
  // The supplied chain is borrowed. Only GetBackBuffer's returned reference is released.
- HRESULT backResult=currentBackBuffer(dev,present->swap_chain,path!=0,D3DBACKBUFFER_TYPE_MONO,&back,D3DERR_INVALIDCALL);
- if(checked(backResult,2,"Get current SwapChain backbuffer")){D3DSURFACE_DESC desc{};if(!checked(back->GetDesc(&desc),9,"Get backbuffer description"))return;dev->SetDepthStencilSurface(nullptr);for(unsigned i=0;i<guard.extraCount;++i)dev->SetRenderTarget(i+1,nullptr);if(!checked(dev->SetRenderTarget(0,back),3,"SetRenderTarget"))return;D3DVIEWPORT9 vp{0,0,desc.Width,desc.Height,0,1};if(!checked(dev->SetViewport(&vp),10,"SetViewport"))return;
+ if(back){dev->SetDepthStencilSurface(nullptr);for(unsigned i=0;i<guard.extraCount;++i)dev->SetRenderTarget(i+1,nullptr);if(!checked(dev->SetRenderTarget(0,back),3,"SetRenderTarget"))return;D3DVIEWPORT9 vp{0,0,desc.Width,desc.Height,0,1};if(!checked(dev->SetViewport(&vp),10,"SetViewport"))return;
  if(checked(dev->BeginScene(),4,"BeginScene")){guard.scene=true;
  dev->SetVertexShader(nullptr);dev->SetPixelShader(nullptr);dev->SetFVF(D3DFVF_XYZRHW|D3DFVF_DIFFUSE|D3DFVF_TEX1);
  dev->SetRenderState(D3DRS_FILLMODE,D3DFILL_SOLID);dev->SetRenderState(D3DRS_ZENABLE,FALSE);dev->SetRenderState(D3DRS_ZWRITEENABLE,FALSE);dev->SetRenderState(D3DRS_CULLMODE,D3DCULL_NONE);dev->SetRenderState(D3DRS_LIGHTING,FALSE);dev->SetRenderState(D3DRS_FOGENABLE,FALSE);dev->SetRenderState(D3DRS_STENCILENABLE,FALSE);dev->SetRenderState(D3DRS_SCISSORTESTENABLE,FALSE);dev->SetRenderState(D3DRS_ALPHATESTENABLE,FALSE);dev->SetRenderState(D3DRS_ALPHABLENDENABLE,TRUE);dev->SetRenderState(D3DRS_SRCBLEND,D3DBLEND_SRCALPHA);dev->SetRenderState(D3DRS_DESTBLEND,D3DBLEND_INVSRCALPHA);dev->SetRenderState(D3DRS_BLENDOP,D3DBLENDOP_ADD);dev->SetRenderState(D3DRS_SEPARATEALPHABLENDENABLE,FALSE);dev->SetRenderState(D3DRS_COLORWRITEENABLE,15);dev->SetRenderState(D3DRS_SRGBWRITEENABLE,FALSE);
@@ -665,7 +688,7 @@ template<class Present> HRESULT paintAndPresent(IDirect3DDevice9* device,IDirect
  if(!checked(back->GetDesc(&desc),13,"Describe presented backbuffer")||!presentationBackup.prepare(device,desc))return false;
  return checked(device->StretchRect(back,nullptr,presentationBackup.clean,nullptr,D3DTEXF_NONE),14,"Capture pristine backbuffer");};
  auto restore=[&](){if(!checked(device->StretchRect(presentationBackup.clean,nullptr,back,nullptr,D3DTEXF_NONE),15,"Restore pristine backbuffer"))++restoreErrors;};
- HRESULT result=E_FAIL;try{result=overlayTransaction(capture,[&](){render(device,&info,plan);++presentationCount;},present,restore);}catch(...){note("Presentation transaction failed");if(back)back->Release();throw;}
+ HRESULT result=E_FAIL;try{result=overlayTransaction(capture,[&](){render(device,plan,back,desc);++presentationCount;},present,restore);}catch(...){note("Presentation transaction failed");if(back)back->Release();throw;}
  if(back)back->Release();return result;
 }
 struct Patch {void** slot;void* original;void* replacement;};
